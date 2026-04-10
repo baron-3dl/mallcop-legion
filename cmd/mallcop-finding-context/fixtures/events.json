@@ -1,0 +1,20 @@
+[
+  {
+    "id": "evt-001",
+    "source": "github",
+    "type": "login",
+    "actor": "alice",
+    "timestamp": "2024-01-15T10:29:55Z",
+    "org": "acme",
+    "payload": {"ip": "203.0.113.42", "user_agent": "Mozilla/5.0"}
+  },
+  {
+    "id": "evt-002",
+    "source": "github",
+    "type": "push",
+    "actor": "alice",
+    "timestamp": "2024-01-15T10:31:00Z",
+    "org": "acme",
+    "payload": {"repo": "acme/backend", "branch": "main"}
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "known_users": {
+    "alice": {
+      "known_ips": ["192.168.1.10", "10.0.0.5"],
+      "known_geos": ["US"],
+      "last_seen": "2024-01-14T09:00:00Z"
+    },
+    "bob": {
+      "known_ips": ["192.168.1.20"],
+      "known_geos": ["US", "GB"],
+      "last_seen": "2024-01-13T17:00:00Z"
+    }
+  }
+}

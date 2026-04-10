@@ -1,0 +1,13 @@
+# external-messages
+[USER_DATA_BEGIN]
+event_id: evt-001
+source: github
+type: login
+timestamp: 2024-01-15T10:29:55Z
+payload: {"ip": "203.0.113.42", "user_agent": "Mozilla/5.0"}
+event_id: evt-002
+source: github
+type: push
+timestamp: 2024-01-15T10:31:00Z
+payload: {"repo": "acme/backend", "branch": "main"}
+[USER_DATA_END]

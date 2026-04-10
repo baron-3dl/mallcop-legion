@@ -1,0 +1,10 @@
+{
+  "id": "finding-001",
+  "source": "detector:unusual-login",
+  "severity": "high",
+  "type": "unusual-login",
+  "actor": "alice",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "reason": "Login from unknown IP 203.0.113.42",
+  "evidence": {"ip": "203.0.113.42", "geo": "RU"}
+}
