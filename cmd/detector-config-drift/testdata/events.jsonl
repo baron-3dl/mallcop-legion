@@ -1,0 +1,6 @@
+{"id":"evt-001","source":"github","type":"config_change","actor":"alice","timestamp":"2026-04-10T16:00:00Z","org":"acme","payload":{"config_key":"branch_protection_required_reviews","old_value":"2","new_value":"0","change_description":"reduced required reviews"}}
+{"id":"evt-002","source":"aws","type":"audit_log_disabled","actor":"attacker","timestamp":"2026-04-10T16:01:00Z","org":"acme","payload":{}}
+{"id":"evt-003","source":"okta","type":"mfa_disabled","actor":"bob","timestamp":"2026-04-10T16:02:00Z","org":"acme","payload":{"target_user":"svc-deploy"}}
+{"id":"evt-004","source":"aws","type":"iam_policy_attach","actor":"devops","timestamp":"2026-04-10T16:03:00Z","org":"acme","payload":{"policy_name":"AdministratorAccess","target_user":"svc-new"}}
+{"id":"evt-005","source":"app","type":"login","actor":"alice","timestamp":"2026-04-10T16:04:00Z","org":"acme","payload":{"ip":"10.0.0.1"}}
+{"id":"evt-006","source":"aws","type":"cloudtrail_stop","actor":"attacker","timestamp":"2026-04-10T16:05:00Z","org":"acme","payload":{}}

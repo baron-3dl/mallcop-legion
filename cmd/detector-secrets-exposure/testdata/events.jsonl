@@ -1,0 +1,6 @@
+{"id":"evt-001","source":"app","type":"chat","actor":"alice","timestamp":"2026-04-10T17:00:00Z","org":"acme","payload":{"message":"please summarize the Q1 security findings"}}
+{"id":"evt-002","source":"github","type":"config_push","actor":"bob","timestamp":"2026-04-10T17:01:00Z","org":"acme","payload":{"filename":".env","content":"AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nAWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}}
+{"id":"evt-003","source":"app","type":"env_update","actor":"alice","timestamp":"2026-04-10T17:02:00Z","org":"acme","payload":{"GITHUB_TOKEN":"ghp_abcdefghijklmnopqrstuvwxyz1234567890","SERVICE":"deploy"}}
+{"id":"evt-004","source":"app","type":"config_push","actor":"devops","timestamp":"2026-04-10T17:03:00Z","org":"acme","payload":{"database_url":"postgres://admin:d3ployS3cr3tP@ss@db.prod.internal:5432/production"}}
+{"id":"evt-005","source":"app","type":"file_upload","actor":"alice","timestamp":"2026-04-10T17:04:00Z","org":"acme","payload":{"filename":"key.pem","content":"-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA2a..."}}
+{"id":"evt-006","source":"app","type":"status_check","actor":"svc-deploy","timestamp":"2026-04-10T17:05:00Z","org":"acme","payload":{"status":"ok","version":"1.2.3"}}

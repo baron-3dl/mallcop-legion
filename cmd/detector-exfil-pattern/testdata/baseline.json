@@ -1,0 +1,9 @@
+{
+  "known_users": {},
+  "known_actors": ["alice", "bob", "svc-backup"],
+  "frequency_tables": {
+    "s3:download": 10,
+    "s3:object_get": 5,
+    "github:file_download": 4
+  }
+}

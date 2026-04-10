@@ -1,0 +1,8 @@
+{
+  "known_users": {},
+  "known_actors": ["alice", "bob", "svc-api"],
+  "frequency_tables": {
+    "app:api_request": 20,
+    "app:api_burst": 5
+  }
+}

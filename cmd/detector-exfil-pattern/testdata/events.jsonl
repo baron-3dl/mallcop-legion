@@ -1,0 +1,5 @@
+{"id":"evt-001","source":"s3","type":"download","actor":"alice","timestamp":"2026-04-10T14:00:00Z","org":"acme","payload":{"bytes_transferred":2097152,"resource_count":1,"destination":"internal-backup"}}
+{"id":"evt-002","source":"s3","type":"bulk_export","actor":"attacker","timestamp":"2026-04-10T14:01:00Z","org":"acme","payload":{"bytes_transferred":629145600,"resource_count":3,"destination":"https://evil.attacker.com/dump"}}
+{"id":"evt-003","source":"s3","type":"list_objects","actor":"attacker","timestamp":"2026-04-10T14:02:00Z","org":"acme","payload":{"resource_count":350}}
+{"id":"evt-004","source":"github","type":"file_download","actor":"bob","timestamp":"2026-04-10T14:03:00Z","org":"acme","payload":{"resource_count":2}}
+{"id":"evt-005","source":"s3","type":"object_get","actor":"svc-backup","timestamp":"2026-04-10T14:04:00Z","org":"acme","payload":{"bytes_transferred":157286400,"destination":"s3://acme-backup-us-east-1"}}

@@ -1,0 +1,5 @@
+{"id":"evt-001","source":"app","type":"api_request","actor":"alice","timestamp":"2026-04-10T15:00:00Z","org":"acme","payload":{"request_count":15,"endpoint":"/api/v1/status","window_secs":60}}
+{"id":"evt-002","source":"app","type":"api_burst","actor":"attacker","timestamp":"2026-04-10T15:01:00Z","org":"acme","payload":{"request_count":3000,"endpoint":"/api/v1/search","window_secs":10}}
+{"id":"evt-003","source":"app","type":"api_request","actor":"bob","timestamp":"2026-04-10T15:02:00Z","org":"acme","payload":{"request_count":120,"endpoint":"/admin/users","window_secs":30}}
+{"id":"evt-004","source":"app","type":"api_request","actor":"svc-api","timestamp":"2026-04-10T15:03:00Z","org":"acme","payload":{"request_count":18,"endpoint":"/api/v1/healthz","window_secs":60}}
+{"id":"evt-005","source":"app","type":"api_request","actor":"attacker","timestamp":"2026-04-10T15:04:00Z","org":"acme","payload":{"request_count":500,"endpoint":"/v1/secrets","window_secs":5}}
