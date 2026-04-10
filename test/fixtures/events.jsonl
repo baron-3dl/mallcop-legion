@@ -1,0 +1,5 @@
+{"id":"evt-001","source":"github","type":"login","actor":"baron","timestamp":"2026-04-10T08:00:00Z","org":"3dl-dev","payload":{"ip":"203.0.113.1","geo":"US"}}
+{"id":"evt-002","source":"github","type":"login","actor":"baron","timestamp":"2026-04-10T09:00:00Z","org":"3dl-dev","payload":{"ip":"192.0.2.99","geo":"DE"}}
+{"id":"evt-003","source":"github","type":"login","actor":"evil-bot","timestamp":"2026-04-10T09:30:00Z","org":"3dl-dev","payload":{"ip":"203.0.113.42","geo":"CN"}}
+{"id":"evt-004","source":"github","type":"push","actor":"baron","timestamp":"2026-04-10T10:00:00Z","org":"3dl-dev","payload":{"ref":"refs/heads/main"}}
+{"id":"evt-005","source":"github","type":"login","actor":"baron","timestamp":"2026-04-10T11:00:00Z","org":"3dl-dev","payload":{"ip":"198.51.100.5","geo":"GB"}}

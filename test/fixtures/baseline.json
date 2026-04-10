@@ -1,0 +1,14 @@
+{
+  "known_users": {
+    "baron": {
+      "known_ips": ["203.0.113.1", "198.51.100.5"],
+      "known_geos": ["US", "GB"],
+      "last_seen": "2026-04-09T12:00:00Z"
+    },
+    "ci-bot": {
+      "known_ips": ["10.0.0.1"],
+      "known_geos": ["US"],
+      "last_seen": "2026-04-10T00:00:00Z"
+    }
+  }
+}

@@ -1,0 +1,105 @@
+# Vertical-slice chart: GitHub unusual-login detection + triage actor
+#
+# Pipeline:
+#   1. GitHub connector (mallcop-connectors) polls 3dl-dev audit log
+#   2. detector-unusual-login compares events against baseline
+#   3. For each finding, mallcop-finding-context builds sanitized WorkContext
+#   4. Triage worker calls Forge inference to classify + resolve
+#   5. Resolution posted to delivery campfire
+#
+# Boot:
+#   we start --chart charts/vertical-slice.toml
+#
+# Required env vars:
+#   GITHUB_APP_ID               — GitHub App ID for 3dl-dev
+#   GITHUB_APP_PRIVATE_KEY      — PEM-encoded private key
+#   MALLCOP_SERVICE_TOKEN       — mallcop-pro service token for Forge inference
+#   MALLCOP_DELIVERY_CAMPFIRE   — delivery campfire ID (default in chart)
+
+[identity]
+name        = "mallcop-vertical-slice"
+type        = "worker"
+description = "Vertical slice — GitHub connector, unusual-login detector, triage actor. Proves the full pipeline end-to-end."
+key_file    = "~/.legion/automata/mallcop-vertical-slice/identity.json"
+
+# Schedule worksource: the pipeline is triggered by schedule (periodic scan),
+# not by rd work items. The chart polls on interval; each poll runs the full
+# connector → detector → triage chain.
+[[worksources]]
+type = "schedule"
+
+[budget]
+max_tokens_per_session = 200000
+max_tokens_per_task    = 50000
+
+[autonomy]
+max_tasks_per_session = 10
+
+[autonomy.escalation]
+# Any finding with severity >= high triggers operator escalation.
+scope_keywords = ["critical", "remediate"]
+
+[capabilities]
+gate_policy    = "gated"
+authority      = "baron@3dl.dev"
+tool_allowlist = ["bash", "read", "grep", "glob"]
+
+# --- Seed capabilities ---
+
+# connector-github: run the GitHub connector binary (read-only audit log poll).
+[[capabilities.seed]]
+name  = "connector-github"
+match = ["task:connector"]
+tools = ["bash", "read"]
+model = "haiku"
+
+# detect-unusual-login: pipe events through the detector binary.
+[[capabilities.seed]]
+name  = "detect-unusual-login"
+match = ["task:detect"]
+tools = ["bash", "read"]
+model = "haiku"
+
+# triage: call Forge inference to classify and resolve findings.
+# Uses sonnet tier — triage decisions require judgment.
+[[capabilities.seed]]
+name  = "triage"
+match = ["task:triage"]
+tools = ["bash", "read"]
+model = "sonnet"
+
+# deliver: post resolution to the delivery campfire.
+[[capabilities.seed]]
+name  = "deliver"
+match = ["task:deliver"]
+tools = ["bash"]
+model = "haiku"
+
+[lifecycle]
+max_workers   = 1
+time_limit    = "30m"
+poll_interval = "60s"
+
+[inference]
+[inference.local_model_mapping]
+local = "qwen3-coder-30b"
+
+[agents]
+dir = "agents"
+
+[campfire]
+transport_dir = "/tmp/campfire"
+
+# --- Pipeline configuration (custom fields read by the pipeline script) ---
+# These are not part of the legion chart schema; they are read by the
+# pipeline orchestration script that the chart's schedule task executes.
+
+# [pipeline]
+# connector_bin      = "github"                    # from mallcop-connectors
+# connector_org      = "3dl-dev"
+# connector_install  = "116376961"
+# detector_bin       = "detector-unusual-login"    # from this repo
+# context_bin        = "mallcop-finding-context"   # from this repo
+# baseline_path      = "test/fixtures/baseline.json"
+# inference_url      = "https://api.mallcop.app"
+# delivery_campfire  = "04c0d27f975b24c3233206637f6a399f3467d44c9c390636bcbb9f59acabff9e"
