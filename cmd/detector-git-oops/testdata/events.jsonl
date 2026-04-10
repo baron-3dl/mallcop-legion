@@ -1,0 +1,5 @@
+{"id":"evt-001","source":"github","type":"push","actor":"alice","timestamp":"2026-04-10T09:00:00Z","org":"acme","payload":{"forced":false,"deleted":false,"ref":"refs/heads/feature-auth","commit_message":"add oauth flow"}}
+{"id":"evt-002","source":"github","type":"push","actor":"bob","timestamp":"2026-04-10T09:01:00Z","org":"acme","payload":{"forced":true,"deleted":false,"ref":"refs/heads/main","commit_message":"fix merge conflict"}}
+{"id":"evt-003","source":"github","type":"push","actor":"alice","timestamp":"2026-04-10T09:02:00Z","org":"acme","payload":{"forced":false,"deleted":true,"ref":"refs/heads/old-feature","commit_message":""}}
+{"id":"evt-004","source":"github","type":"push","actor":"carol","timestamp":"2026-04-10T09:03:00Z","org":"acme","payload":{"forced":true,"deleted":false,"ref":"refs/heads/experiment","commit_message":""}}
+{"id":"evt-005","source":"github","type":"push","actor":"svc-deploy","timestamp":"2026-04-10T09:04:00Z","org":"acme","payload":{"forced":false,"deleted":false,"ref":"refs/heads/main","commit_message":"deploy: AKIAIOSFODNN7EXAMPLE key used for automation"}}

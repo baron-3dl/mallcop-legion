@@ -1,0 +1,9 @@
+{
+  "known_users": {},
+  "frequency_tables": {
+    "github:push": 10,
+    "github:pull_request": 20,
+    "github:login": 8,
+    "github:workflow_run": 15
+  }
+}

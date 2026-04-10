@@ -1,0 +1,4 @@
+{
+  "known_users": {},
+  "known_actors": ["alice", "bob", "carol", "svc-deploy"]
+}

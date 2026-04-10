@@ -1,0 +1,8 @@
+{
+  "known_users": {},
+  "actor_roles": {
+    "alice": ["write", "contributor"],
+    "bob": ["admin"],
+    "svc-deploy": ["write"]
+  }
+}

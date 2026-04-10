@@ -1,0 +1,7 @@
+{"id":"evt-001","source":"github","type":"push","actor":"alice","timestamp":"2026-04-10T09:00:00Z","org":"acme","payload":{}}
+{"id":"evt-002","source":"github","type":"role_assignment","actor":"alice","timestamp":"2026-04-10T09:01:00Z","org":"acme","payload":{"role_name":"write","permission_level":"","target_user":"carol"}}
+{"id":"evt-003","source":"github","type":"role_assignment","actor":"alice","timestamp":"2026-04-10T09:02:00Z","org":"acme","payload":{"role_name":"owner","permission_level":"","target_user":"mallory"}}
+{"id":"evt-004","source":"github","type":"permission_change","actor":"mallory","timestamp":"2026-04-10T09:03:00Z","org":"acme","payload":{"role_name":"","permission_level":"admin","target_user":""}}
+{"id":"evt-005","source":"github","type":"admin_action","actor":"external","timestamp":"2026-04-10T09:04:00Z","org":"acme","payload":{"role_name":"","permission_level":"","target_user":""}}
+{"id":"evt-006","source":"github","type":"role_assignment","actor":"bob","timestamp":"2026-04-10T09:05:00Z","org":"acme","payload":{"role_name":"admin","permission_level":"","target_user":""}}
+{"id":"evt-007","source":"github","type":"collaborator_added","actor":"new-user","timestamp":"2026-04-10T09:06:00Z","org":"acme","payload":{"role_name":"maintainer","permission_level":"","target_user":"new-user"}}
