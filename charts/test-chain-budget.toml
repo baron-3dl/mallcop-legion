@@ -1,0 +1,108 @@
+# test-chain-budget.toml — Integration test chart for chain budget enforcement.
+#
+# Used by test/budget/chain_budget_test.go to verify that the per-session
+# token budget enforces a chain-wide cap across triage → investigate → heal,
+# with fail-safe escalation on exhaustion.
+#
+# Budget design:
+#   max_tokens_per_session = 10000
+#   canned backend returns 4000 tokens per call
+#   triage:      4000 tokens → cumulative 4000  (< 10000, proceeds)
+#   investigate: 4000 tokens → cumulative 8000  (< 10000, proceeds)
+#   heal:        would need 4000 → cumulative 12000 (> 10000, budget gate fires)
+#
+# Expected outcome: chain status = "escalated" with total tokens ≤ 10000.
+#
+# IMPORTANT — KNOWN GAPS (see rd item agentaa9f633f-a0d):
+#
+# 1. inference_url is NOT a native we chart field.  In the production chart
+#    (charts/vertical-slice.toml) it only appears as a commented-out custom
+#    [pipeline] field.  When legion/we implements inference_url as a first-class
+#    chart field, update the [inference] section below accordingly.
+#
+# 2. The we binary (v0.1.0) does not exist at the expected GitHub release URL.
+#    Until that is resolved, chain_budget_test.go skips the subprocess spawn
+#    and tests only the budget arithmetic and canned backend in isolation.
+
+[identity]
+name        = "mallcop-chain-budget-test"
+type        = "worker"
+description = "Test-only chart: chain budget enforcement across triage+investigate+heal."
+key_file    = "~/.legion/automata/mallcop-chain-budget-test/identity.json"
+
+[[worksources]]
+type = "schedule"
+
+[budget]
+# 10000-token cap chosen so:
+#   - step 1 (triage, 4000 tokens):      passes  (4000 < 10000)
+#   - step 2 (investigate, 4000 tokens): passes  (8000 < 10000)
+#   - step 3 (heal, 4000 tokens):        blocked (12000 > 10000) → escalated
+max_tokens_per_session = 10000
+max_tokens_per_task    = 5000
+
+[autonomy]
+max_tasks_per_session = 3
+
+[autonomy.escalation]
+scope_keywords = ["critical", "remediate", "budget-exhausted"]
+
+[capabilities]
+gate_policy    = "gated"
+authority      = "baron@3dl.dev"
+tool_allowlist = ["bash", "read", "grep"]
+
+[[capabilities.seed]]
+name  = "triage"
+match = ["task:triage"]
+tools = ["bash", "read"]
+model = "haiku"
+
+[[capabilities.seed]]
+name  = "investigate"
+match = ["task:investigate"]
+tools = ["bash", "read", "grep"]
+model = "haiku"
+
+[[capabilities.seed]]
+name  = "heal"
+match = ["task:heal"]
+tools = ["bash", "read"]
+model = "haiku"
+
+# --- Playbook ---
+# Three-step chain with explicit needs: dependencies to mirror the production chart.
+# Budget is shared session-wide; each step starts with (max_session - prior_steps_tokens) remaining.
+
+[playbook.steps.triage]
+seed      = "triage"
+routes_to = "investigate"
+
+[playbook.steps.investigate]
+needs      = ["triage"]
+seed       = "investigate"
+routes_to  = "heal"
+
+[playbook.steps.heal]
+needs = ["investigate"]
+seed  = "heal"
+gate  = "human"
+
+[lifecycle]
+max_workers   = 1
+time_limit    = "5m"
+poll_interval = "10s"
+
+# inference.url is a placeholder for when legion/we implements this as a
+# first-class chart field.  The chain_budget_test.go patches this field at
+# runtime by writing a temp chart with the canned backend URL substituted in.
+# Until inference_url is natively supported, the test skips the subprocess
+# spawn and tests the canned backend + budget arithmetic in isolation.
+[inference]
+# url = "http://127.0.0.1:REPLACED_AT_TEST_RUNTIME"   # uncomment when native
+
+[agents]
+dir = "agents"
+
+[campfire]
+transport_dir = "/tmp/campfire-budget-test"
