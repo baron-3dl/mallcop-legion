@@ -1,6 +1,6 @@
 # spec
-Finding: finding-001 (unusual-login, high)
-Source: detector:unusual-login
+Finding: [USER_DATA_BEGIN]finding-001[USER_DATA_END] ([USER_DATA_BEGIN]unusual-login[USER_DATA_END], [USER_DATA_BEGIN]high[USER_DATA_END])
+Source: [USER_DATA_BEGIN]detector:unusual-login[USER_DATA_END]
 Actor: [USER_DATA_BEGIN]alice[USER_DATA_END]
 Reason: [USER_DATA_BEGIN]Login from unknown IP 203.0.113.42[USER_DATA_END]
 Evidence: [USER_DATA_BEGIN]

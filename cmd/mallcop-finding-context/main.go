@@ -130,11 +130,11 @@ func emitStandingFacts(fi *finding.Finding, bl *baseline.Baseline) {
 }
 
 func emitSpec(fi *finding.Finding) {
-	// Finding metadata (ID, source, type, severity) is mallcop-generated — NOT wrapped
-	// Actor is external data — wrapped
+	// All finding fields are wrapped — fi.ID, fi.Source, fi.Type, fi.Severity
+	// may originate from semi-trusted input and are injection vectors if left bare.
 	fmt.Printf("# spec\n")
-	fmt.Printf("Finding: %s (%s, %s)\n", fi.ID, fi.Type, fi.Severity)
-	fmt.Printf("Source: %s\n", fi.Source)
+	fmt.Printf("Finding: %s (%s, %s)\n", sanitizeInline(fi.ID), sanitizeInline(fi.Type), sanitizeInline(fi.Severity))
+	fmt.Printf("Source: %s\n", sanitizeInline(fi.Source))
 	fmt.Printf("Actor: %s\n", sanitizeInline(fi.Actor))
 	if fi.Reason != "" {
 		fmt.Printf("Reason: %s\n", sanitizeInline(fi.Reason))
