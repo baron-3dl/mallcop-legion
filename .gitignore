@@ -20,7 +20,9 @@ vendor/
 
 # Build output
 /dist/
-/bin/
+/bin/**
+!/bin/we
+!/bin/we_test.sh
 
 # IDE
 .idea/

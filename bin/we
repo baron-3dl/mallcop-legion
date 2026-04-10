@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# bin/we — self-installing wrapper for the legion (we) binary
+# Reads version from .we-version, downloads from GitHub releases on first use.
+# Fails loudly on: network error, missing release, sha256 mismatch, unsupported platform.
+# Never silently falls back to an older version.
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Resolve version file — walk up from this script's location
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+VERSION_FILE="${REPO_ROOT}/.we-version"
+
+if [[ ! -f "${VERSION_FILE}" ]]; then
+  echo "we: ERROR: .we-version not found at ${VERSION_FILE}" >&2
+  exit 1
+fi
+
+VERSION="$(tr -d '[:space:]' < "${VERSION_FILE}")"
+if [[ -z "${VERSION}" ]]; then
+  echo "we: ERROR: .we-version is empty" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Platform detection
+# ---------------------------------------------------------------------------
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+case "${OS}" in
+  Linux)
+    case "${ARCH}" in
+      x86_64)  PLATFORM="linux-amd64"  ;;
+      aarch64) PLATFORM="linux-arm64"  ;;
+      arm64)   PLATFORM="linux-arm64"  ;;
+      *)
+        echo "we: ERROR: unsupported architecture '${ARCH}' on Linux" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  Darwin)
+    case "${ARCH}" in
+      arm64) PLATFORM="darwin-arm64" ;;
+      *)
+        echo "we: ERROR: unsupported architecture '${ARCH}' on Darwin (only arm64 is supported)" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  *)
+    echo "we: ERROR: unsupported operating system '${OS}'" >&2
+    exit 1
+    ;;
+esac
+
+# ---------------------------------------------------------------------------
+# Hardcoded SHA-256 checksums per platform+version
+# ---------------------------------------------------------------------------
+declare -A SHA256_MAP=(
+  ["v0.1.0:linux-amd64"]="0fa01906fc78f8b3434944d4d42b3f99d9e5592f28af76f7ed55bc0a637b635f"
+  ["v0.1.0:linux-arm64"]="392fb893238fbfc00e7fa1e4ed081bbcb430093a5e2f4f00be90e20ae262df74"
+  ["v0.1.0:darwin-arm64"]="0b5cbc6e8cd51e5e965c5a27a278a5fd6e2e3b4b911951117b905eef254a26d4"
+)
+
+EXPECTED_SHA="${SHA256_MAP["${VERSION}:${PLATFORM}"]:-}"
+if [[ -z "${EXPECTED_SHA}" ]]; then
+  echo "we: ERROR: no hardcoded SHA-256 for version=${VERSION} platform=${PLATFORM}" >&2
+  echo "we: This version may not be supported by this wrapper. Update .we-version or the wrapper script." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Install path
+# ---------------------------------------------------------------------------
+INSTALL_DIR="${HOME}/.local/lib/we/${VERSION}"
+BINARY="${INSTALL_DIR}/we"
+
+# ---------------------------------------------------------------------------
+# Download and install if not already present
+# ---------------------------------------------------------------------------
+if [[ ! -x "${BINARY}" ]]; then
+  echo "we: installing ${VERSION} for ${PLATFORM} ..." >&2
+
+  BASE_URL="https://github.com/3dl-dev/legion/releases/download/${VERSION}"
+  TARBALL="we-${PLATFORM}.tar.gz"
+  TARBALL_URL="${BASE_URL}/${TARBALL}"
+  SHA256_URL="${BASE_URL}/${TARBALL}.sha256"
+
+  TMPDIR="$(mktemp -d)"
+  trap 'rm -rf "${TMPDIR}"' EXIT
+
+  TARBALL_PATH="${TMPDIR}/${TARBALL}"
+  SHA256_PATH="${TMPDIR}/${TARBALL}.sha256"
+
+  # Download tarball
+  echo "we: downloading ${TARBALL_URL}" >&2
+  if ! curl --fail --silent --show-error --location --output "${TARBALL_PATH}" "${TARBALL_URL}"; then
+    echo "we: ERROR: failed to download ${TARBALL_URL}" >&2
+    echo "we: Check your network connection or whether the release exists." >&2
+    exit 1
+  fi
+
+  # Download .sha256 file for audit trail (optional — we use hardcoded checksums as primary)
+  if curl --fail --silent --show-error --location --output "${SHA256_PATH}" "${SHA256_URL}" 2>/dev/null; then
+    REMOTE_SHA="$(awk '{print $1}' "${SHA256_PATH}")"
+    if [[ "${REMOTE_SHA}" != "${EXPECTED_SHA}" ]]; then
+      echo "we: ERROR: remote .sha256 file does not match hardcoded checksum!" >&2
+      echo "we:   hardcoded: ${EXPECTED_SHA}" >&2
+      echo "we:   remote:    ${REMOTE_SHA}" >&2
+      echo "we: The release may have been tampered with, or the wrapper is out of date." >&2
+      exit 1
+    fi
+  else
+    echo "we: WARNING: could not fetch remote .sha256 file; proceeding with hardcoded checksum only" >&2
+  fi
+
+  # Verify tarball against hardcoded SHA-256
+  if command -v sha256sum &>/dev/null; then
+    ACTUAL_SHA="$(sha256sum "${TARBALL_PATH}" | awk '{print $1}')"
+  elif command -v shasum &>/dev/null; then
+    ACTUAL_SHA="$(shasum -a 256 "${TARBALL_PATH}" | awk '{print $1}')"
+  else
+    echo "we: ERROR: no sha256sum or shasum found — cannot verify integrity" >&2
+    exit 1
+  fi
+
+  if [[ "${ACTUAL_SHA}" != "${EXPECTED_SHA}" ]]; then
+    echo "we: ERROR: SHA-256 mismatch for downloaded tarball!" >&2
+    echo "we:   expected: ${EXPECTED_SHA}" >&2
+    echo "we:   actual:   ${ACTUAL_SHA}" >&2
+    echo "we: The download may be corrupted or tampered with. Aborting." >&2
+    exit 1
+  fi
+
+  echo "we: SHA-256 verified OK" >&2
+
+  # Extract binary
+  mkdir -p "${INSTALL_DIR}"
+  if ! tar -xzf "${TARBALL_PATH}" -C "${INSTALL_DIR}" we 2>/dev/null; then
+    # Try extracting without specifying the filename (some archives may have different structure)
+    if ! tar -xzf "${TARBALL_PATH}" -C "${INSTALL_DIR}" 2>/dev/null; then
+      echo "we: ERROR: failed to extract tarball" >&2
+      exit 1
+    fi
+    # Ensure the binary is named 'we'
+    if [[ ! -f "${BINARY}" ]]; then
+      echo "we: ERROR: extracted archive but 'we' binary not found at ${BINARY}" >&2
+      exit 1
+    fi
+  fi
+
+  chmod +x "${BINARY}"
+  echo "we: installed to ${BINARY}" >&2
+fi
+
+# ---------------------------------------------------------------------------
+# Execute
+# ---------------------------------------------------------------------------
+exec "${BINARY}" "$@"
