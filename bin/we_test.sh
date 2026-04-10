@@ -176,59 +176,87 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 4: Script fails on SHA-256 mismatch (tampered archive)
+# Test 4: Script fails on SHA-256 mismatch — invokes real wrapper against tampered archive
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== Test 4: Fails on SHA-256 mismatch ==="
+echo "=== Test 4: Fails on SHA-256 mismatch (real wrapper, local HTTP server, tampered archive) ==="
 
 FAKE_REPO2="${TMPDIR_TEST}/fake_repo2"
-mkdir -p "${FAKE_REPO2}/bin"
+SERVE_DIR="${TMPDIR_TEST}/serve"
+mkdir -p "${FAKE_REPO2}/bin" "${SERVE_DIR}"
 echo "v0.1.0" > "${FAKE_REPO2}/.we-version"
 
-# Create a test that simulates sha256 verification failing
-cat > "${FAKE_REPO2}/bin/we_sha_check" << 'WRAPPER'
-#!/usr/bin/env bash
-set -euo pipefail
+# Detect current platform (mirrors bin/we logic)
+_OS="$(uname -s)"
+_ARCH="$(uname -m)"
+case "${_OS}" in
+  Linux)
+    case "${_ARCH}" in
+      x86_64)  _PLATFORM="linux-amd64"  ;;
+      aarch64) _PLATFORM="linux-arm64"  ;;
+      arm64)   _PLATFORM="linux-arm64"  ;;
+      *)       _PLATFORM="linux-amd64"  ;;  # fallback for test purposes
+    esac
+    ;;
+  Darwin)
+    _PLATFORM="darwin-arm64" ;;
+  *)
+    _PLATFORM="linux-amd64" ;;
+esac
 
-EXPECTED="0fa01906fc78f8b3434944d4d42b3f99d9e5592f28af76f7ed55bc0a637b635f"
-ACTUAL="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+# Create a tampered tarball (wrong content — SHA will not match the hardcoded value)
+TARBALL_NAME="we-${_PLATFORM}.tar.gz"
+echo "tampered binary content — not the real we binary" > "${SERVE_DIR}/fake_we"
+tar -czf "${SERVE_DIR}/${TARBALL_NAME}" -C "${SERVE_DIR}" fake_we
 
-if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
-  echo "we: ERROR: SHA-256 mismatch for downloaded tarball!" >&2
-  echo "we:   expected: ${EXPECTED}" >&2
-  echo "we:   actual:   ${ACTUAL}" >&2
-  echo "we: The download may be corrupted or tampered with. Aborting." >&2
-  exit 1
-fi
-exec false
-WRAPPER
-chmod +x "${FAKE_REPO2}/bin/we_sha_check"
-
-if ! "${FAKE_REPO2}/bin/we_sha_check" 2>/dev/null; then
-  pass "script exits non-zero on SHA-256 mismatch"
-else
-  fail "script should have failed on SHA-256 mismatch"
-fi
-
-# Create a tampered archive and verify sha256sum detection
-TMPDIR_SHA="${TMPDIR_TEST}/sha_test"
-mkdir -p "${TMPDIR_SHA}"
-echo "this is tampered content" > "${TMPDIR_SHA}/tampered.tar.gz"
-
-EXPECTED_REAL="0fa01906fc78f8b3434944d4d42b3f99d9e5592f28af76f7ed55bc0a637b635f"
-
+# Also create a fake .sha256 file whose value matches the tampered archive
+# (so the remote .sha256 check passes, but the hardcoded SHA check still catches it)
 if command -v sha256sum &>/dev/null; then
-  ACTUAL_TAMPERED="$(sha256sum "${TMPDIR_SHA}/tampered.tar.gz" | awk '{print $1}')"
-elif command -v shasum &>/dev/null; then
-  ACTUAL_TAMPERED="$(shasum -a 256 "${TMPDIR_SHA}/tampered.tar.gz" | awk '{print $1}')"
+  TAMPERED_SHA="$(sha256sum "${SERVE_DIR}/${TARBALL_NAME}" | awk '{print $1}')"
 else
-  ACTUAL_TAMPERED="no-sha-tool"
+  TAMPERED_SHA="$(shasum -a 256 "${SERVE_DIR}/${TARBALL_NAME}" | awk '{print $1}')"
 fi
+echo "${TAMPERED_SHA}  ${TARBALL_NAME}" > "${SERVE_DIR}/${TARBALL_NAME}.sha256"
 
-if [[ "${ACTUAL_TAMPERED}" != "${EXPECTED_REAL}" ]]; then
-  pass "sha256 of tampered file correctly differs from expected (integrity check would catch it)"
+# Start a local HTTP server on a random high port
+HTTP_PORT=$((30000 + RANDOM % 10000))
+python3 -m http.server "${HTTP_PORT}" --directory "${SERVE_DIR}" &>/dev/null &
+HTTP_PID=$!
+# Give the server a moment to start
+sleep 0.3
+
+# Verify the server started; if not, skip with a warning
+if ! kill -0 "${HTTP_PID}" 2>/dev/null; then
+  fail "could not start local HTTP server for Test 4"
 else
-  fail "tampered file unexpectedly matched expected sha256 — this should never happen"
+  # Copy the real bin/we and patch the BASE_URL to point at local server
+  sed "s|https://github.com/3dl-dev/legion/releases/download/\${VERSION}|http://127.0.0.1:${HTTP_PORT}|g" \
+    "${WE_SCRIPT}" > "${FAKE_REPO2}/bin/we"
+  chmod +x "${FAKE_REPO2}/bin/we"
+
+  # Override install dir so we don't collide with any real install
+  FAKE_HOME="${TMPDIR_TEST}/fake_home"
+  mkdir -p "${FAKE_HOME}"
+
+  # Run the patched wrapper; it should fail because the tampered archive's SHA
+  # does not match the hardcoded expected value in the SHA256_MAP
+  SHA_ERR_OUTPUT="$(HOME="${FAKE_HOME}" "${FAKE_REPO2}/bin/we" --version 2>&1 || true)"
+  SHA_EXIT=0
+  HOME="${FAKE_HOME}" "${FAKE_REPO2}/bin/we" --version 2>/dev/null && SHA_EXIT=0 || SHA_EXIT=$?
+
+  kill "${HTTP_PID}" 2>/dev/null || true
+
+  if [[ "${SHA_EXIT}" -ne 0 ]]; then
+    pass "wrapper exits non-zero when tarball SHA does not match hardcoded checksum"
+  else
+    fail "wrapper should have exited non-zero on SHA mismatch (exit=${SHA_EXIT})"
+  fi
+
+  if echo "${SHA_ERR_OUTPUT}" | grep -q "SHA-256 mismatch\|mismatch\|tampered\|corrupted"; then
+    pass "wrapper emits SHA mismatch error message"
+  else
+    fail "wrapper output did not contain expected mismatch message; got: ${SHA_ERR_OUTPUT}"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
