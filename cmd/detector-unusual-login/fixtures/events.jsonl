@@ -1,0 +1,4 @@
+{"id":"evt-001","source":"github","type":"login","actor":"alice","timestamp":"2026-04-10T09:00:00Z","org":"acme","payload":{"ip":"1.2.3.4","geo":"US"}}
+{"id":"evt-002","source":"github","type":"login","actor":"bob","timestamp":"2026-04-10T09:01:00Z","org":"acme","payload":{"ip":"99.88.77.66","geo":"GB"}}
+{"id":"evt-003","source":"github","type":"login","actor":"alice","timestamp":"2026-04-10T09:02:00Z","org":"acme","payload":{"ip":"200.100.50.25","geo":"DE"}}
+{"id":"evt-004","source":"github","type":"login","actor":"charlie","timestamp":"2026-04-10T09:03:00Z","org":"acme","payload":{"ip":"10.0.0.1","geo":"CN"}}
