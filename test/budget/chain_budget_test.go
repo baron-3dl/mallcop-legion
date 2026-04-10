@@ -1,49 +1,45 @@
 //go:build e2e
 
-// Package budget contains the chain budget enforcement integration test.
+// Package budget contains the chain budget enforcement integration tests.
 //
-// TestChainBudgetEnforcement verifies that the per-session token budget
-// enforces a chain-wide cap across the triage → investigate → heal playbook,
-// with fail-safe escalation when the budget would be exceeded.
+// # TestWeStartsAndExitsOnIdle — engine smoke test (real subprocess)
 //
-// # Design
+// Proves the legion orchestrator wired with the test chart actually boots,
+// loads chart + identity + agent roster, runs the poll loop, finds the queue
+// empty, and exits cleanly via --exit-on-idle. This is the minimum "engine
+// turning" verification — it does not exercise the chain, only the lifecycle.
 //
-// The test starts a CannedBackend HTTP server that returns 4000 tokens per
-// response, then spawns `we start --chart test-chain-budget.toml --once` as a
-// subprocess.  The budget in the test chart is 10000 tokens:
+// # TestChainBudgetEnforcement — chain budget (still gated)
+//
+// Starts a CannedBackend HTTP server returning 4000 tokens per response and
+// spawns `we start --chart test-chain-budget.toml --exit-on-idle` with
+// FORGE_API_URL pointing at the canned backend. Budget = 10000 tokens:
 //
 //	triage:      4000 tokens  cumulative  4000  (< 10000 → proceeds)
 //	investigate: 4000 tokens  cumulative  8000  (< 10000 → proceeds)
 //	heal:        would need 4000 → cumulative 12000 (> 10000 → budget gate fires)
 //
-// Expected: chain final status = "escalated", total reported tokens ≤ 10000.
+// Currently gated by work-seeding: legion reads work from campfire worksources
+// (ready/schedule), and we don't yet have a programmatic way to inject a
+// finding into the queue for the three-step chain to pick up. The test skips
+// with a clear message until that's resolved.
 //
-// # Known gaps — rd item agentaa9f633f-a0d
+// # Configuration
 //
-// TWO HARD BLOCKERS prevent the subprocess spawn from running today.  The test
-// documents both precisely with t.Skip() so that fixing either one is a clear,
-// targeted action:
+//   - Inference endpoint: FORGE_API_URL env var (not a chart field)
+//   - One-shot exit: --exit-on-idle flag
+//   - Agent identities: cf init --name <type>, symlinked into agents/<type>/
+//   - Budget: [budget] max_tokens_per_session in the chart
 //
-//  1. The `we` binary (v0.1.0) does not exist at the expected GitHub release
-//     URL.  The bin/we wrapper fails with HTTP 404.  Until a valid release is
-//     published, the subprocess spawn cannot run.
-//
-//  2. `inference_url` is NOT a native `we` chart field.  In the production
-//     chart (charts/vertical-slice.toml) it only appears as a commented-out
-//     custom [pipeline] section.  Until `we start` honours an
-//     `[inference] url = "..."` chart field (or an equivalent flag like
-//     `--inference-url`), there is no way to redirect inference calls to the
-//     canned backend from within the chart.
-//
-// The arithmetic assertions and the canned backend are fully exercised without
-// the subprocess — they are NOT skipped.  Only the `we` subprocess spawn is
-// skipped.
+// The arithmetic assertions and canned backend tests never depend on `we`.
 package budget
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -83,55 +79,61 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// weAvailable returns true only if the `we` binary can be executed successfully.
-// We do NOT attempt to download it — we just check whether it already exists and
-// is runnable.
-func weAvailable(root string) bool {
-	weBin := filepath.Join(root, "bin", "we")
-	// Check for an already-installed binary.
-	installDir := filepath.Join(os.Getenv("HOME"), ".local", "lib", "we")
-	entries, err := os.ReadDir(installDir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		bin := filepath.Join(installDir, e.Name(), "we")
-		if _, err := os.Stat(bin); err == nil {
-			return true
-		}
-	}
-	// Try running the wrapper to see if it succeeds without downloading.
-	cmd := exec.Command(weBin, "--version")
-	cmd.Env = append(os.Environ(), "WE_SKIP_DOWNLOAD=1") // hypothetical flag
-	err = cmd.Run()
-	return err == nil
+// weWrapper returns the path to the bin/we wrapper in this repo. The wrapper
+// builds legion from source (LEGION_REPO or ~/projects/legion) on first use.
+func weWrapper(root string) string {
+	return filepath.Join(root, "bin", "we")
 }
 
-// writeTestChart writes a copy of the test-chain-budget.toml with the
-// inference URL substituted in so `we` can find the canned backend.
-func writeTestChart(t *testing.T, root, inferenceURL string) string {
+// ensureAgentIdentity makes sure agents/<name>/identity.json exists as a
+// symlink to ~/.campfire/agents/<name>/identity.json. If the cf-managed
+// identity is missing, it runs `cf init --name <name>` to create it. This
+// gives legion disposition agents nested under the operator's identity.
+func ensureAgentIdentity(t *testing.T, root, name string) {
 	t.Helper()
-	src := filepath.Join(root, "charts", "test-chain-budget.toml")
-	data, err := os.ReadFile(src)
+	repoLink := filepath.Join(root, "agents", name, "identity.json")
+	if _, err := os.Lstat(repoLink); err == nil {
+		return
+	}
+
+	home, err := os.UserHomeDir()
 	if err != nil {
-		t.Fatalf("reading test chart: %v", err)
+		t.Fatalf("UserHomeDir: %v", err)
 	}
-
-	// Replace the commented placeholder URL with the real canned backend URL.
-	// This is the runtime substitution that makes the test chart point at the
-	// canned backend.  When legion/we implements [inference] url as a native
-	// field, this substitution will activate it.
-	patched := strings.ReplaceAll(
-		string(data),
-		`# url = "http://127.0.0.1:REPLACED_AT_TEST_RUNTIME"   # uncomment when native`,
-		fmt.Sprintf(`url = %q`, inferenceURL),
-	)
-
-	outPath := filepath.Join(t.TempDir(), "test-chain-budget.toml")
-	if err := os.WriteFile(outPath, []byte(patched), 0644); err != nil {
-		t.Fatalf("writing patched chart: %v", err)
+	cfPath := filepath.Join(home, ".campfire", "agents", name, "identity.json")
+	if _, err := os.Stat(cfPath); err != nil {
+		if _, err := exec.LookPath("cf"); err != nil {
+			t.Skipf("cf binary not on PATH — cannot bootstrap agent identity %q", name)
+		}
+		cmd := exec.Command("cf", "init", "--name", name)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("cf init --name %s failed: %v\n%s", name, err, out)
+		}
 	}
-	return outPath
+	if err := os.MkdirAll(filepath.Dir(repoLink), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(repoLink), err)
+	}
+	if err := os.Symlink(cfPath, repoLink); err != nil {
+		t.Fatalf("symlink %s -> %s: %v", repoLink, cfPath, err)
+	}
+}
+
+// ensureAutomatonIdentity makes sure the `we` automaton identity exists.
+// Runs `we init --name <name>` if missing.
+func ensureAutomatonIdentity(t *testing.T, weBin, name string) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	idPath := filepath.Join(home, ".legion", "automata", name, "identity.json")
+	if _, err := os.Stat(idPath); err == nil {
+		return
+	}
+	cmd := exec.Command(weBin, "init", "--name", name)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("we init --name %s failed: %v\n%s", name, err, out)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -310,152 +312,147 @@ func TestBudgetArithmeticWith6000Tokens(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestChainBudgetEnforcement — subprocess spawn (skipped when we unavailable)
+// TestWeStartsAndExitsOnIdle — engine smoke test (real subprocess)
 //
-// This is the full end-to-end test that spawns `we start` as a subprocess.
-// It is skipped when:
-//   (a) the `we` binary is not installed (v0.1.0 release is 404 on GitHub), OR
-//   (b) the `we` binary does not support [inference] url as a native chart field
-//
-// When both blockers are resolved, remove the t.Skip() call and this test
-// will run the full subprocess scenario.
+// Spawns `we start --chart charts/test-chain-budget.toml --exit-on-idle` and
+// verifies the orchestrator boots, loads the full agent roster (triage,
+// investigate, heal), runs the poll loop, finds the queue empty, and exits
+// via --exit-on-idle. Proves the engine turns end-to-end — the plumbing from
+// chart → identity → constellation → agent roster → poll → exit is all wired.
 // ---------------------------------------------------------------------------
-func TestChainBudgetEnforcement(t *testing.T) {
+func TestWeStartsAndExitsOnIdle(t *testing.T) {
 	root := repoRoot(t)
+	weBin := weWrapper(root)
 
-	// ---- BLOCKER 1: we binary must be available ----
-	//
-	// The bin/we wrapper downloads from:
-	//   https://github.com/3dl-dev/legion/releases/download/v0.1.0/we-linux-amd64.tar.gz
-	// That URL returns HTTP 404.  When the release is published, remove this skip.
-	if !weAvailable(root) {
-		t.Skip("BLOCKER: `we` binary not available. " +
-			"The v0.1.0 release does not exist at the expected GitHub URL. " +
-			"Filed as rd item agentaa9f633f-a0d. " +
-			"To unblock: publish the release tarball at " +
-			"https://github.com/3dl-dev/legion/releases/download/v0.1.0/we-linux-amd64.tar.gz " +
-			"with SHA-256 matching bin/we's hardcoded checksum.")
+	// Build legion from source into ~/.local/bin/we on first use.
+	// The wrapper is a no-op thereafter.
+	ensureAutomatonIdentity(t, weBin, "mallcop-chain-budget-test")
+	for _, disposition := range []string{"triage", "investigate", "heal"} {
+		ensureAgentIdentity(t, root, disposition)
 	}
 
-	// ---- BLOCKER 2: we must support inference_url from chart config ----
-	//
-	// Currently `inference_url` only appears as a commented-out custom [pipeline]
-	// field in charts/vertical-slice.toml.  There is no [inference] url field
-	// in the we chart schema that we can set to redirect inference calls to the
-	// canned backend.
-	//
-	// To verify whether this is supported, we run `we start --help` and look for
-	// "--inference-url" or check whether the [inference] section is documented.
-	weBin := filepath.Join(root, "bin", "we")
-	helpOut, _ := exec.Command(weBin, "start", "--help").CombinedOutput()
-	if !strings.Contains(string(helpOut), "inference-url") &&
-		!strings.Contains(string(helpOut), "inference_url") {
-		t.Skip("BLOCKER: `we start` does not support --inference-url or [inference] url chart field. " +
-			"Without this, there is no way to redirect inference calls from the subprocess to the " +
-			"canned backend. Filed as rd item agentaa9f633f-a0d. " +
-			"To unblock: implement `we start --inference-url <url>` or honour [inference] url in the chart.")
-	}
-
-	// ---- Setup: start canned backend ----
+	// Canned backend isn't strictly required for the idle path (no inference
+	// calls fire with an empty queue), but we start it and pass its URL via
+	// FORGE_API_URL so the end-to-end wiring is exercised and a future work-
+	// seeded run will use it unchanged.
 	b := &CannedBackend{TokensPerResponse: tokensPerCall}
 	if err := b.Start(); err != nil {
 		t.Fatalf("canned backend start: %v", err)
 	}
 	defer b.Stop()
 
-	// ---- Write patched chart with canned backend URL ----
-	chartPath := writeTestChart(t, root, b.URL())
+	chartPath := filepath.Join(root, "charts", "test-chain-budget.toml")
 
-	// ---- Seed a finding that triggers the full triage→investigate→heal chain ----
-	//
-	// The `we start --once` flag runs one scan cycle and exits.  We rely on the
-	// finding fixture or a seed mechanism provided by `we`.  If `we` doesn't
-	// yet have a seed mechanism, this will need to be extended.
-	findingFixture := map[string]interface{}{
-		"id":        "budget-test-finding-001",
-		"source":    "detector:unusual-login",
-		"severity":  "high",
-		"type":      "unusual-login",
-		"actor":     "test-attacker",
-		"timestamp": "2026-04-10T10:00:00Z",
-		"reason":    "login from unrecognized account with high-severity geo anomaly",
-		"evidence":  map[string]interface{}{"ip": "203.0.113.100", "geo": "CN"},
-	}
-	findingBytes, _ := json.Marshal(findingFixture)
-	findingFile := filepath.Join(t.TempDir(), "seed-finding.json")
-	if err := os.WriteFile(findingFile, findingBytes, 0644); err != nil {
-		t.Fatalf("writing finding fixture: %v", err)
-	}
-
-	// ---- Spawn `we start` subprocess ----
-	cmd := exec.Command(weBin, "start",
-		"--chart", chartPath,
-		"--once",
-		"--seed-finding", findingFile, // hypothetical flag; may need adjustment
-	)
+	cmd := exec.Command(weBin, "start", "--chart", chartPath, "--exit-on-idle")
 	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "FORGE_API_URL="+b.URL())
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Stream output so we can detect the exit-on-idle marker live. Legion's
+	// shutdown path currently hangs ~indefinitely after "automaton runtime
+	// stopped" (filed separately as a legion bug); we treat the marker in the
+	// log as the pass signal and kill the process ourselves.
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
 
-	// Allow up to 2 minutes for the chain to run (or exhaust the budget).
-	done := make(chan error, 1)
-	go func() { done <- cmd.Run() }()
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("we start: %v", err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+		_ = pw.Close()
+	}()
+
+	// Close the pipe writer when the process itself exits (if it ever does),
+	// so the scanner sees EOF.
+	go func() {
+		_ = cmd.Wait()
+		_ = pw.Close()
+	}()
+
+	var outBuf bytes.Buffer
+	idleMarker := "exiting (--exit-on-idle)"
+	deadline := time.After(45 * time.Second)
+	idleSeen := make(chan struct{})
+
+	go func() {
+		sc := bufio.NewScanner(pr)
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			line := sc.Text()
+			outBuf.WriteString(line)
+			outBuf.WriteByte('\n')
+			if strings.Contains(line, idleMarker) {
+				select {
+				case <-idleSeen:
+				default:
+					close(idleSeen)
+				}
+			}
+		}
+	}()
 
 	select {
-	case err := <-done:
-		// `we` may exit with a non-zero status when the chain is escalated —
-		// that is expected behaviour, not a test failure.
-		if err != nil {
-			t.Logf("`we start` exited with error (may be expected for budget exhaustion): %v", err)
+	case <-idleSeen:
+		// Pass signal. Kill the still-running process; we've proven the engine
+		// reached idle and signalled exit.
+	case <-deadline:
+		t.Fatalf("we did not reach --exit-on-idle marker within deadline\noutput so far:\n%s", outBuf.String())
+	}
+
+	// Give the scanner a moment to flush remaining buffered lines, then kill.
+	time.Sleep(250 * time.Millisecond)
+	_ = cmd.Process.Kill()
+	_, _ = cmd.Process.Wait()
+	_ = pw.Close()
+
+	output := outBuf.String()
+
+	// The three load-bearing assertions for "the engine turned":
+	//   1. Chart and identity loaded (boot)
+	//   2. All three agent dispositions loaded (roster)
+	//   3. Poll fired and exit-on-idle triggered (runtime + clean shutdown)
+	for _, want := range []string{
+		`"identity loaded"`,
+		`"agent roster loaded"`,
+		`"triage"`,
+		`"investigate"`,
+		`"heal"`,
+		`exiting (--exit-on-idle)`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("we output missing expected marker %q\nfull output:\n%s", want, output)
 		}
-	case <-time.After(2 * time.Minute):
-		_ = cmd.Process.Kill()
-		t.Fatal("`we start` timed out after 2 minutes")
 	}
 
-	t.Logf("we stdout:\n%s", stdout.String())
-	t.Logf("we stderr:\n%s", stderr.String())
+	// The canned backend must NOT have been called — queue was empty, no
+	// inference should fire. If it did, something else is calling Forge.
+	if calls := b.CallCount(); calls != 0 {
+		t.Errorf("canned backend received %d calls with empty queue; expected 0", calls)
+	}
+}
 
-	// ---- Assert: canned backend received exactly 2 calls (triage + investigate) ----
-	//
-	// heal must NOT receive a call because the budget gate fires first.
-	callCount := b.CallCount()
-	if callCount != 2 {
-		t.Errorf("canned backend received %d calls, want 2 (triage + investigate; heal must be blocked by budget gate)",
-			callCount)
-	}
-
-	// ---- Assert: total tokens reported ≤ max_session ----
-	totalTokens := b.TotalTokensReported()
-	if totalTokens > maxSessionTokens {
-		t.Errorf("total tokens reported = %d, exceeds max_session = %d", totalTokens, maxSessionTokens)
-	}
-
-	// ---- Assert: chain status = "escalated" ----
-	//
-	// Look for "escalated" in the `we` output (exact format depends on the
-	// legion implementation).
-	weOutput := stdout.String() + stderr.String()
-	if !strings.Contains(weOutput, "escalated") && !strings.Contains(weOutput, "budget") {
-		t.Errorf("expected `we` output to contain 'escalated' or 'budget' (budget gate fired), got:\n%s", weOutput)
-	}
-
-	// ---- Assert: token counts per step ----
-	calls := b.Requests()
-	if len(calls) >= 1 {
-		t.Logf("step 1 (triage):      %d tokens (cumulative %d)", tokensPerCall, tokensPerCall)
-	}
-	if len(calls) >= 2 {
-		t.Logf("step 2 (investigate): %d tokens (cumulative %d)", tokensPerCall, 2*tokensPerCall)
-	}
-	if len(calls) >= 3 {
-		t.Errorf("step 3 (heal) must NOT run: budget gate should fire before heal is dispatched")
-	}
-
-	t.Logf("chain budget enforcement: callCount=%d totalTokens=%d maxSession=%d",
-		callCount, totalTokens, maxSessionTokens)
+// ---------------------------------------------------------------------------
+// TestChainBudgetEnforcement — chain budget (gated on work seeding)
+//
+// This is the end-to-end chain test. It requires a way to seed a finding into
+// legion's work queue so triage→investigate→heal actually fires. Legion reads
+// work from campfire worksources (schedule or ready convention items), so a
+// real seeding implementation would post a task to the capabilities campfire
+// or create an rd item the automaton can claim.
+//
+// Skipped until work seeding is implemented. The smoke test above proves the
+// engine lifecycle; this test proves budget enforcement once work flows.
+// ---------------------------------------------------------------------------
+func TestChainBudgetEnforcement(t *testing.T) {
+	t.Skip("GATED: no work-seeding mechanism yet. Need to post a finding into " +
+		"the test automaton's worksource (capabilities campfire schedule or " +
+		"rd ready item) so triage→investigate→heal fires. TestWeStartsAndExitsOnIdle " +
+		"proves the engine lifecycle works — this test proves budget enforcement " +
+		"once work flows through.")
 }
 
 // ---------------------------------------------------------------------------

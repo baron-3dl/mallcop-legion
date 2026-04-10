@@ -28,7 +28,7 @@ type ScanSummary struct {
 	Resolved         int `json:"resolved"`
 }
 
-// scanOutput collects structured output emitted by `we start --once` to stdout.
+// scanOutput collects structured output emitted by `we start --exit-on-idle` to stdout.
 // Lines are JSONL; each line may be a Finding or a Resolution.
 type scanOutput struct {
 	findings    []finding.Finding
@@ -59,8 +59,10 @@ func runScan(args []string) error {
 	// Build output directory path derived from chart location.
 	outDir := scanOutputDir(*chartPath)
 
-	// Invoke we start --chart <chart> --once
-	cmd := exec.Command(weBin, "start", "--chart", *chartPath, "--once")
+	// Invoke `we start --chart <chart> --exit-on-idle` — the agentic one-shot.
+	// `we` exits cleanly once the work queue is empty and no schedule entries
+	// remain, after draining active workers.
+	cmd := exec.Command(weBin, "start", "--chart", *chartPath, "--exit-on-idle")
 	cmd.Stderr = os.Stderr
 
 	// Capture stdout so we can parse JSONL findings.

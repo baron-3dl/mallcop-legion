@@ -38,3 +38,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Agent identity files — per-machine, managed by `cf init --name <type>`.
+# Symlinked into agents/<type>/identity.json at runtime; see test/budget helpers.
+agents/*/identity.json

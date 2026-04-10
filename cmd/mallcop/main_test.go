@@ -209,6 +209,10 @@ func TestIsFindingsError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestResolveWe_BinFallback(t *testing.T) {
+	// Clear PATH so resolveWe falls through to the bin/we fallback.
+	// (In a dev environment, ~/.local/bin/we may exist and would otherwise win.)
+	t.Setenv("PATH", "")
+
 	// Create a temp dir simulating repo root with bin/we.
 	tmp := t.TempDir()
 	binDir := tmp + "/bin"

@@ -11,18 +11,13 @@
 #   investigate: 4000 tokens → cumulative 8000  (< 10000, proceeds)
 #   heal:        would need 4000 → cumulative 12000 (> 10000, budget gate fires)
 #
-# Expected outcome: chain status = "escalated" with total tokens ≤ 10000.
+# Inference endpoint:
+#   Set via FORGE_API_URL env var when spawning `we start`, not a chart field.
+#   Example: FORGE_API_URL=http://127.0.0.1:PORT we start --chart <this> --exit-on-idle
 #
-# IMPORTANT — KNOWN GAPS (see rd item agentaa9f633f-a0d):
-#
-# 1. inference_url is NOT a native we chart field.  In the production chart
-#    (charts/vertical-slice.toml) it only appears as a commented-out custom
-#    [pipeline] field.  When legion/we implements inference_url as a first-class
-#    chart field, update the [inference] section below accordingly.
-#
-# 2. The we binary (v0.1.0) does not exist at the expected GitHub release URL.
-#    Until that is resolved, chain_budget_test.go skips the subprocess spawn
-#    and tests only the budget arithmetic and canned backend in isolation.
+# One-shot mode:
+#   `we start --exit-on-idle` drains the queue once and exits cleanly when the
+#   queue is empty AND no schedule entries exist.
 
 [identity]
 name        = "mallcop-chain-budget-test"
@@ -92,14 +87,6 @@ gate  = "human"
 max_workers   = 1
 time_limit    = "5m"
 poll_interval = "10s"
-
-# inference.url is a placeholder for when legion/we implements this as a
-# first-class chart field.  The chain_budget_test.go patches this field at
-# runtime by writing a temp chart with the canned backend URL substituted in.
-# Until inference_url is natively supported, the test skips the subprocess
-# spawn and tests the canned backend + budget arithmetic in isolation.
-[inference]
-# url = "http://127.0.0.1:REPLACED_AT_TEST_RUNTIME"   # uncomment when native
 
 [agents]
 dir = "agents"
