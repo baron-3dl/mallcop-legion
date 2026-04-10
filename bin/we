@@ -1,50 +1,180 @@
 #!/usr/bin/env bash
-# bin/we — build-from-source wrapper for the legion (we) binary.
+# bin/we — self-installing wrapper for the legion (we) binary.
 #
-# Builds from ~/projects/legion (override with LEGION_REPO) and caches the
-# binary at ~/.local/bin/we. Rebuilds on 'we upgrade'.
+# Downloads tagged releases from github.com/3dl-dev/legion via `gh release
+# download` (handles private-repo auth) and verifies them against hardcoded
+# SHA-256 checksums. Fails loudly on: missing gh, network error, missing
+# release, sha256 mismatch, unsupported platform.
 #
-# Rationale: the v0.1.0 release tarball does not exist on GitHub, so the
-# prior download-based wrapper was broken. Legion lives in a sibling repo
-# and its own bin/we also builds from source — we follow the same model.
+# The version is pinned in .we-version at the repo root. Bump it there to
+# upgrade.
 set -euo pipefail
 
-BINARY="${HOME}/.local/bin/we"
-LEGION_REPO="${LEGION_REPO:-${HOME}/projects/legion}"
+# ---------------------------------------------------------------------------
+# Resolve version file — walk up from this script's location
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+VERSION_FILE="${REPO_ROOT}/.we-version"
 
-_build() {
-  if [ ! -d "${LEGION_REPO}" ]; then
-    echo "we: ERROR: legion repo not found at ${LEGION_REPO}" >&2
-    echo "we: Set LEGION_REPO to the path of the legion source checkout." >&2
+if [[ ! -f "${VERSION_FILE}" ]]; then
+  echo "we: ERROR: .we-version not found at ${VERSION_FILE}" >&2
+  exit 1
+fi
+
+VERSION="$(tr -d '[:space:]' < "${VERSION_FILE}")"
+if [[ -z "${VERSION}" ]]; then
+  echo "we: ERROR: .we-version is empty" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Platform detection
+# ---------------------------------------------------------------------------
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+case "${OS}" in
+  Linux)
+    case "${ARCH}" in
+      x86_64)  PLATFORM="linux-amd64"  ;;
+      aarch64) PLATFORM="linux-arm64"  ;;
+      arm64)   PLATFORM="linux-arm64"  ;;
+      *)
+        echo "we: ERROR: unsupported architecture '${ARCH}' on Linux" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  Darwin)
+    case "${ARCH}" in
+      arm64) PLATFORM="darwin-arm64" ;;
+      *)
+        echo "we: ERROR: unsupported architecture '${ARCH}' on Darwin (only arm64 is supported)" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  *)
+    echo "we: ERROR: unsupported operating system '${OS}'" >&2
+    exit 1
+    ;;
+esac
+
+# ---------------------------------------------------------------------------
+# Hardcoded SHA-256 checksums per platform+version.
+# Cross-checked against the .sha256 file in the GitHub release on version bump.
+# ---------------------------------------------------------------------------
+declare -A SHA256_MAP=(
+  ["v0.1.0:linux-amd64"]="0fa01906fc78f8b3434944d4d42b3f99d9e5592f28af76f7ed55bc0a637b635f"
+  ["v0.1.0:linux-arm64"]="392fb893238fbfc00e7fa1e4ed081bbcb430093a5e2f4f00be90e20ae262df74"
+  ["v0.1.0:darwin-arm64"]="0b5cbc6e8cd51e5e965c5a27a278a5fd6e2e3b4b911951117b905eef254a26d4"
+)
+
+EXPECTED_SHA="${SHA256_MAP["${VERSION}:${PLATFORM}"]:-}"
+if [[ -z "${EXPECTED_SHA}" ]]; then
+  echo "we: ERROR: no hardcoded SHA-256 for version=${VERSION} platform=${PLATFORM}" >&2
+  echo "we: Update SHA256_MAP in bin/we for this version/platform combination." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Cross-platform sha256 helper.
+# ---------------------------------------------------------------------------
+_sha256_file() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${path}" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${path}" | awk '{print $1}'
+  else
+    echo "we: ERROR: no sha256sum or shasum available — cannot verify integrity" >&2
     exit 1
   fi
-  if [ ! -f "${LEGION_REPO}/go.mod" ]; then
-    echo "we: ERROR: ${LEGION_REPO} is not a Go module (no go.mod)" >&2
+}
+
+# ---------------------------------------------------------------------------
+# Install path
+# ---------------------------------------------------------------------------
+INSTALL_DIR="${HOME}/.local/lib/we/${VERSION}"
+BINARY="${INSTALL_DIR}/we"
+
+# ---------------------------------------------------------------------------
+# Download and install if not already present
+# ---------------------------------------------------------------------------
+if [[ ! -x "${BINARY}" ]]; then
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "we: ERROR: gh (GitHub CLI) is required to download legion releases." >&2
+    echo "we: The legion repo is private; gh uses the user's auth token." >&2
+    echo "we: Install gh and run 'gh auth login' first." >&2
     exit 1
   fi
-  echo "we: building from ${LEGION_REPO} ..." >&2
-  mkdir -p "$(dirname "${BINARY}")"
-  # Prefer /usr/local/go/bin/go if PATH doesn't have go
-  local go_bin="go"
-  if ! command -v go >/dev/null 2>&1; then
-    if [ -x /usr/local/go/bin/go ]; then
-      go_bin=/usr/local/go/bin/go
-    else
-      echo "we: ERROR: go toolchain not found on PATH or at /usr/local/go/bin/go" >&2
+
+  echo "we: installing ${VERSION} for ${PLATFORM} ..." >&2
+
+  TMPDIR="$(mktemp -d)"
+  trap 'rm -rf "${TMPDIR}"' EXIT
+
+  TARBALL="we-${PLATFORM}.tar.gz"
+  TARBALL_PATH="${TMPDIR}/${TARBALL}"
+  SHA256_PATH="${TMPDIR}/${TARBALL}.sha256"
+
+  # Download tarball and its published .sha256 via gh (handles private auth).
+  echo "we: downloading ${VERSION}/${TARBALL} via gh" >&2
+  if ! gh release download "${VERSION}" \
+        --repo 3dl-dev/legion \
+        --pattern "${TARBALL}" \
+        --pattern "${TARBALL}.sha256" \
+        --dir "${TMPDIR}" >&2; then
+    echo "we: ERROR: gh release download failed for ${VERSION}/${TARBALL}" >&2
+    echo "we: Check your gh auth ('gh auth status') and that the release exists:" >&2
+    echo "we:   gh release view ${VERSION} --repo 3dl-dev/legion" >&2
+    exit 1
+  fi
+
+  # Verify published .sha256 matches hardcoded expectation.
+  if [[ -f "${SHA256_PATH}" ]]; then
+    REMOTE_SHA="$(awk '{print $1}' "${SHA256_PATH}")"
+    if [[ "${REMOTE_SHA}" != "${EXPECTED_SHA}" ]]; then
+      echo "we: ERROR: published .sha256 does not match hardcoded checksum!" >&2
+      echo "we:   hardcoded: ${EXPECTED_SHA}" >&2
+      echo "we:   published: ${REMOTE_SHA}" >&2
+      echo "we: The release was re-cut or the wrapper's SHA256_MAP is stale." >&2
+      exit 1
+    fi
+  else
+    echo "we: WARNING: no published .sha256 file for ${TARBALL}; relying on hardcoded checksum only" >&2
+  fi
+
+  # Verify tarball content against hardcoded SHA-256.
+  ACTUAL_SHA="$(_sha256_file "${TARBALL_PATH}")"
+  if [[ "${ACTUAL_SHA}" != "${EXPECTED_SHA}" ]]; then
+    echo "we: ERROR: SHA-256 mismatch for downloaded tarball!" >&2
+    echo "we:   expected: ${EXPECTED_SHA}" >&2
+    echo "we:   actual:   ${ACTUAL_SHA}" >&2
+    echo "we: The download may be corrupted or tampered with. Aborting." >&2
+    exit 1
+  fi
+  echo "we: SHA-256 verified OK" >&2
+
+  # Extract — prefer the specific `we` entry, fall back to whatever's inside.
+  mkdir -p "${INSTALL_DIR}"
+  if ! tar -xzf "${TARBALL_PATH}" -C "${INSTALL_DIR}" we 2>/dev/null; then
+    if ! tar -xzf "${TARBALL_PATH}" -C "${INSTALL_DIR}" 2>/dev/null; then
+      echo "we: ERROR: failed to extract tarball" >&2
+      exit 1
+    fi
+    if [[ ! -f "${BINARY}" ]]; then
+      echo "we: ERROR: extracted archive but 'we' binary not found at ${BINARY}" >&2
       exit 1
     fi
   fi
-  (cd "${LEGION_REPO}" && "${go_bin}" build -o "${BINARY}" ./cmd/we/)
-  echo "we: built -> ${BINARY}" >&2
-}
 
-if [ "${1:-}" = "upgrade" ]; then
-  _build
-  exit 0
+  chmod +x "${BINARY}"
+  echo "we: installed to ${BINARY}" >&2
 fi
 
-if [ ! -x "${BINARY}" ]; then
-  _build
-fi
-
+# ---------------------------------------------------------------------------
+# Execute
+# ---------------------------------------------------------------------------
 exec "${BINARY}" "$@"
