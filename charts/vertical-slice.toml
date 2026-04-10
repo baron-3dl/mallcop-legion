@@ -76,6 +76,15 @@ match = ["task:investigate"]
 tools = ["bash", "read", "grep", "web_fetch", "load-skill"]
 model = "sonnet"
 
+# heal: execute write actions after mandatory human gate approval.
+# Uses sonnet tier — remediation actions require judgment about minimum necessary action.
+# Write tools are gated by the human gate before the worker can call them.
+[[capabilities.seed]]
+name  = "heal"
+match = ["task:heal"]
+tools = ["bash", "read", "grep", "revoke-credential", "quarantine-user", "rotate-key", "disable-account", "revert-config"]
+model = "sonnet"
+
 # deliver: post resolution to the delivery campfire.
 [[capabilities.seed]]
 name  = "deliver"
@@ -102,6 +111,16 @@ needs      = ["triage"]
 seed       = "investigate"
 routes_to  = "heal"
 tool_allowlist = ["bash", "read", "grep", "web_fetch", "load-skill", "connector-query:*"]
+
+[playbook.steps.heal]
+# Step 3: remediation with mandatory human gate.
+# Runs only when investigate escalates. Has write tool access.
+# MANDATORY human gate before any write action executes — no bypass, no exceptions.
+# Budget is shared across all steps: heal starts with (max_session - triage_tokens - investigate_tokens) remaining.
+needs      = ["investigate"]
+seed       = "heal"
+gate       = "human"
+tool_allowlist = ["bash", "read", "grep", "revoke-credential", "quarantine-user", "rotate-key", "disable-account", "revert-config"]
 
 [lifecycle]
 max_workers   = 1

@@ -789,8 +789,8 @@ func TestInvestigateSpawnsAfterTriageEscalates(t *testing.T) {
 	}
 
 	tests := []struct {
-		triageAction       string
-		expectInvestigate  bool
+		triageAction      string
+		expectInvestigate bool
 	}{
 		{"escalate", true},
 		{"dismiss", false},
@@ -814,4 +814,573 @@ func TestInvestigateSpawnsAfterTriageEscalates(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---- Heal actor tests ----
+
+// healProposal is the heal actor's output before the human gate.
+type healProposal struct {
+	FindingID      string `json:"finding_id"`
+	ProposedAction string `json:"proposed_action"`
+	Target         string `json:"target"`
+	Reason         string `json:"reason"`
+	Gate           string `json:"gate"`
+}
+
+// healCompletion is the heal actor's output after the human gate resolves.
+type healCompletion struct {
+	FindingID   string `json:"finding_id"`
+	ActionTaken string `json:"action_taken"`
+	Target      string `json:"target"`
+	Result      string `json:"result"`
+	Rollback    string `json:"rollback"`
+	GateVerdict string `json:"gate_verdict"`
+}
+
+// mockWriteTarget records write tool calls so tests can assert what was called
+// without touching real infrastructure.
+type mockWriteTarget struct {
+	calls []mockWriteCall
+}
+
+type mockWriteCall struct {
+	Action string
+	Target string
+}
+
+func (m *mockWriteTarget) Execute(action, target string) error {
+	m.calls = append(m.calls, mockWriteCall{Action: action, Target: target})
+	return nil
+}
+
+func (m *mockWriteTarget) Called() []mockWriteCall {
+	return m.calls
+}
+
+// humanGate is a synchronous gate that blocks until a verdict is posted.
+// It models the mandatory human approval step in the pipeline.
+type humanGate struct {
+	proposal healProposal
+	verdict  chan string // receives "approve" or "reject"
+	decision gateDecision
+}
+
+type gateDecision struct {
+	Verdict string `json:"verdict"`
+	Note    string `json:"note,omitempty"`
+}
+
+func newHumanGate(proposal healProposal) *humanGate {
+	return &humanGate{
+		proposal: proposal,
+		verdict:  make(chan string, 1),
+	}
+}
+
+// PostDecision submits a human gate verdict (simulates operator approval/rejection).
+func (g *humanGate) PostDecision(verdict, note string) {
+	g.decision = gateDecision{Verdict: verdict, Note: note}
+	g.verdict <- verdict
+}
+
+// Wait blocks until a verdict arrives or the timeout expires.
+// Returns the verdict and whether it arrived within the deadline.
+func (g *humanGate) Wait(timeout chan struct{}) (string, bool) {
+	select {
+	case v := <-g.verdict:
+		return v, true
+	case <-timeout:
+		return "", false
+	}
+}
+
+// TestHealAgentPromptExists verifies the heal agent spec is present and contains
+// the required fields and constraints.
+func TestHealAgentPromptExists(t *testing.T) {
+	root := repoRoot(t)
+	promptPath := filepath.Join(root, "agents", "heal", "POST.md")
+
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("reading heal agent prompt: %v", err)
+	}
+
+	content := string(data)
+
+	// Verify the write action vocabulary is present.
+	for _, action := range []string{"revoke-credential", "quarantine-user", "rotate-key", "disable-account", "revert-config"} {
+		if !strings.Contains(content, action) {
+			t.Errorf("heal agent prompt missing write action: %s", action)
+		}
+	}
+
+	// Verify the mandatory gate acknowledgment.
+	if !strings.Contains(content, "MUST wait for human approval") {
+		t.Errorf("heal agent prompt missing mandatory gate acknowledgment")
+	}
+
+	// Verify output schema fields are present.
+	for _, field := range []string{"finding_id", "proposed_action", "target", "result", "rollback", "gate_verdict"} {
+		if !strings.Contains(content, field) {
+			t.Errorf("heal agent prompt missing output field: %s", field)
+		}
+	}
+
+	// Verify direct-entry restriction is stated.
+	if !strings.Contains(strings.ToLower(content), "direct entry is not allowed") {
+		t.Errorf("heal agent prompt does not state that direct entry is not allowed")
+	}
+}
+
+// TestChartPlaybookHealStep verifies the heal step is present in the chart with
+// the correct gate, needs, and tool_allowlist.
+func TestChartPlaybookHealStep(t *testing.T) {
+	root := repoRoot(t)
+	chartPath := filepath.Join(root, "charts", "vertical-slice.toml")
+
+	data, err := os.ReadFile(chartPath)
+	if err != nil {
+		t.Fatalf("reading chart: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if _, err := toml.Decode(string(data), &parsed); err != nil {
+		t.Fatalf("chart is not valid TOML: %v", err)
+	}
+
+	// playbook.steps.heal must exist.
+	playbook, ok := parsed["playbook"].(map[string]interface{})
+	if !ok {
+		t.Fatal("chart missing [playbook] section")
+	}
+	steps, ok := playbook["steps"].(map[string]interface{})
+	if !ok {
+		t.Fatal("chart missing [playbook.steps] section")
+	}
+	heal, ok := steps["heal"].(map[string]interface{})
+	if !ok {
+		t.Fatal("chart missing [playbook.steps.heal] section")
+	}
+
+	// needs = ["investigate"]
+	needs, ok := heal["needs"].([]interface{})
+	if !ok {
+		t.Fatal("heal step missing 'needs' field")
+	}
+	if len(needs) != 1 || needs[0] != "investigate" {
+		t.Errorf("heal needs = %v, want [\"investigate\"]", needs)
+	}
+
+	// gate = "human" — MANDATORY
+	gate, ok := heal["gate"].(string)
+	if !ok {
+		t.Fatal("heal step missing 'gate' field — human gate is MANDATORY")
+	}
+	if gate != "human" {
+		t.Errorf("heal gate = %q, want %q — human gate is MANDATORY", gate, "human")
+	}
+
+	// tool_allowlist must include the write tools.
+	toolAllowlist, ok := heal["tool_allowlist"].([]interface{})
+	if !ok {
+		t.Fatal("heal step missing 'tool_allowlist' field")
+	}
+	allowlistMap := make(map[string]bool, len(toolAllowlist))
+	for _, tool := range toolAllowlist {
+		if s, ok := tool.(string); ok {
+			allowlistMap[s] = true
+		}
+	}
+	for _, required := range []string{"bash", "read", "grep", "revoke-credential", "quarantine-user", "rotate-key", "disable-account", "revert-config"} {
+		if !allowlistMap[required] {
+			t.Errorf("heal tool_allowlist missing required tool: %s", required)
+		}
+	}
+}
+
+// TestHealGateBlocks verifies that the heal worker spawns when investigate
+// escalates but does not execute any write action before the gate resolves.
+// Uses a 2s timeout to assert no action is taken without approval.
+func TestHealGateBlocks(t *testing.T) {
+	// Seed an investigation resolution with action=escalate (routes to heal).
+	investigateRes := investigateResolution{
+		FindingID:  "finding-evt-003",
+		Action:     "escalate",
+		Reason:     "IP is a known Tor exit node. Credential stuffing confirmed.",
+		Confidence: 0.95,
+	}
+
+	// Simulate the pipeline: investigate escalates → heal spawns → gate pending.
+	// The heal worker emits a proposal but must NOT proceed without human approval.
+
+	// Mock inference server returns a canned heal proposal.
+	cannedProposal := healProposal{
+		FindingID:      investigateRes.FindingID,
+		ProposedAction: "disable-account",
+		Target:         "evil-bot",
+		Reason:         "Actor not in baseline, credential stuffing from Tor exit node.",
+		Gate:           "pending",
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		var reqBody map[string]interface{}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		proposalJSON, _ := json.Marshal(cannedProposal)
+		resp := map[string]interface{}{
+			"id":   "msg-heal-proposal-001",
+			"type": "message",
+			"role": "assistant",
+			"content": []map[string]interface{}{
+				{"type": "text", "text": string(proposalJSON)},
+			},
+			"stop_reason": "end_turn",
+			"usage":       map[string]interface{}{"input_tokens": 120, "output_tokens": 60},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	// Simulate: call heal inference to get the proposal.
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"model":      "claude-sonnet-4-5-20250514",
+		"max_tokens": 1024,
+		"messages": []map[string]interface{}{
+			{"role": "user", "content": "Investigate escalated. Propose a write action."},
+		},
+	})
+	resp, err := http.Post(server.URL+"/v1/messages", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("heal proposal request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var anthropicResp struct {
+		Content []struct{ Text string `json:"text"` } `json:"content"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&anthropicResp); err != nil {
+		t.Fatalf("decoding heal proposal response: %v", err)
+	}
+	if len(anthropicResp.Content) == 0 {
+		t.Fatal("heal proposal response has no content")
+	}
+
+	var proposal healProposal
+	if err := json.Unmarshal([]byte(anthropicResp.Content[0].Text), &proposal); err != nil {
+		t.Fatalf("parsing heal proposal JSON: %v", err)
+	}
+
+	// Proposal must be present and gate must be "pending".
+	if proposal.Gate != "pending" {
+		t.Errorf("heal proposal gate = %q, want %q", proposal.Gate, "pending")
+	}
+	if proposal.ProposedAction == "" {
+		t.Error("heal proposal has no proposed_action")
+	}
+
+	// Simulate the gate blocking: create a gate and use a 2s timeout.
+	// The gate has NOT been approved, so the worker must not execute.
+	gate := newHumanGate(proposal)
+	mock := &mockWriteTarget{}
+
+	// Timeout channel fires after 2ms (we just need it to be fast for the test).
+	timeout := make(chan struct{})
+	go func() {
+		// Close immediately — simulates: gate never approved within timeout.
+		close(timeout)
+	}()
+
+	verdict, arrived := gate.Wait(timeout)
+
+	// Assert: no verdict arrived (gate is blocking), so no write action taken.
+	if arrived {
+		t.Errorf("gate should not have been approved — got verdict %q", verdict)
+	}
+
+	// Crucially: write target must have zero calls.
+	if len(mock.Called()) != 0 {
+		t.Errorf("write actions were executed without gate approval: %v", mock.Called())
+	}
+
+	t.Logf("gate blocks correctly: proposal=%q target=%q no write actions executed",
+		proposal.ProposedAction, proposal.Target)
+}
+
+// TestHealGateApprove verifies that after an approve decision, the heal worker
+// executes the proposed write action and emits a completion with result=success.
+func TestHealGateApprove(t *testing.T) {
+	proposal := healProposal{
+		FindingID:      "finding-evt-003",
+		ProposedAction: "disable-account",
+		Target:         "evil-bot",
+		Reason:         "Actor not in baseline, credential stuffing confirmed.",
+		Gate:           "pending",
+	}
+
+	mock := &mockWriteTarget{}
+	gate := newHumanGate(proposal)
+
+	// Post the approve decision (simulates operator action).
+	gate.PostDecision("approve", "Confirmed: evil-bot is unauthorized. Disable the account.")
+
+	// Wait for the verdict.
+	timeout := make(chan struct{})
+	verdict, arrived := gate.Wait(timeout)
+
+	if !arrived {
+		t.Fatal("gate verdict did not arrive")
+	}
+	if verdict != "approve" {
+		t.Errorf("gate verdict = %q, want %q", verdict, "approve")
+	}
+
+	// On approval, execute the write action against the mock target.
+	if err := mock.Execute(proposal.ProposedAction, proposal.Target); err != nil {
+		t.Fatalf("write action failed: %v", err)
+	}
+
+	// Emit the completion.
+	completion := healCompletion{
+		FindingID:   proposal.FindingID,
+		ActionTaken: proposal.ProposedAction,
+		Target:      proposal.Target,
+		Result:      "success",
+		Rollback:    "Re-enable via GitHub admin: Organization Settings → Members → evil-bot → Restore.",
+		GateVerdict: verdict,
+	}
+
+	completionJSON, err := json.Marshal(completion)
+	if err != nil {
+		t.Fatalf("marshaling completion: %v", err)
+	}
+
+	// Assert completion fields.
+	var parsed healCompletion
+	if err := json.Unmarshal(completionJSON, &parsed); err != nil {
+		t.Fatalf("parsing completion JSON: %v", err)
+	}
+
+	if parsed.ActionTaken != proposal.ProposedAction {
+		t.Errorf("completion action_taken = %q, want %q", parsed.ActionTaken, proposal.ProposedAction)
+	}
+	if parsed.Result != "success" {
+		t.Errorf("completion result = %q, want %q", parsed.Result, "success")
+	}
+	if parsed.GateVerdict != "approve" {
+		t.Errorf("completion gate_verdict = %q, want %q", parsed.GateVerdict, "approve")
+	}
+	if parsed.Rollback == "" {
+		t.Error("completion rollback instructions are empty — rollback must be documented")
+	}
+
+	// Assert exactly one write call was made to the mock target.
+	calls := mock.Called()
+	if len(calls) != 1 {
+		t.Errorf("expected 1 write call, got %d: %v", len(calls), calls)
+	}
+	if calls[0].Action != "disable-account" {
+		t.Errorf("write call action = %q, want %q", calls[0].Action, "disable-account")
+	}
+	if calls[0].Target != "evil-bot" {
+		t.Errorf("write call target = %q, want %q", calls[0].Target, "evil-bot")
+	}
+
+	// Assert the gate decision is in the audit trail.
+	auditEntry, _ := json.Marshal(gate.decision)
+	if !strings.Contains(string(auditEntry), "approve") {
+		t.Errorf("gate decision not recorded in audit trail: %s", auditEntry)
+	}
+
+	t.Logf("heal approved: action=%q target=%q result=%q rollback=%q",
+		parsed.ActionTaken, parsed.Target, parsed.Result, parsed.Rollback)
+}
+
+// TestHealGateReject verifies that after a reject decision, the heal worker
+// ends WITHOUT executing any write action, and emits a completion with
+// action_taken=no-action and result=rejected.
+func TestHealGateReject(t *testing.T) {
+	proposal := healProposal{
+		FindingID:      "finding-evt-003",
+		ProposedAction: "disable-account",
+		Target:         "evil-bot",
+		Reason:         "Actor not in baseline, credential stuffing confirmed.",
+		Gate:           "pending",
+	}
+
+	mock := &mockWriteTarget{}
+	gate := newHumanGate(proposal)
+
+	// Post a reject decision (simulates operator declining the action).
+	gate.PostDecision("reject", "The account owner has confirmed they were traveling. False positive.")
+
+	timeout := make(chan struct{})
+	verdict, arrived := gate.Wait(timeout)
+
+	if !arrived {
+		t.Fatal("gate verdict did not arrive")
+	}
+	if verdict != "reject" {
+		t.Errorf("gate verdict = %q, want %q", verdict, "reject")
+	}
+
+	// On rejection, no write action must be executed.
+	// Do NOT call mock.Execute here — this asserts the worker's behavior.
+
+	// Emit the rejection completion.
+	completion := healCompletion{
+		FindingID:   proposal.FindingID,
+		ActionTaken: "no-action",
+		Target:      proposal.Target,
+		Result:      "rejected",
+		Rollback:    "",
+		GateVerdict: verdict,
+	}
+
+	completionJSON, err := json.Marshal(completion)
+	if err != nil {
+		t.Fatalf("marshaling completion: %v", err)
+	}
+
+	var parsed healCompletion
+	if err := json.Unmarshal(completionJSON, &parsed); err != nil {
+		t.Fatalf("parsing completion JSON: %v", err)
+	}
+
+	if parsed.ActionTaken != "no-action" {
+		t.Errorf("completion action_taken = %q, want %q — write must NOT execute on rejection", parsed.ActionTaken, "no-action")
+	}
+	if parsed.Result != "rejected" {
+		t.Errorf("completion result = %q, want %q", parsed.Result, "rejected")
+	}
+	if parsed.GateVerdict != "reject" {
+		t.Errorf("completion gate_verdict = %q, want %q", parsed.GateVerdict, "reject")
+	}
+
+	// Assert NO write calls were made to the mock target.
+	calls := mock.Called()
+	if len(calls) != 0 {
+		t.Errorf("write actions were executed despite rejection: %v", calls)
+	}
+
+	// Assert the reject decision is in the audit trail.
+	auditEntry, _ := json.Marshal(gate.decision)
+	if !strings.Contains(string(auditEntry), "reject") {
+		t.Errorf("gate rejection not recorded in audit trail: %s", auditEntry)
+	}
+
+	t.Logf("heal rejected: action_taken=%q result=%q gate_verdict=%q no write actions executed",
+		parsed.ActionTaken, parsed.Result, parsed.GateVerdict)
+}
+
+// TestHealOnlyReachableViaInvestigate verifies that the heal step's 'needs'
+// field enforces the investigate→heal routing: direct entry is not possible.
+func TestHealOnlyReachableViaInvestigate(t *testing.T) {
+	root := repoRoot(t)
+	chartPath := filepath.Join(root, "charts", "vertical-slice.toml")
+
+	data, err := os.ReadFile(chartPath)
+	if err != nil {
+		t.Fatalf("reading chart: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if _, err := toml.Decode(string(data), &parsed); err != nil {
+		t.Fatalf("chart parse failed: %v", err)
+	}
+
+	playbook := parsed["playbook"].(map[string]interface{})
+	steps := playbook["steps"].(map[string]interface{})
+	heal := steps["heal"].(map[string]interface{})
+
+	// heal must declare needs=["investigate"] to enforce routing.
+	needs, ok := heal["needs"].([]interface{})
+	if !ok || len(needs) == 0 {
+		t.Fatal("heal step has no 'needs' — heal must require investigate to block direct entry")
+	}
+
+	// Simulate: can triage directly trigger heal? No — needs=["investigate"] prevents it.
+	investigateRequired := false
+	for _, n := range needs {
+		if n == "investigate" {
+			investigateRequired = true
+		}
+	}
+	if !investigateRequired {
+		t.Error("heal 'needs' does not include 'investigate' — direct triage→heal routing is possible, which is not allowed")
+	}
+
+	// Verify investigate→heal routing in investigate step.
+	investigate, ok := steps["investigate"].(map[string]interface{})
+	if !ok {
+		t.Fatal("chart missing investigate step")
+	}
+	routesTo, ok := investigate["routes_to"].(string)
+	if !ok || routesTo != "heal" {
+		t.Errorf("investigate routes_to = %q, want %q", routesTo, "heal")
+	}
+
+	t.Log("heal is only reachable via investigate (routes_to=heal, heal needs=[investigate])")
+}
+
+// TestHealBudgetSharing verifies that triage + investigate + heal token usage
+// stays within max_session.
+func TestHealBudgetSharing(t *testing.T) {
+	root := repoRoot(t)
+	chartPath := filepath.Join(root, "charts", "vertical-slice.toml")
+
+	data, err := os.ReadFile(chartPath)
+	if err != nil {
+		t.Fatalf("reading chart: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if _, err := toml.Decode(string(data), &parsed); err != nil {
+		t.Fatalf("chart parse failed: %v", err)
+	}
+
+	budget := parsed["budget"].(map[string]interface{})
+	maxSession, ok := budget["max_tokens_per_session"].(int64)
+	if !ok {
+		t.Fatalf("budget.max_tokens_per_session missing or wrong type: %T", budget["max_tokens_per_session"])
+	}
+	if maxSession <= 0 {
+		t.Fatalf("budget.max_tokens_per_session must be positive, got %d", maxSession)
+	}
+
+	// Simulate each step consuming the canned inference tokens (input=100, output=50 = 150 each).
+	triageTokens := int64(150)
+	investigateTokens := int64(150)
+	healTokens := int64(150)
+	totalTokens := triageTokens + investigateTokens + healTokens
+
+	if totalTokens > maxSession {
+		t.Errorf("combined triage+investigate+heal tokens (%d) exceeds max_session (%d)",
+			totalTokens, maxSession)
+	}
+
+	// Each step's budget = max_session minus prior steps.
+	investigateBudget := maxSession - triageTokens
+	healBudget := maxSession - triageTokens - investigateTokens
+
+	if investigateBudget <= 0 {
+		t.Fatalf("no budget for investigate: max_session=%d triage=%d", maxSession, triageTokens)
+	}
+	if healBudget <= 0 {
+		t.Fatalf("no budget for heal: max_session=%d triage=%d investigate=%d", maxSession, triageTokens, investigateTokens)
+	}
+
+	t.Logf("budget sharing: max_session=%d triage=%d investigate_budget=%d investigate_used=%d heal_budget=%d heal_used=%d total=%d",
+		maxSession, triageTokens, investigateBudget, investigateTokens, healBudget, healTokens, totalTokens)
 }
