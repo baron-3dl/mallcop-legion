@@ -46,15 +46,48 @@ func loadFinding(path string) (*finding.Finding, error) {
 	return &fi, nil
 }
 
+// loadEvents reads events from path, supporting both JSON array and JSONL formats.
+// JSON array: starts with '['. JSONL: one JSON object per line.
 func loadEvents(path string) ([]event.Event, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	var events []event.Event
-	if err := json.NewDecoder(f).Decode(&events); err != nil {
+
+	dec := json.NewDecoder(f)
+	tok, err := dec.Token()
+	if err != nil {
 		return nil, err
+	}
+
+	if delim, ok := tok.(json.Delim); ok && delim == '[' {
+		// JSON array: decode elements until ']'
+		var events []event.Event
+		for dec.More() {
+			var ev event.Event
+			if err := dec.Decode(&ev); err != nil {
+				return nil, err
+			}
+			events = append(events, ev)
+		}
+		return events, nil
+	}
+
+	// JSONL: first token was start of an object '{'. Re-open and scan line by line.
+	f2, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f2.Close()
+	var events []event.Event
+	dec2 := json.NewDecoder(f2)
+	for dec2.More() {
+		var ev event.Event
+		if err := dec2.Decode(&ev); err != nil {
+			return nil, err
+		}
+		events = append(events, ev)
 	}
 	return events, nil
 }
@@ -113,7 +146,7 @@ func emitSpec(fi *finding.Finding) {
 
 func main() {
 	findingPath := flag.String("finding", "", "path to finding JSON file")
-	eventsPath := flag.String("events", "", "path to events JSON file")
+	eventsPath := flag.String("events", "", "path to events JSON or JSONL file")
 	baselinePath := flag.String("baseline", "", "path to baseline JSON file")
 	field := flag.String("field", "", "field to emit: external-messages | standing-facts | spec")
 	flag.Parse()
