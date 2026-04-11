@@ -10,6 +10,31 @@ import (
 	"testing"
 )
 
+// forbiddenSubstrings is the case-folded list used in trap-leak checks.
+// Extend here when new ground-truth field names are added to the schema.
+var forbiddenSubstrings = []string{
+	"trap_description",
+	"trap_resolved_means",
+	"expected_resolution",
+	"chain_action",
+	"triage_action",
+	"reasoning_must_mention",
+	"reasoning_must_not_mention",
+	"investigate_must_use_tools",
+}
+
+// checkNoForbidden asserts that content contains none of the forbidden
+// substrings (case-insensitive). label and src are used in error messages.
+func checkNoForbidden(t *testing.T, content []byte, label, src string) {
+	t.Helper()
+	lower := bytes.ToLower(content)
+	for _, f := range forbiddenSubstrings {
+		if bytes.Contains(lower, []byte(f)) {
+			t.Errorf("%s %s contains forbidden field %q:\n%s", label, src, f, content)
+		}
+	}
+}
+
 // requireCF skips the test if cf is not on PATH.
 func requireCF(t *testing.T) string {
 	t.Helper()
@@ -98,9 +123,9 @@ func repoRoot(t *testing.T) string {
 	return abs
 }
 
-// TestSeed_FullCorpus_NoTrapLeak seeds the full 57-scenario corpus into a real
+// TestSeed_FullCorpus_NoTrapLeak seeds the full 56-scenario corpus into a real
 // local campfire and asserts that no ground-truth trap fields appear in any
-// emitted message.
+// emitted message OR in any fixture file written to disk.
 func TestSeed_FullCorpus_NoTrapLeak(t *testing.T) {
 	cfBin := requireCF(t)
 	cfHome, campfireID := newIsolatedCampfire(t, cfBin)
@@ -114,28 +139,41 @@ func TestSeed_FullCorpus_NoTrapLeak(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
+	// Check all campfire message payloads.
 	msgs := readAllMessages(t, cfBin, cfHome, campfireID)
-
-	forbidden := []string{
-		"trap_description",
-		"trap_resolved_means",
-		"expected_resolution",
-		"TrapDescription",
-		"TrapResolvedMeans",
-		"ExpectedResolution",
-	}
-
 	for i, msg := range msgs {
-		body := []byte(msg.Payload)
-		for _, f := range forbidden {
-			if bytes.Contains(body, []byte(f)) {
-				t.Errorf("message[%d] (id=%s tags=%v) contains forbidden field %q in payload:\n%s",
-					i, msg.ID, msg.Tags, f, msg.Payload)
-			}
-		}
+		checkNoForbidden(t, []byte(msg.Payload),
+			"message["+itoa(i)+"]", "id="+msg.ID)
 	}
+	t.Logf("checked %d messages for trap leaks", len(msgs))
 
-	t.Logf("checked %d messages for trap leaks — all clean", len(msgs))
+	// Check all fixture files on disk (events.json, baseline.json).
+	// HIGH-1 fix: a leak in fixture files is equivalent to a leak in message
+	// bodies — workers read fixtures via fixture_path.
+	fixtureCount := 0
+	err := filepath.Walk(fixturesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if filepath.Ext(path) != ".json" {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("read fixture %s: %v", path, readErr)
+			return nil
+		}
+		checkNoForbidden(t, content, "fixture", path)
+		fixtureCount++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk fixturesDir: %v", err)
+	}
+	t.Logf("checked %d fixture files for trap leaks — all clean", fixtureCount)
 }
 
 // TestSeed_ReportItemAntecedents seeds the corpus and verifies the exam:report
@@ -294,6 +332,111 @@ func TestSeed_FixtureContents(t *testing.T) {
 				len(bl.KnownEntities.Actors), len(wantActors))
 		}
 	}
+}
+
+// TestSeed_MetadataLeak_DetectedAndRejected is a positive-control test.
+// It seeds a synthetic scenario that has ground-truth content planted in
+// multiple places (finding.metadata, event.raw, event.metadata, top-level
+// trap fields) and asserts that NONE of the leak markers appear in any
+// emitted campfire message or any fixture file on disk.
+//
+// This test is a tripwire: if a future refactor reintroduces the passthrough,
+// this test fires even if the blacklist misses the new key name.
+func TestSeed_MetadataLeak_DetectedAndRejected(t *testing.T) {
+	cfBin := requireCF(t)
+	cfHome, campfireID := newIsolatedCampfire(t, cfBin)
+	sender := senderForTest(cfBin, cfHome)
+
+	// Write the synthetic adversarial scenario to a temp directory.
+	scenariosDir := t.TempDir()
+	syntheticYAML := `id: SYN-LEAK-01
+failure_mode: test_only
+finding:
+  id: SYN-LEAK-01-F
+  severity: high
+  description: synthetic leak test
+  metadata:
+    trap_description: LEAK-FROM-FINDING-METADATA
+    correct_action: LEAK-FROM-SEMANTIC-KEY
+events:
+  - id: E1
+    timestamp: 2026-04-11T00:00:00Z
+    actor: alice
+    raw:
+      trap_description: LEAK-FROM-EVENT-RAW
+    metadata:
+      expected_resolution: LEAK-FROM-EVENT-METADATA
+baseline:
+  known_entities:
+    actors: [alice]
+expected:
+  chain_action: SHOULD_BE_STRIPPED
+  triage_action: SHOULD_BE_STRIPPED
+trap_description: TOP-LEVEL-TRAP-SHOULD-BE-STRIPPED
+trap_resolved_means: SHOULD_BE_STRIPPED
+`
+	if err := os.WriteFile(filepath.Join(scenariosDir, "SYN-LEAK-01.yaml"), []byte(syntheticYAML), 0o644); err != nil {
+		t.Fatalf("write synthetic scenario: %v", err)
+	}
+
+	fixturesDir := t.TempDir()
+	if err := seed(sender, "leak-test", campfireID, scenariosDir, fixturesDir, ""); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// leakMarkers are the strings that must NOT appear anywhere in output.
+	leakMarkers := []string{
+		"leak-from-finding-metadata",
+		"leak-from-semantic-key",
+		"leak-from-event-raw",
+		"leak-from-event-metadata",
+		"should_be_stripped",
+		"top-level-trap-should-be-stripped",
+	}
+
+	// Check all campfire message payloads.
+	msgs := readAllMessages(t, cfBin, cfHome, campfireID)
+	for i, msg := range msgs {
+		lower := bytes.ToLower([]byte(msg.Payload))
+		for _, marker := range leakMarkers {
+			if bytes.Contains(lower, []byte(marker)) {
+				t.Errorf("message[%d] (id=%s) contains leak marker %q in payload:\n%s",
+					i, msg.ID, marker, msg.Payload)
+			}
+		}
+	}
+	t.Logf("checked %d messages — no leak markers in payloads", len(msgs))
+
+	// Check all fixture files on disk.
+	fixtureCount := 0
+	err := filepath.Walk(fixturesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if filepath.Ext(path) != ".json" {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("read fixture %s: %v", path, readErr)
+			return nil
+		}
+		lower := bytes.ToLower(content)
+		for _, marker := range leakMarkers {
+			if bytes.Contains(lower, []byte(marker)) {
+				t.Errorf("fixture %s contains leak marker %q:\n%s", path, marker, content)
+			}
+		}
+		fixtureCount++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk fixturesDir: %v", err)
+	}
+	t.Logf("checked %d fixture files — no leak markers in fixtures", fixtureCount)
 }
 
 // mockSender implements ReadySender for unit tests that don't need cf.

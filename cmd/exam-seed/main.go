@@ -101,6 +101,8 @@ type scenarioPayload struct {
 }
 
 // findingPayload mirrors ScenarioFinding without any ground-truth fields.
+// Metadata is filtered through metadataAllowlist before serialization —
+// the passthrough map[string]interface{} is never written verbatim.
 type findingPayload struct {
 	ID       string                 `json:"id"`
 	Detector string                 `json:"detector"`
@@ -108,6 +110,93 @@ type findingPayload struct {
 	Severity string                 `json:"severity"`
 	EventIDs []string               `json:"event_ids"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// metadataAllowlist is the set of finding.metadata keys that may pass
+// through to worker input. Any key not in this set is silently dropped.
+// This prevents semantic leaks through arbitrary key names
+// (e.g. finding.metadata.correct_action or finding.metadata.trap_description).
+// The values are all factual/observational; none are ground-truth.
+var metadataAllowlist = map[string]bool{
+	"actor":              true,
+	"source":             true,
+	"event_type":         true,
+	"volume_ratio":       true,
+	"window_minutes":     true,
+	"window_hours":       true,
+	"distinct_api_count": true,
+	"new_resource":       true,
+	"subject":            true,
+	"injection_type":     true,
+	"payload_location":   true,
+	"pattern":            true,
+	"accounts_affected":  true,
+	"distinct_ips":       true,
+	"total_failures":     true,
+	"correlated_findings":  true,
+	"concurrent_detectors": true,
+	"prior_resolution":     true,
+	"prior_triage_actor":   true,
+	"prior_triage_date":    true,
+	"external_user":        true,
+	"external_domain":      true,
+	"external_org":         true,
+	"container_app":        true,
+	"unmatched_percent":    true,
+}
+
+// filterMetadata returns a copy of m with only allowlisted keys retained.
+// Returns nil if m is nil or the filtered result is empty.
+func filterMetadata(m map[string]interface{}) map[string]interface{} {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		if metadataAllowlist[k] {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// forbiddenKeys is the set of map keys (case-folded) that are forbidden in
+// fixture files. scrubMap drops any key whose lowercased form matches.
+var forbiddenKeys = []string{
+	"trap_description",
+	"trap_resolved_means",
+	"expected_resolution",
+	"chain_action",
+	"triage_action",
+	"reasoning_must_mention",
+	"reasoning_must_not_mention",
+	"investigate_must_use_tools",
+}
+
+// scrubMap returns a shallow copy of m with forbidden keys removed.
+// Keys are matched case-insensitively by lowercasing before comparison.
+func scrubMap(m map[string]interface{}) map[string]interface{} {
+	if len(m) == 0 {
+		return m
+	}
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		lower := strings.ToLower(k)
+		forbidden := false
+		for _, f := range forbiddenKeys {
+			if lower == f {
+				forbidden = true
+				break
+			}
+		}
+		if !forbidden {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // reportPayload is the work:create payload for the exam:report item.
@@ -243,13 +332,15 @@ func seedScenario(sender ReadySender, s *exam.Scenario, runID, campfireID, fixtu
 	}
 
 	// Build sanitized payload — ground-truth fields are deliberately excluded.
+	// finding.Metadata is filtered through metadataAllowlist to prevent
+	// semantic leaks via arbitrary key names.
 	fp := findingPayload{
 		ID:       s.Finding.ID,
 		Detector: s.Finding.Detector,
 		Title:    s.Finding.Title,
 		Severity: s.Finding.Severity,
 		EventIDs: s.Finding.EventIDs,
-		Metadata: s.Finding.Metadata,
+		Metadata: filterMetadata(s.Finding.Metadata),
 	}
 	sp := scenarioPayload{
 		ScenarioID:  s.ID,
@@ -281,8 +372,20 @@ func materializeFixtures(s *exam.Scenario, runID, fixturesDir string) (string, e
 		return "", fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	// Write events.json.
-	evts := fixtureEvents{Events: s.Events}
+	// Write events.json. Scrub event.Raw and event.Metadata of any
+	// forbidden keys before writing to disk (surgical scrub: preserves
+	// legitimate IP, user_agent, operation data while blocking trap leaks).
+	scrubbed := make([]exam.Event, len(s.Events))
+	for i, ev := range s.Events {
+		scrubbed[i] = ev
+		if raw, ok := ev.Raw.(map[string]interface{}); ok {
+			scrubbed[i].Raw = scrubMap(raw)
+		}
+		if len(ev.Metadata) > 0 {
+			scrubbed[i].Metadata = exam.EventMetadata(scrubMap(map[string]interface{}(ev.Metadata)))
+		}
+	}
+	evts := fixtureEvents{Events: scrubbed}
 	if err := writeJSON(filepath.Join(dir, "events.json"), evts); err != nil {
 		return "", fmt.Errorf("write events.json: %w", err)
 	}
