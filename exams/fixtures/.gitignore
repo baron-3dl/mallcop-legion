@@ -1,0 +1,4 @@
+# Materialized exam fixture files are generated at run time by exam-seed.
+# Do not commit run-scoped fixture directories.
+*
+!.gitignore
