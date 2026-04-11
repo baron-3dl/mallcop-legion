@@ -16,14 +16,14 @@
 package main
 
 import (
-	"encoding/hex"
-	"encoding/json"
+	"crypto/ed25519"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
+	"github.com/campfire-net/campfire/pkg/identity"
 )
 
 // renderForTest is a test helper that calls renderTemplate with a temp out dir.
@@ -165,32 +165,35 @@ func TestLegionChartParse(t *testing.T) {
 }
 
 // TestIdentityGeneration verifies that rendering creates .run/exam-<run>/identity.json
-// with a valid ed25519 private key (64 bytes hex-encoded = 128 hex chars).
+// in a format that campfire identity.Load accepts, and that the loaded key can
+// sign and verify a test message. This test would have caught the original hex
+// encoding bug.
 func TestIdentityGeneration(t *testing.T) {
 	_, runDir := renderForTest(t, "R1", "")
 
 	identityPath := filepath.Join(runDir, "identity.json")
-	data, err := os.ReadFile(identityPath)
+
+	// Load the file using the REAL identity.Load — this is the same call
+	// legion's loadIdentity makes. Any format mismatch (wrong encoding,
+	// missing fields, wrong key size) surfaces here.
+	id, err := identity.Load(identityPath)
 	if err != nil {
-		t.Fatalf("identity.json not created at %s: %v", identityPath, err)
+		t.Fatalf("identity.Load(%s) failed: %v", identityPath, err)
 	}
 
-	var id identityFile
-	if err := json.Unmarshal(data, &id); err != nil {
-		t.Fatalf("identity.json is not valid JSON: %v", err)
+	// Verify the key is usable: sign a test message and verify the signature.
+	message := []byte("mallcop-legion identity smoke test")
+	sig := ed25519.Sign(id.PrivateKey, message)
+
+	if !ed25519.Verify(id.PublicKey, message, sig) {
+		t.Fatal("ed25519.Verify failed: signature does not match public key derived from loaded private key")
 	}
 
-	if id.PrivateKey == "" {
-		t.Fatal("identity.json private_key is empty")
+	// Sanity-check key sizes (identity.Load already enforces these, but belt+suspenders).
+	if len(id.PrivateKey) != ed25519.PrivateKeySize {
+		t.Errorf("private key size: expected %d bytes, got %d", ed25519.PrivateKeySize, len(id.PrivateKey))
 	}
-
-	decoded, err := hex.DecodeString(id.PrivateKey)
-	if err != nil {
-		t.Fatalf("private_key is not valid hex: %v", err)
-	}
-
-	// ed25519 private key (seed + public) = 64 bytes.
-	if len(decoded) != 64 {
-		t.Errorf("ed25519 private key should be 64 bytes, got %d", len(decoded))
+	if len(id.PublicKey) != ed25519.PublicKeySize {
+		t.Errorf("public key size: expected %d bytes, got %d", ed25519.PublicKeySize, len(id.PublicKey))
 	}
 }
