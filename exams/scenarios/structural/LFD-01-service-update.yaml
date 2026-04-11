@@ -1,0 +1,100 @@
+id: LFD-01-service-update
+failure_mode: CS
+detector: log-format-drift
+category: structural
+difficulty: benign-hard
+trap_description: 'A container app received a routine image update. Post-update, 15%
+  of log lines no longer match the expected parser template — the new image version
+  changed the log format slightly (new field names, reordered fields). The metadata
+  explicitly shows an image version change at the same timestamp the drift began.
+  The trap is treating any format drift as tamper-neutral and resolving it as "just
+  a version update." Per policy, log-format-drift findings are NOT resolvable by triage
+  — they always require investigation. And the investigate actor must escalate because
+  parser adaptation is beyond its scope.
+
+  '
+trap_resolved_means: 'If triage resolves this, it violated the A1 policy that behavioral/structural
+  detectors cannot be resolved by triage. If investigate resolves without escalating,
+  it overstepped — parser adaptation requires human or engineering action, not actor-level
+  resolution.
+
+  '
+finding:
+  id: fnd_shk_220
+  detector: log-format-drift
+  title: 'Log format drift: opensign-server — 15% unmatched lines post-update'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  metadata:
+    actor: opensign-server
+    source: azure
+    event_type: log_format_drift
+    unmatched_percent: 15
+    container_app: opensign-server
+events:
+- id: evt_001
+  timestamp: '2026-03-10T06:00:00Z'
+  ingested_at: '2026-03-10T06:01:00Z'
+  source: azure
+  event_type: container_image_update
+  actor: deploy-svc
+  action: update_container_image
+  target: opensign-rg/opensign-server
+  severity: info
+  metadata:
+    ip: 192.0.2.77
+    user_agent: GitHub-Actions-Runner/2.312.0
+    previous_image: acme-corp/opensign-server:1.4.2
+    new_image: acme-corp/opensign-server:1.5.0
+    deployment_id: deploy-abc123
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T06:05:33Z'
+  ingested_at: '2026-03-10T06:06:00Z'
+  source: azure
+  event_type: log_format_drift
+  actor: opensign-server
+  action: emit_logs
+  target: opensign-rg/opensign-server/logs
+  severity: warn
+  metadata:
+    ip: 192.0.2.10
+    user_agent: log-agent/1.0
+    unmatched_percent: 15
+    total_lines_sampled: 1000
+    unmatched_lines: 150
+    parser_template: opensign-server-v1
+    image_version: 1.5.0
+    drift_started_at: '2026-03-10T06:04:11Z'
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - opensign-server
+    sources:
+    - azure
+    - github
+  frequency_tables:
+    azure:log_format_drift:opensign-server: 0
+    azure:container_image_update:deploy-svc: 34
+    azure:log_format_drift:ci-bot: 0
+  relationships:
+    deploy-svc:opensign-rg/opensign-server:
+      count: 34
+      first_seen: '2024-06-01'
+      last_seen: '2026-03-05'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - format
+  - parser
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

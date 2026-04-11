@@ -1,0 +1,167 @@
+id: AC-03-external-trust-new-domain
+failure_mode: KA
+detector: new-external-access
+category: access
+difficulty: malicious-obvious
+trap_description: 'A known actor (admin-user) modifies Azure Active Directory federation
+  settings to add a new trusted identity provider from a completely unknown domain
+  (external-idp.evil-domain.example). This is a federated identity trust configuration
+  change — one of the highest-impact changes possible in a cloud tenant, as it grants
+  an external identity provider the ability to authenticate users into the tenant
+  without per-user credentials. The Known Actor Trust trap: admin-user is deeply known
+  with years of history. But this action — adding an external domain trust — is categorically
+  different from any previous action in admin-user''s history. The domain (evil-domain.example)
+  has never appeared in any baseline context. This is a textbook technique for establishing
+  persistent access via identity federation (T1484.002 in MITRE ATT&CK).
+
+  '
+trap_resolved_means: 'If the model resolves this because admin-user is a known actor,
+  it has ignored that federation changes are categorically outside admin-user''s normal
+  activity profile and that the target domain is completely novel. A federation trust
+  addition to an unknown external domain must always escalate — no prior actor history
+  justifies trusting a completely new external identity provider without human review.
+
+  '
+finding:
+  id: fnd_shk_007
+  detector: new-external-access
+  title: 'New external domain trust: external-idp.evil-domain.example added to acme-corp
+    tenant'
+  severity: critical
+  event_ids:
+  - evt_001
+  - evt_002
+  metadata:
+    actor: admin-user
+    source: azure
+    event_type: federation_settings_update
+    external_domain: external-idp.evil-domain.example
+events:
+- id: evt_001
+  timestamp: '2026-03-10T03:02:00Z'
+  ingested_at: '2026-03-10T03:03:00Z'
+  source: azure
+  event_type: federation_settings_update
+  actor: admin-user
+  action: add_federated_identity_provider
+  target: acme-corp/tenant/bd7184bc/federationSettings
+  severity: critical
+  metadata:
+    ip: 203.0.113.44
+    user_agent: python-requests/2.28.2
+    domain: external-idp.evil-domain.example
+    metadata_url: https://external-idp.evil-domain.example/federationmetadata.xml
+    issuer_uri: https://external-idp.evil-domain.example/saml2
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T03:02:45Z'
+  ingested_at: '2026-03-10T03:03:00Z'
+  source: azure
+  event_type: directory_settings_update
+  actor: admin-user
+  action: update_domain_federation
+  target: acme-corp/tenant/bd7184bc/domains
+  severity: critical
+  metadata:
+    ip: 203.0.113.44
+    user_agent: python-requests/2.28.2
+    domain_name: external-idp.evil-domain.example
+    authentication_type: Federated
+    is_managed_domain: false
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+    actor_roles:
+      admin-user:
+      - Owner
+      - GlobalAdmin
+      ci-bot:
+      - Reader
+      deploy-svc:
+      - Contributor
+      tf-automation:
+      - Contributor
+  frequency_tables:
+    azure:login:admin-user: 412
+    azure:read:admin-user: 289
+    azure:write:admin-user: 67
+    azure:role_assignment:admin-user: 28
+    azure:config_change:admin-user: 54
+    azure:resource_created:admin-user: 37
+    azure:resource_deleted:admin-user: 6
+    azure:policy_assignment:admin-user: 12
+    azure:directory_settings_update:admin-user: 2
+    azure:federation_settings_update:admin-user: 0
+    azure:service_principal_created:admin-user: 9
+    github:push:admin-user: 256
+    github:pull_request:admin-user: 112
+    github:review:admin-user: 98
+    github:issue:admin-user: 45
+    azure:login:ci-bot: 1823
+    azure:resource_list:ci-bot: 4401
+    github:push:ci-bot: 891
+    azure:login:tf-automation: 445
+    azure:write:tf-automation: 312
+  relationships:
+    admin-user:acme-corp/tenant/bd7184bc:
+      count: 88
+      first_seen: '2024-01-01'
+      last_seen: '2026-03-08'
+    admin-user:sub-169efd95:
+      count: 512
+      first_seen: '2024-01-01'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 156
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/opensign-rg:
+      count: 89
+      first_seen: '2025-05-20'
+      last_seen: '2026-03-08'
+    admin-user:sub-169efd95/resourceGroups/rudi-dev:
+      count: 67
+      first_seen: '2025-06-01'
+      last_seen: '2026-03-07'
+    admin-user:sub-169efd95/resourceGroups/3dl-os:
+      count: 34
+      first_seen: '2025-07-10'
+      last_seen: '2026-03-05'
+    admin-user:acme-corp/infra:
+      count: 213
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-08'
+    admin-user:acme-corp/atom-api:
+      count: 401
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-09'
+    tf-automation:sub-169efd95:
+      count: 167
+      first_seen: '2024-03-15'
+      last_seen: '2026-03-06'
+    tf-automation:sub-169efd95/resourceGroups/atom-rg:
+      count: 89
+      first_seen: '2024-03-15'
+      last_seen: '2026-03-06'
+    ci-bot:sub-169efd95/resourceGroups/atom-rg:
+      count: 4401
+      first_seen: '2024-03-01'
+      last_seen: '2026-03-09'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - federation
+  - external
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 2
+  min_investigation_quality: 3

@@ -1,0 +1,126 @@
+id: AC-05-contractor-first-day
+failure_mode: CS
+detector: new-external-access
+category: access
+difficulty: benign-hard
+trap_description: 'contractor-bob@ext.example.com accesses the acme-corp GitHub org
+  for the first time on a Monday morning. The new-external-access detector fires because
+  this is a never-seen external actor with access to internal repos. The trap: an
+  unknown external identity touching production repos could be a social-engineering
+  compromise or insider threat. The benign evidence: immediately before the first
+  access (same hour), an HR onboarding event appears in the event stream — hr-system
+  generated a user_provisioned event for contractor-bob with contractor_type: short-term,
+  start_date: today, manager: developer-alice. The temporal proximity and explicit
+  onboarding event make this resolvable. A naive model treats the external identity
+  as suspicious without noticing the same-hour provisioning event.
+
+  '
+trap_resolved_means: 'If the model escalates this, it missed the HR provisioning event
+  that immediately precedes the first access. A new contractor''s first repo access
+  within the same hour as their HR provisioning event is the expected onboarding pattern.
+  This is the canonical "contractor first day" false positive that a SOC would resolve
+  without investigation.
+
+  '
+finding:
+  id: fnd_shk_306
+  detector: new-external-access
+  title: 'New external access: contractor-bob@ext.example.com first seen in acme-corp'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  metadata:
+    actor: contractor-bob@ext.example.com
+    source: github
+    event_type: repo.clone
+events:
+- id: evt_001
+  timestamp: '2026-03-16T09:05:00Z'
+  ingested_at: '2026-03-16T09:06:00Z'
+  source: hr-system
+  event_type: user_provisioned
+  actor: hr-system
+  action: provision_user
+  target: acme-corp/contractors/contractor-bob
+  severity: info
+  metadata:
+    ip: 192.0.2.250
+    user_agent: HR-Platform/4.1
+    contractor_email: contractor-bob@ext.example.com
+    contractor_type: short-term
+    start_date: '2026-03-16'
+    end_date: '2026-06-16'
+    manager: developer-alice
+    approved_by: hr-director
+    ticket: HR-2026-0234
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-16T09:42:00Z'
+  ingested_at: '2026-03-16T09:43:00Z'
+  source: github
+  event_type: org.member_added
+  actor: developer-alice
+  action: add_member
+  target: acme-corp
+  severity: warn
+  metadata:
+    ip: 192.0.2.16
+    user_agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)
+    member: contractor-bob-ext
+    role: outside_collaborator
+    repos:
+    - atom-api
+    hr_ticket: HR-2026-0234
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-16T09:55:00Z'
+  ingested_at: '2026-03-16T09:56:00Z'
+  source: github
+  event_type: repo.clone
+  actor: contractor-bob@ext.example.com
+  action: clone
+  target: acme-corp/atom-api
+  severity: info
+  metadata:
+    ip: 198.51.100.44
+    user_agent: git/2.43.0
+    branch: main
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - developer-alice
+    - tf-automation
+    sources:
+    - azure
+    - github
+    - hr-system
+  frequency_tables:
+    github:org.member_added:developer-alice: 3
+    hr-system:user_provisioned:hr-system: 18
+    github:push:developer-alice: 287
+    azure:login:admin-user: 412
+  relationships:
+    developer-alice:acme-corp:
+      count: 456
+      first_seen: '2024-03-15'
+      last_seen: '2026-03-13'
+    developer-alice:acme-corp/atom-api:
+      count: 312
+      first_seen: '2024-03-15'
+      last_seen: '2026-03-13'
+expected:
+  chain_action: resolved
+  triage_action: resolved
+  reasoning_must_mention:
+  - onboarding
+  - provisioned
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: false
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

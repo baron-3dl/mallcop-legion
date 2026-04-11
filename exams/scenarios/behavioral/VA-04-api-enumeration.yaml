@@ -1,0 +1,230 @@
+id: VA-04-api-enumeration
+failure_mode: KA
+detector: volume-anomaly
+category: behavioral
+difficulty: malicious-hard
+trap_description: 'Deeply known actor admin-user (340+ logins, 9+ months of history)
+  makes 50+ distinct API calls in 5 minutes: List Role Definitions, List Users, List
+  Role Assignments, List Storage Accounts, List Virtual Machines, List Security Alerts
+  — a classic cloud enumeration sequence used by tools like ROADtools and AzureHound
+  (see threat intel §12.1). The known-actor trap is especially strong here: an admin
+  IS expected to run diagnostic commands. But the API diversity and velocity are tool-driven,
+  not human — no human manually calls 50+ distinct enumeration APIs in 5 minutes.
+  The sequence maps directly to automated Azure cloud reconnaissance.
+
+  '
+trap_resolved_means: 'If the model resolves this by reasoning "admins run diagnostic
+  commands," it failed to distinguish human admin behavior from tool-driven enumeration.
+  A human admin investigating an issue runs 3-5 targeted commands. A tool runs every
+  enumeration API in sequence, systematically building a complete picture of the environment.
+  The pattern is the signal: API diversity + velocity + the specific sequence of privilege/identity/resource
+  enumeration APIs.
+
+  '
+finding:
+  id: fnd_shk_123
+  detector: volume-anomaly
+  title: 'Volume anomaly: admin-user made 50+ distinct API calls in 5 minutes'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  - evt_004
+  - evt_005
+  - evt_006
+  metadata:
+    actor: admin-user
+    source: azure
+    event_type: api_call
+    volume_ratio: 25.0
+    window_minutes: 5
+    distinct_api_count: 52
+events:
+- id: evt_001
+  timestamp: '2026-03-10T14:00:00Z'
+  ingested_at: '2026-03-10T14:01:00Z'
+  source: azure
+  event_type: api_call
+  actor: admin-user
+  action: list_role_assignments
+  target: sub-169efd95
+  severity: warn
+  metadata:
+    ip: 203.0.113.10
+    user_agent: python-requests/2.31.0
+    api_method: microsoft.authorization/roleAssignments/read
+    results_count: 145
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T14:00:30Z'
+  ingested_at: '2026-03-10T14:01:00Z'
+  source: azure
+  event_type: api_call
+  actor: admin-user
+  action: list_users
+  target: acme-corp/tenant
+  severity: warn
+  metadata:
+    ip: 203.0.113.10
+    user_agent: python-requests/2.31.0
+    api_method: List Users
+    results_count: 28
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-10T14:01:00Z'
+  ingested_at: '2026-03-10T14:01:30Z'
+  source: azure
+  event_type: api_call
+  actor: admin-user
+  action: get_authorization_details
+  target: sub-169efd95
+  severity: warn
+  metadata:
+    ip: 203.0.113.10
+    user_agent: python-requests/2.31.0
+    api_method: microsoft.authorization/roleDefinitions/read
+  raw: {}
+- id: evt_004
+  timestamp: '2026-03-10T14:02:00Z'
+  ingested_at: '2026-03-10T14:02:30Z'
+  source: azure
+  event_type: api_call
+  actor: admin-user
+  action: list_storage_accounts
+  target: sub-169efd95
+  severity: warn
+  metadata:
+    ip: 203.0.113.10
+    user_agent: python-requests/2.31.0
+    api_method: microsoft.storage/storageAccounts/read
+    results_count: 8
+  raw: {}
+- id: evt_005
+  timestamp: '2026-03-10T14:03:00Z'
+  ingested_at: '2026-03-10T14:03:30Z'
+  source: azure
+  event_type: api_call
+  actor: admin-user
+  action: list_virtual_machines
+  target: sub-169efd95
+  severity: warn
+  metadata:
+    ip: 203.0.113.10
+    user_agent: python-requests/2.31.0
+    api_method: microsoft.compute/virtualMachines/read
+    results_count: 3
+  raw: {}
+- id: evt_006
+  timestamp: '2026-03-10T14:04:00Z'
+  ingested_at: '2026-03-10T14:04:30Z'
+  source: azure
+  event_type: api_call
+  actor: admin-user
+  action: list_security_detectors
+  target: sub-169efd95
+  severity: warn
+  metadata:
+    ip: 203.0.113.10
+    user_agent: python-requests/2.31.0
+    api_method: microsoft.security/alerts/read
+    comment: enumerating security monitoring coverage
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+    actor_roles:
+      admin-user:
+      - GlobalAdministrator
+      - SubscriptionOwner
+      ci-bot:
+      - ContainerRegistryPush
+      - ContainerAppsDeploy
+      deploy-svc:
+      - ContributorOnAtomRg
+      - ContributorOnRudiDev
+      tf-automation:
+      - SubscriptionContributor
+  frequency_tables:
+    azure:login:admin-user: 487
+    azure:read_resource:admin-user: 312
+    azure:update_config:admin-user: 89
+    azure:role_assignment:admin-user: 67
+    azure:container_restart:admin-user: 38
+    azure:keyvault_access:admin-user: 19
+    azure:service_principal_created:admin-user: 14
+    azure:policy_update:admin-user: 22
+    azure:network_rule_change:admin-user: 11
+    azure:api_call:admin-user: 12
+    azure:login:admin-user:0:afternoon: 78
+    azure:login:admin-user:1:afternoon: 82
+    azure:login:admin-user:2:afternoon: 75
+    azure:login:admin-user:3:afternoon: 80
+    azure:login:admin-user:4:afternoon: 71
+    azure:login:admin-user:0:evening: 45
+    azure:login:admin-user:1:evening: 48
+    azure:login:admin-user:2:evening: 41
+    azure:login:admin-user:3:evening: 43
+    azure:login:admin-user:4:evening: 37
+    azure:read_resource:admin-user:1:afternoon: 65
+    azure:read_resource:admin-user:3:afternoon: 59
+    azure:update_config:admin-user:2:afternoon: 21
+    azure:update_config:admin-user:4:afternoon: 19
+  relationships:
+    admin-user:acme-corp/tenant:
+      count: 487
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95:
+      count: 312
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 156
+      first_seen: '2025-05-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/rudi-dev:
+      count: 98
+      first_seen: '2025-06-01'
+      last_seen: '2026-03-08'
+    admin-user:sub-169efd95/resourceGroups/opensign-rg:
+      count: 73
+      first_seen: '2025-07-01'
+      last_seen: '2026-03-07'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api:
+      count: 89
+      first_seen: '2025-05-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot:
+      count: 64
+      first_seen: '2025-05-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv:
+      count: 19
+      first_seen: '2025-08-01'
+      last_seen: '2026-02-28'
+    admin-user:acme-corp/service-principals:
+      count: 67
+      first_seen: '2025-06-15'
+      last_seen: '2026-02-14'
+    admin-user:sub-169efd95/resourceGroups/rudi-dev/containerApps/ca-rudi:
+      count: 41
+      first_seen: '2025-06-15'
+      last_seen: '2026-03-08'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - enumeration
+  - recon
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 2
+  min_investigation_quality: 3

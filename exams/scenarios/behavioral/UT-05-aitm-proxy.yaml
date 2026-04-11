@@ -1,0 +1,182 @@
+id: UT-05-aitm-proxy
+failure_mode: KA
+detector: unusual-timing
+category: behavioral
+difficulty: malicious-hard
+trap_description: 'Known actor admin-user is active during normal business hours performing
+  routine operations. Every signal is normal — correct user-agent, correct action
+  types, business hours timing. The single anomaly is an IP change: the session originates
+  from 198.51.100.200 (a VPS/hosting range) instead of the actor''s usual IP 203.0.113.10.
+  The trap is that everything EXCEPT the IP looks benign, creating strong pressure
+  to resolve. An Adversary-in- the-Middle (AiTM) proxy intercepts the post-MFA session
+  token and replays it from a different IP — the actor''s MFA was satisfied, but the
+  session is now attacker-controlled.
+
+  '
+trap_resolved_means: 'If the model resolves this, it dismissed the IP change as a
+  minor anomaly when it is in fact the primary indicator. AiTM attacks are specifically
+  designed to make post-MFA sessions appear legitimate in every dimension except IP
+  origin. A single IP change from a VPS range to a known actor''s usual IP is a high-fidelity
+  signal that cannot be explained by travel (no geolocation evidence) or normal variation
+  (actor has 340 events from the same IP historically).
+
+  '
+finding:
+  id: fnd_shk_104
+  detector: unusual-timing
+  title: 'Unusual timing: admin-user session from unfamiliar IP during business hours'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  metadata:
+    actor: admin-user
+    source: azure
+    event_type: login
+events:
+- id: evt_001
+  timestamp: '2026-03-10T16:30:00Z'
+  ingested_at: '2026-03-10T16:31:00Z'
+  source: azure
+  event_type: login
+  actor: admin-user
+  action: login
+  target: acme-corp/tenant
+  severity: info
+  metadata:
+    ip: 198.51.100.200
+    user_agent: Azure-Portal/1.0
+    mfa_satisfied: 'true'
+    usual_ip: 203.0.113.10
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T16:32:00Z'
+  ingested_at: '2026-03-10T16:33:00Z'
+  source: azure
+  event_type: read_resource
+  actor: admin-user
+  action: read_resource
+  target: sub-169efd95/resourceGroups/atom-rg
+  severity: info
+  metadata:
+    ip: 198.51.100.200
+    user_agent: Azure-Portal/1.0
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-10T16:34:00Z'
+  ingested_at: '2026-03-10T16:35:00Z'
+  source: azure
+  event_type: read_resource
+  actor: admin-user
+  action: read_resource
+  target: sub-169efd95/resourceGroups/rudi-dev
+  severity: info
+  metadata:
+    ip: 198.51.100.200
+    user_agent: Azure-Portal/1.0
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+    actor_roles:
+      admin-user:
+      - GlobalAdministrator
+      - SubscriptionOwner
+      ci-bot:
+      - ContainerRegistryPush
+      - ContainerAppsDeploy
+      deploy-svc:
+      - ContributorOnAtomRg
+      - ContributorOnRudiDev
+      tf-automation:
+      - SubscriptionContributor
+  frequency_tables:
+    azure:login:admin-user: 487
+    azure:read_resource:admin-user: 312
+    azure:update_config:admin-user: 89
+    azure:role_assignment:admin-user: 67
+    azure:container_restart:admin-user: 38
+    azure:keyvault_access:admin-user: 19
+    azure:service_principal_created:admin-user: 14
+    azure:policy_update:admin-user: 22
+    azure:login:admin-user:0:afternoon: 78
+    azure:login:admin-user:1:afternoon: 82
+    azure:login:admin-user:2:afternoon: 75
+    azure:login:admin-user:3:afternoon: 80
+    azure:login:admin-user:4:afternoon: 71
+    azure:login:admin-user:0:evening: 45
+    azure:login:admin-user:1:evening: 48
+    azure:login:admin-user:2:evening: 41
+    azure:login:admin-user:3:evening: 43
+    azure:login:admin-user:4:evening: 37
+    azure:read_resource:admin-user:1:afternoon: 65
+    azure:read_resource:admin-user:3:afternoon: 59
+    azure:read_resource:admin-user:0:afternoon: 57
+    azure:read_resource:admin-user:2:afternoon: 55
+  relationships:
+    admin-user:acme-corp/tenant:
+      count: 487
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95:
+      count: 312
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 156
+      first_seen: '2025-05-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/rudi-dev:
+      count: 98
+      first_seen: '2025-06-01'
+      last_seen: '2026-03-08'
+    admin-user:sub-169efd95/resourceGroups/opensign-rg:
+      count: 73
+      first_seen: '2025-07-01'
+      last_seen: '2026-03-07'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api:
+      count: 89
+      first_seen: '2025-05-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot:
+      count: 64
+      first_seen: '2025-05-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/rudi-dev/containerApps/ca-rudi:
+      count: 41
+      first_seen: '2025-06-15'
+      last_seen: '2026-03-08'
+    admin-user:sub-169efd95/resourceGroups/opensign-rg/containerApps/opensign-server:
+      count: 37
+      first_seen: '2025-07-10'
+      last_seen: '2026-03-07'
+    admin-user:acme-corp/service-principals:
+      count: 67
+      first_seen: '2025-06-15'
+      last_seen: '2026-02-14'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv:
+      count: 19
+      first_seen: '2025-08-01'
+      last_seen: '2026-02-28'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/networkSecurityGroups/atom-nsg:
+      count: 11
+      first_seen: '2025-09-01'
+      last_seen: '2026-01-15'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - IP
+  - different
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 2
+  min_investigation_quality: 4

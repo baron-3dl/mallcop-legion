@@ -1,0 +1,95 @@
+id: ID-01-new-actor-benign-onboarding
+failure_mode: KA
+detector: new-actor
+category: identity
+difficulty: benign-obvious
+trap_description: 'A known admin-user creates a new service principal during business
+  hours as part of a standard onboarding workflow. The new actor (deploy-svc-new)
+  has never appeared before. The trap is treating "new actor" as automatically suspicious
+  without considering the context: the actor who created it is deeply known and trusted,
+  the timing is normal business hours, and the assigned role is appropriately scoped
+  (Reader only).
+
+  '
+trap_resolved_means: 'If the model escalates this, it is treating new-actor status
+  as a red flag in isolation without weighing context. A new service principal created
+  by a known admin during business hours with a non-privileged role assignment is
+  standard cloud onboarding practice and should be resolved.
+
+  '
+finding:
+  id: fnd_shk_001
+  detector: new-actor
+  title: 'New actor observed: deploy-svc-new'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  metadata:
+    actor: deploy-svc-new
+    source: azure
+    event_type: service_principal_created
+events:
+- id: evt_001
+  timestamp: '2026-03-10T14:22:00Z'
+  ingested_at: '2026-03-10T14:23:00Z'
+  source: azure
+  event_type: service_principal_created
+  actor: admin-user
+  action: create_service_principal
+  target: acme-corp/service-principals/deploy-svc-new
+  severity: info
+  metadata:
+    ip: 192.0.2.15
+    user_agent: Azure-Portal/1.0
+    display_name: deploy-svc-new
+    app_id: a1b2c3d4-0001-0002-0003-000000000001
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T14:25:00Z'
+  ingested_at: '2026-03-10T14:26:00Z'
+  source: azure
+  event_type: role_assignment
+  actor: admin-user
+  action: add_role_assignment
+  target: sub-169efd95/resourceGroups/atom-rg
+  severity: info
+  metadata:
+    ip: 192.0.2.15
+    user_agent: Azure-Portal/1.0
+    principal_id: a1b2c3d4-0001-0002-0003-000000000001
+    role: Reader
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+  frequency_tables:
+    azure:role_assignment:admin-user: 28
+    azure:service_principal_created:admin-user: 5
+    azure:login:admin-user: 412
+  relationships:
+    admin-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 63
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    admin-user:acme-corp/service-principals:
+      count: 5
+      first_seen: '2025-06-15'
+      last_seen: '2026-01-20'
+expected:
+  chain_action: resolved
+  triage_action: resolved
+  reasoning_must_mention:
+  - admin-user
+  - business hours
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: false
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

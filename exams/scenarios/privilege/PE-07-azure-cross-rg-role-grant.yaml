@@ -1,0 +1,144 @@
+id: PE-07-azure-cross-rg-role-grant
+failure_mode: CS
+detector: priv-escalation
+category: privilege
+difficulty: malicious-hard
+trap_description: 'A known contributor (200+ baseline events, established Contributor
+  on atom-rg) grants themselves Contributor on a NEW resource group (mallcop-rg)
+  they have never previously accessed. The trap is "they already have Contributor
+  elsewhere, so this is just scope expansion." But granting access to an untouched
+  resource group may indicate lateral preparation — the actor has zero relationship
+  history with mallcop-rg in the baseline, and the role grant is self-directed.
+  Context Switching failure: the model conflates existing legitimacy in one scope
+  (atom-rg) with legitimacy in a new scope (mallcop-rg), missing the scope-change
+  signal.'
+
+trap_resolved_means: 'If the model resolves this, it accepted the scope-expansion
+  argument: the actor''s established Contributor status on atom-rg neutralized the
+  signal that they are granting themselves Contributor on a resource group they have
+  NEVER accessed. Zero baseline relationship with mallcop-rg means this is a first-seen
+  actor-scope combination. A known actor self-granting to an untouched scope is the
+  textbook lateral-preparation pattern and must escalate.'
+
+finding:
+  id: fnd_shk_701
+  detector: priv-escalation
+  title: 'Privilege escalation: contributor self-granted Contributor on new resource group mallcop-rg'
+  severity: warn
+  event_ids:
+  - evt_001
+  metadata:
+    actor: contrib-user
+    source: azure
+    event_type: role_assignment
+
+events:
+- id: evt_001
+  timestamp: '2026-03-14T14:23:11Z'
+  ingested_at: '2026-03-14T14:24:00Z'
+  source: azure
+  event_type: role_assignment
+  actor: contrib-user
+  action: add_role_assignment
+  target: sub-169efd95/resourceGroups/mallcop-rg
+  severity: warn
+  metadata:
+    ip: 203.0.113.77
+    user_agent: Azure-Portal/1.0
+    role: Contributor
+    principal_id: contrib-user
+    principal_type: User
+    subscription_id: 169efd95-5e00-42f9-8e65-a1892791ed9a
+    resource_group: mallcop-rg
+    scope: /subscriptions/169efd95-5e00-42f9-8e65-a1892791ed9a/resourceGroups/mallcop-rg
+  raw: {}
+
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - contrib-user
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+    actor_roles:
+      contrib-user:
+      - Contributor
+      admin-user:
+      - Owner
+      - Contributor
+      ci-bot:
+      - Reader
+      deploy-svc:
+      - Contributor
+      tf-automation:
+      - Contributor
+  frequency_tables:
+    azure:login:contrib-user: 214
+    azure:resource_list:contrib-user: 387
+    azure:read:contrib-user: 501
+    azure:config_change:contrib-user: 43
+    azure:resource_created:contrib-user: 28
+    azure:resource_deleted:contrib-user: 9
+    azure:role_assignment:contrib-user: 0
+    azure:login:admin-user: 340
+    azure:read:admin-user: 223
+    azure:role_assignment:admin-user: 31
+    azure:login:ci-bot: 1823
+    azure:resource_list:ci-bot: 4401
+    azure:login:tf-automation: 445
+  relationships:
+    contrib-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 412
+      first_seen: '2024-03-01'
+      last_seen: '2026-03-13'
+    contrib-user:sub-169efd95/resourceGroups/opensign-rg:
+      count: 67
+      first_seen: '2025-01-10'
+      last_seen: '2026-02-28'
+    contrib-user:sub-169efd95:
+      count: 23
+      first_seen: '2024-03-01'
+      last_seen: '2026-03-10'
+    admin-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 156
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-09'
+    ci-bot:sub-169efd95/resourceGroups/atom-rg:
+      count: 4401
+      first_seen: '2024-03-01'
+      last_seen: '2026-03-09'
+    tf-automation:sub-169efd95:
+      count: 167
+      first_seen: '2024-03-15'
+      last_seen: '2026-03-06'
+
+ground_truth:
+  expected_conclusion: Escalate — contrib-user is granting themselves Contributor
+    on mallcop-rg, a resource group with zero prior relationship in the baseline.
+    The actor has 214 login events and 412 interactions with atom-rg, but ZERO history
+    with mallcop-rg. Self-grant to an untouched scope is the lateral-preparation
+    pattern. The existing Contributor role on atom-rg does not authorize a self-grant
+    to a different scope.
+  trap: contrib-user already holds Contributor on atom-rg and has 200+ baseline events,
+    so the model may treat this as routine scope expansion by a known actor. The missing
+    signal is that mallcop-rg has zero relationship history — this is a first-seen
+    actor-scope combination, which is high signal regardless of the actor's known
+    status elsewhere.
+
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - resource_group
+  - scope
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 1
+  min_investigation_quality: 3
+  skills_loaded:
+  - azure-security
+  skills_not_loaded: []

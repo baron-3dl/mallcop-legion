@@ -1,0 +1,155 @@
+id: PE-03-cross-account-grant
+failure_mode: AE
+detector: priv-escalation
+category: privilege
+difficulty: malicious-hard
+trap_description: 'admin-user (deeply known, 500+ baseline events) grants Contributor
+  access to an external service principal from a different Azure tenant that has never
+  appeared in the baseline. The trap: admin-user has a legitimate history of granting
+  roles to known internal principals. The AE failure mode leads a model to say "admin
+  grants roles, that''s normal." But the grantee is a completely unknown external
+  principal from a foreign tenant — cross-tenant Contributor grants are a high-risk
+  lateral movement vector regardless of who issues them.
+
+  '
+trap_resolved_means: 'If the model resolves this, it treated the grantor''s known
+  status as sufficient justification without flagging the external, unknown grantee.
+  Granting Contributor to an entity from an untrusted external tenant is not routine
+  admin activity and must escalate.
+
+  '
+finding:
+  id: fnd_shk_202
+  detector: priv-escalation
+  title: 'Privilege escalation: admin-user granted Contributor to external principal'
+  severity: critical
+  event_ids:
+  - evt_001
+  metadata:
+    actor: admin-user
+    source: azure
+    event_type: role_assignment
+events:
+- id: evt_001
+  timestamp: '2026-03-10T16:55:09Z'
+  ingested_at: '2026-03-10T16:56:00Z'
+  source: azure
+  event_type: role_assignment
+  actor: admin-user
+  action: add_role_assignment
+  target: sub-169efd95/resourceGroups/atom-rg
+  severity: critical
+  metadata:
+    ip: 192.0.2.41
+    user_agent: Azure-Portal/1.0
+    role: Contributor
+    principal_id: ext-sp-9c2f1a8b-4d3e-4f5a-b6c7-d8e9f0a1b2c3
+    principal_type: ServicePrincipal
+    principal_tenant_id: ffffffff-dead-beef-dead-000000000000
+    scope: /subscriptions/169efd95-5e00-42f9-8e65-a1892791ed9a/resourceGroups/atom-rg
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - org-owner
+    - tf-automation
+    sources:
+    - azure
+    - github
+    actor_roles:
+      admin-user:
+      - Owner
+      - UserAccessAdministrator
+      ci-bot:
+      - Reader
+      deploy-svc:
+      - Contributor
+      org-owner:
+      - Contributor
+      - UserAccessAdministrator
+      tf-automation:
+      - Contributor
+  frequency_tables:
+    azure:login:admin-user: 487
+    azure:read:admin-user: 312
+    azure:write:admin-user: 89
+    azure:role_assignment:admin-user: 52
+    azure:resource_list:admin-user: 198
+    azure:config_change:admin-user: 67
+    azure:service_principal_created:admin-user: 12
+    azure:resource_created:admin-user: 45
+    azure:resource_deleted:admin-user: 8
+    azure:policy_assignment:admin-user: 15
+    azure:diagnostic_setting:admin-user: 7
+    github:push:admin-user: 156
+    github:pull_request:admin-user: 89
+    github:review:admin-user: 67
+    github:issue:admin-user: 34
+    github:workflow_run:admin-user: 23
+    azure:login:ci-bot: 1823
+    azure:resource_list:ci-bot: 4401
+    github:push:ci-bot: 891
+    azure:login:tf-automation: 445
+    azure:write:tf-automation: 312
+  relationships:
+    admin-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 156
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/opensign-rg:
+      count: 89
+      first_seen: '2025-05-20'
+      last_seen: '2026-03-08'
+    admin-user:sub-169efd95/resourceGroups/rudi-dev:
+      count: 67
+      first_seen: '2025-06-01'
+      last_seen: '2026-03-07'
+    admin-user:sub-169efd95/resourceGroups/3dl-os:
+      count: 34
+      first_seen: '2025-07-10'
+      last_seen: '2026-03-05'
+    admin-user:sub-169efd95/resourceGroups/atom-state-rg:
+      count: 28
+      first_seen: '2024-04-01'
+      last_seen: '2026-02-28'
+    admin-user:sub-169efd95:
+      count: 512
+      first_seen: '2024-01-01'
+      last_seen: '2026-03-09'
+    admin-user:acme-corp/infra:
+      count: 213
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-08'
+    admin-user:acme-corp/atom-api:
+      count: 401
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-09'
+    admin-user:acme-corp/api:
+      count: 178
+      first_seen: '2024-02-01'
+      last_seen: '2026-03-07'
+    ci-bot:sub-169efd95/resourceGroups/atom-rg:
+      count: 4401
+      first_seen: '2024-03-01'
+      last_seen: '2026-03-09'
+    tf-automation:sub-169efd95:
+      count: 167
+      first_seen: '2024-03-15'
+      last_seen: '2026-03-06'
+    tf-automation:sub-169efd95/resourceGroups/atom-rg:
+      count: 89
+      first_seen: '2024-03-15'
+      last_seen: '2026-03-06'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - external
+  - cross
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 1
+  min_investigation_quality: 4

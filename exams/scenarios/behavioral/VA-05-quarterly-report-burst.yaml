@@ -1,0 +1,141 @@
+id: VA-05-quarterly-report-burst
+failure_mode: CS
+detector: volume-anomaly
+category: behavioral
+difficulty: benign-hard
+trap_description: 'report-svc generates 800 events in 6 hours on March 31 — a 400x
+  spike over its daily baseline of ~2 events/day. The target resources are financial
+  databases and the actor is a service account, both factors that push toward escalation.
+  The benign evidence requires reading: (1) every event carries job_id: "q1-2026-financial-report"
+  and schedule: "quarterly:Q-end:00:00", (2) the event type is exclusively database_read
+  (no writes, no deletes), (3) the baseline shows prior quarterly spikes on 2025-12-31
+  and 2025-09-30 with identical volume_ratio. A naive model sees a 400x spike touching
+  financial data and escalates without checking the periodicity or the job metadata.
+
+  '
+trap_resolved_means: 'If the model escalates this, it failed to reason about quarterly
+  periodicity. The baseline explicitly shows prior Q-end bursts with identical volume
+  ratios. A read-only service account generating a burst on the last day of the quarter,
+  with an explicit quarterly schedule tag and matching historical pattern, is a false
+  positive. The SOC should resolve and note the pattern.
+
+  '
+finding:
+  id: fnd_shk_303
+  detector: volume-anomaly
+  title: 'Volume anomaly: report-svc — 800 events in 6 hours (baseline: 2/day)'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  - evt_004
+  metadata:
+    actor: report-svc
+    source: azure
+    event_type: database_read
+    volume_ratio: 400.0
+    window_hours: 6
+events:
+- id: evt_001
+  timestamp: '2026-03-31T00:05:00Z'
+  ingested_at: '2026-03-31T00:06:00Z'
+  source: azure
+  event_type: database_read
+  actor: report-svc
+  action: query_database
+  target: sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod
+  severity: info
+  metadata:
+    ip: 192.0.2.100
+    user_agent: report-engine/3.2
+    operation: SELECT
+    tables: revenue,invoices
+    job_id: q1-2026-financial-report
+    schedule: quarterly:Q-end:00:00
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-31T01:20:00Z'
+  ingested_at: '2026-03-31T01:21:00Z'
+  source: azure
+  event_type: database_read
+  actor: report-svc
+  action: query_database
+  target: sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod
+  severity: info
+  metadata:
+    ip: 192.0.2.100
+    user_agent: report-engine/3.2
+    operation: SELECT
+    tables: expenses,payroll
+    job_id: q1-2026-financial-report
+    schedule: quarterly:Q-end:00:00
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-31T03:45:00Z'
+  ingested_at: '2026-03-31T03:46:00Z'
+  source: azure
+  event_type: storage_access
+  actor: report-svc
+  action: read_blob
+  target: sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/financial-archive
+  severity: info
+  metadata:
+    ip: 192.0.2.100
+    user_agent: report-engine/3.2
+    operation: GET
+    job_id: q1-2026-financial-report
+    schedule: quarterly:Q-end:00:00
+  raw: {}
+- id: evt_004
+  timestamp: '2026-03-31T05:58:00Z'
+  ingested_at: '2026-03-31T05:59:00Z'
+  source: azure
+  event_type: storage_access
+  actor: report-svc
+  action: write_blob
+  target: sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/reports-output
+  severity: info
+  metadata:
+    ip: 192.0.2.100
+    user_agent: report-engine/3.2
+    operation: PUT
+    job_id: q1-2026-financial-report
+    filename: q1-2026-consolidated-report.pdf
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - report-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+  frequency_tables:
+    azure:database_read:report-svc: 4
+    azure:storage_access:report-svc: 4
+    azure:login:report-svc: 8
+    quarterly_burst:Q4-2025:report-svc: 792
+    quarterly_burst:Q3-2025:report-svc: 768
+  relationships:
+    report-svc:sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod:
+      count: 4
+      first_seen: '2025-06-30'
+      last_seen: '2025-12-31'
+    report-svc:sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01:
+      count: 8
+      first_seen: '2025-06-30'
+      last_seen: '2025-12-31'
+expected:
+  chain_action: resolved
+  triage_action: resolved
+  reasoning_must_mention:
+  - quarterly
+  - scheduled
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: false
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

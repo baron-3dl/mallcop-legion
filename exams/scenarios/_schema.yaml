@@ -1,0 +1,19 @@
+# Scenario YAML Schema Reference
+# This file documents the required format — it is NOT loaded by code.
+
+# Required top-level fields:
+#   id: string — unique scenario identifier (e.g., KA-03-unusual-timing)
+#   failure_mode: string — which reasoning trap this probes (KA, AE, CS, etc.)
+#   detector: string — which detector produced the finding
+#   category: string — threat category (identity, behavioral, privilege, etc.)
+#   difficulty: string — benign-obvious | benign-hard | malicious-hard | malicious-obvious | ambiguous
+#   finding: mapping — the finding that enters the pipeline
+#   events: sequence — events the tools will return
+#   baseline: mapping — baseline state
+#   expected: mapping — expected outcomes
+
+# Optional:
+#   trap_description: string — human-readable description of the trap
+#   trap_resolved_means: string — what it means if the model resolves incorrectly
+#   connector_tools: sequence — canned connector tool definitions
+#   tags: sequence — additional tags for filtering

@@ -1,0 +1,156 @@
+id: AF-02-distributed-spray
+failure_mode: SA
+detector: auth-failure-burst
+category: auth
+difficulty: malicious-hard
+trap_description: 'Five different accounts each receive exactly one failed login attempt
+  from five different residential proxy IPs, all within a 10-minute window. No single
+  account exceeds the per-account failure threshold that would trigger an obvious
+  alert. This is the Midnight Blizzard low-and-slow password spray pattern (§12.3):
+  distribute attempts across many accounts and many IPs to stay below per-entity rate
+  limits. The trap (SA — signal attenuation) is treating each event as isolated and
+  low-severity, missing the coordinated multi-account pattern.
+
+  '
+trap_resolved_means: 'If the model resolves this, it evaluated each failure in isolation
+  and concluded "one failure per account is not significant." The cross-account timing
+  correlation and the use of distinct residential proxy IPs across all five attempts
+  is the signature of an orchestrated credential spray campaign and must escalate.
+
+  '
+finding:
+  id: fnd_shk_211
+  detector: auth-failure-burst
+  title: 'Auth failure burst: distributed spray across 5 accounts from 5 IPs'
+  severity: critical
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  - evt_004
+  - evt_005
+  metadata:
+    actor: multiple
+    source: azure
+    event_type: login_failure
+    pattern: distributed-spray
+    accounts_affected: 5
+    distinct_ips: 5
+events:
+- id: evt_001
+  timestamp: '2026-03-10T23:01:04Z'
+  ingested_at: '2026-03-10T23:02:00Z'
+  source: azure
+  event_type: login_failure
+  actor: admin-user
+  action: login_attempt
+  target: acme-corp/auth
+  severity: warn
+  metadata:
+    ip: 198.51.100.11
+    user_agent: python-requests/2.31.0
+    reason: InvalidPassword
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T23:03:17Z'
+  ingested_at: '2026-03-10T23:04:00Z'
+  source: azure
+  event_type: login_failure
+  actor: ci-bot
+  action: login_attempt
+  target: acme-corp/auth
+  severity: warn
+  metadata:
+    ip: 198.51.100.22
+    user_agent: python-requests/2.31.0
+    reason: InvalidPassword
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-10T23:05:44Z'
+  ingested_at: '2026-03-10T23:06:00Z'
+  source: azure
+  event_type: login_failure
+  actor: deploy-svc
+  action: login_attempt
+  target: acme-corp/auth
+  severity: warn
+  metadata:
+    ip: 198.51.100.33
+    user_agent: python-requests/2.31.0
+    reason: InvalidPassword
+  raw: {}
+- id: evt_004
+  timestamp: '2026-03-10T23:07:29Z'
+  ingested_at: '2026-03-10T23:08:00Z'
+  source: azure
+  event_type: login_failure
+  actor: org-owner
+  action: login_attempt
+  target: acme-corp/auth
+  severity: warn
+  metadata:
+    ip: 198.51.100.44
+    user_agent: python-requests/2.31.0
+    reason: InvalidPassword
+  raw: {}
+- id: evt_005
+  timestamp: '2026-03-10T23:10:02Z'
+  ingested_at: '2026-03-10T23:11:00Z'
+  source: azure
+  event_type: login_failure
+  actor: tf-automation
+  action: login_attempt
+  target: acme-corp/auth
+  severity: warn
+  metadata:
+    ip: 198.51.100.55
+    user_agent: python-requests/2.31.0
+    reason: InvalidPassword
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - org-owner
+    - tf-automation
+    sources:
+    - azure
+    - github
+  frequency_tables:
+    azure:login:admin-user: 412
+    azure:login_failure:admin-user: 6
+    azure:login:ci-bot: 1823
+    azure:login_failure:ci-bot: 2
+    azure:login:deploy-svc: 944
+    azure:login_failure:deploy-svc: 1
+    azure:login:org-owner: 521
+    azure:login_failure:org-owner: 4
+    azure:login:tf-automation: 307
+    azure:login_failure:tf-automation: 0
+  relationships:
+    admin-user:acme-corp/auth:
+      count: 412
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-09'
+ground_truth:
+  expected_conclusion: Escalate — five distinct accounts each receive one failure
+    from five distinct IPs (198.51.100.11–.55) within a 9-minute window, all using
+    the same python-requests user-agent; no single account exceeds its historical
+    failure rate, but the coordinated cross-account timing and rotating residential
+    proxy IPs are the signature of a low-and-slow credential spray.
+  trap: Each individual event (one failure per account) looks low-severity when evaluated
+    in isolation, and each account's failure count stays below historical norms —
+    the model must reason across all five events as a coordinated pattern rather than
+    five independent minor incidents.
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - distributed
+  - spray
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 1
+  min_investigation_quality: 3
