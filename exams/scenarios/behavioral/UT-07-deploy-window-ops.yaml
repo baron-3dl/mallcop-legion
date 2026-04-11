@@ -1,0 +1,132 @@
+id: UT-07-deploy-window-ops
+failure_mode: CS
+detector: unusual-timing
+category: behavioral
+difficulty: benign-hard
+trap_description: 'ops-engineer is active at 03:00 UTC performing infrastructure changes
+  — resource deletions and role modifications. The combination of off-hours timing,
+  a human operator (not a service account), and destructive operations (deletes) is
+  designed to look like a rogue insider or compromised account. The benign evidence:
+  event metadata contains maintenance_window: "true", window_id: "mw-Q1-2026-infrastructure-cleanup",
+  and ops-engineer has no out-of-hours baseline activity normally. However, the window
+  itself is documented in the baseline via a scheduled_windows entry, and all operations
+  are pre-approved cleanup tasks removing deprecated resources. The trap is that destructive
+  actions + off-hours + human actor looks alarming even with the maintenance window
+  tag visible in the data.
+
+  '
+trap_resolved_means: 'If the model escalates this, it weighted the destructive operations
+  and human actor over the explicit maintenance window evidence. The maintenance window
+  metadata is the resolution: ops-engineer is executing a pre-scheduled cleanup within
+  an approved window. Escalating documented maintenance operations would produce alert
+  fatigue around every quarterly housekeeping task.
+
+  '
+finding:
+  id: fnd_shk_304
+  detector: unusual-timing
+  title: 'Unusual timing: ops-engineer active at 03:00 UTC performing resource deletions'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  metadata:
+    actor: ops-engineer
+    source: azure
+    event_type: resource_deleted
+events:
+- id: evt_001
+  timestamp: '2026-03-13T03:05:00Z'
+  ingested_at: '2026-03-13T03:06:00Z'
+  source: azure
+  event_type: resource_deleted
+  actor: ops-engineer
+  action: delete_resource
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api-v1-deprecated
+  severity: warn
+  metadata:
+    ip: 192.0.2.22
+    user_agent: Azure-CLI/2.55.0
+    maintenance_window: 'true'
+    window_id: mw-Q1-2026-infrastructure-cleanup
+    ticket: OPS-2026-0312
+    reason: deprecated_resource
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-13T03:18:00Z'
+  ingested_at: '2026-03-13T03:19:00Z'
+  source: azure
+  event_type: resource_deleted
+  actor: ops-engineer
+  action: delete_resource
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot-v0-deprecated
+  severity: warn
+  metadata:
+    ip: 192.0.2.22
+    user_agent: Azure-CLI/2.55.0
+    maintenance_window: 'true'
+    window_id: mw-Q1-2026-infrastructure-cleanup
+    ticket: OPS-2026-0312
+    reason: deprecated_resource
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-13T03:42:00Z'
+  ingested_at: '2026-03-13T03:43:00Z'
+  source: azure
+  event_type: role_assignment
+  actor: ops-engineer
+  action: remove_role_assignment
+  target: sub-169efd95/resourceGroups/atom-rg
+  severity: info
+  metadata:
+    ip: 192.0.2.22
+    user_agent: Azure-CLI/2.55.0
+    maintenance_window: 'true'
+    window_id: mw-Q1-2026-infrastructure-cleanup
+    principal_id: svc-atom-legacy
+    role: Contributor
+    reason: service_decommissioned
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - ops-engineer
+    - tf-automation
+    sources:
+    - azure
+    - github
+    actor_roles:
+      ops-engineer:
+      - Contributor
+      - UserAccessAdministrator
+    scheduled_windows:
+      mw-Q1-2026-infrastructure-cleanup:
+        start: '2026-03-13T02:00:00Z'
+        end: '2026-03-13T06:00:00Z'
+        approved_by: admin-user
+  frequency_tables:
+    azure:resource_deleted:ops-engineer: 23
+    azure:role_assignment:ops-engineer: 41
+    azure:login:ops-engineer: 389
+    time:03:ops-engineer: 0
+    time:09:ops-engineer: 78
+    time:10:ops-engineer: 94
+  relationships:
+    ops-engineer:sub-169efd95/resourceGroups/atom-rg:
+      count: 467
+      first_seen: '2024-02-01'
+      last_seen: '2026-03-12'
+expected:
+  chain_action: resolved
+  triage_action: resolved
+  reasoning_must_mention:
+  - maintenance
+  - window
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: false
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

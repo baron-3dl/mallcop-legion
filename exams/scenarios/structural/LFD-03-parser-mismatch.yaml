@@ -1,0 +1,102 @@
+id: LFD-03-parser-mismatch
+failure_mode: CS
+detector: log-format-drift
+category: structural
+difficulty: benign-hard
+trap_description: 'A container image update to opensign-client changed JSON log key
+  names (e.g., "msg" → "message", "ts" → "timestamp"). 25% of log lines are unmatched
+  by the current parser. There are no sequence gaps, no suspicious timing, no unknown
+  actors involved. The deployment was performed by the well-known ci-bot during normal
+  business hours. This is a pure parser mismatch from a renamed-field format change
+  — benign cause, but still a structural finding. Per A1 policy, log-format-drift
+  is NOT triage-resolvable; investigation must escalate because parser updates require
+  engineering action.
+
+  '
+trap_resolved_means: 'If triage resolves this, it violated the policy that structural/behavioral
+  detectors must always escalate from triage. If investigate resolves it without escalating,
+  it overstepped — a parser template update is not something the investigate actor
+  can perform. Both dispositions are wrong.
+
+  '
+finding:
+  id: fnd_shk_222
+  detector: log-format-drift
+  title: 'Log format drift: opensign-client — 25% unmatched after key rename'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  metadata:
+    actor: opensign-client
+    source: azure
+    event_type: log_format_drift
+    unmatched_percent: 25
+    container_app: opensign-client
+events:
+- id: evt_001
+  timestamp: '2026-03-10T10:15:00Z'
+  ingested_at: '2026-03-10T10:16:00Z'
+  source: azure
+  event_type: container_image_update
+  actor: ci-bot
+  action: update_container_image
+  target: opensign-rg/opensign-client
+  severity: info
+  metadata:
+    ip: 192.0.2.77
+    user_agent: GitHub-Actions-Runner/2.312.0
+    previous_image: acme-corp/opensign-client:2.1.0
+    new_image: acme-corp/opensign-client:2.2.0
+    deployment_id: deploy-xyz789
+    changelog_note: 'log format: renamed msg→message, ts→timestamp'
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T10:20:44Z'
+  ingested_at: '2026-03-10T10:21:00Z'
+  source: azure
+  event_type: log_format_drift
+  actor: opensign-client
+  action: emit_logs
+  target: opensign-rg/opensign-client/logs
+  severity: warn
+  metadata:
+    ip: 192.0.2.11
+    user_agent: log-agent/1.0
+    unmatched_percent: 25
+    total_lines_sampled: 800
+    unmatched_lines: 200
+    parser_template: opensign-client-v1
+    image_version: 2.2.0
+    drift_started_at: '2026-03-10T10:18:02Z'
+    sample_unmatched: '{"message":"startup complete","timestamp":"2026-03-10T10:18:03Z","level":"INFO"}'
+    sample_expected: '{"msg":"startup complete","ts":"2026-03-10T10:18:03Z","level":"INFO"}'
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - opensign-client
+    sources:
+    - azure
+    - github
+  frequency_tables:
+    azure:log_format_drift:opensign-client: 0
+    azure:container_image_update:ci-bot: 89
+  relationships:
+    ci-bot:opensign-rg/opensign-client:
+      count: 89
+      first_seen: '2024-06-01'
+      last_seen: '2026-03-09'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - parser
+  - format
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

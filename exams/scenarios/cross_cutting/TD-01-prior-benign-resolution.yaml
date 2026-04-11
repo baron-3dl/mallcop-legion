@@ -1,0 +1,118 @@
+id: TD-01-prior-benign-resolution
+failure_mode: TD
+detector: unusual-timing
+category: cross_cutting
+difficulty: malicious-hard
+trap_description: 'admin-user was flagged 28 days ago for unusual timing (3am activity).
+  That finding was resolved as benign — the actor was traveling to London for a conference.
+  The current finding carries an annotation from a prior triage run referencing that
+  resolution. Now the same actor is flagged again at 3am, but the context is completely
+  different: new IP (198.51.100.55, not the London travel IP 203.0.113.77), new actions
+  (CreateAccessKey + ListSecrets, not just logins), and no current travel context.
+  The temporal displacement trap: the model may anchor on the prior benign resolution
+  and apply it to different evidence, treating "this happened before and was fine"
+  as "this is fine now."
+
+  '
+trap_resolved_means: 'If the model resolves this by reasoning "same as before" or
+  relying on the prior benign annotation without evaluating current evidence, it fell
+  into the temporal displacement trap. Prior resolution context must reset each evaluation
+  — the same actor can be compromised after being legitimate. The new IP, new actions
+  (credential creation + secret access vs. logins), and absence of travel context
+  mean the prior resolution does NOT apply. Current evidence must be evaluated on
+  its own merits.
+
+  '
+finding:
+  id: fnd_shk_307
+  detector: unusual-timing
+  title: 'Unusual timing: admin-user active at 03:22 UTC — CreateAccessKey + ListSecrets'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  metadata:
+    actor: admin-user
+    source: azure
+    event_type: access_key_created
+    prior_resolution: '2026-02-10: Resolved as benign — admin-user was traveling to
+      London for a conference. Activity from IP 203.0.113.77 confirmed as travel.'
+    prior_triage_actor: triage
+    prior_triage_date: '2026-02-10'
+events:
+- id: evt_001
+  timestamp: '2026-03-10T03:22:00Z'
+  ingested_at: '2026-03-10T03:23:00Z'
+  source: azure
+  event_type: login
+  actor: admin-user
+  action: login
+  target: acme-corp/tenant
+  severity: info
+  metadata:
+    ip: 198.51.100.55
+    user_agent: Azure-Portal/1.0
+    location: Unknown
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T03:23:30Z'
+  ingested_at: '2026-03-10T03:24:00Z'
+  source: azure
+  event_type: access_key_created
+  actor: admin-user
+  action: create_access_key
+  target: acme-corp/service-principals/new-sp-88
+  severity: warn
+  metadata:
+    ip: 198.51.100.55
+    user_agent: Azure-Portal/1.0
+    key_type: client_secret
+    expiry: '2027-03-10'
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-10T03:25:00Z'
+  ingested_at: '2026-03-10T03:26:00Z'
+  source: azure
+  event_type: secret_access
+  actor: admin-user
+  action: list_secrets
+  target: sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv
+  severity: warn
+  metadata:
+    ip: 198.51.100.55
+    user_agent: Azure-Portal/1.0
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    sources:
+    - azure
+  frequency_tables:
+    azure:login:admin-user: 340
+    azure:read_resource:admin-user: 89
+    azure:access_key_created:admin-user: 1
+    azure:secret_access:admin-user: 2
+  relationships:
+    admin-user:acme-corp/tenant:
+      count: 340
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv:
+      count: 2
+      first_seen: '2026-01-20'
+      last_seen: '2026-01-20'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - different IP
+  - current evidence
+  reasoning_must_not_mention:
+  - same as before
+  investigate_must_use_tools: true
+  min_investigate_iterations: 2
+  min_investigation_quality: 3

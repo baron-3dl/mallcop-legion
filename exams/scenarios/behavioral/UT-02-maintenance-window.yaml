@@ -1,0 +1,125 @@
+id: UT-02-maintenance-window
+failure_mode: CS
+detector: unusual-timing
+category: behavioral
+difficulty: benign-obvious
+trap_description: 'Service account deploy-svc is active at 02:00 UTC performing restarts
+  and config updates. Out-of-hours activity on a service account is a classic unusual-timing
+  signal. The trap is that the model may focus on the off-hours timestamp without
+  reading the metadata that explicitly marks this as a scheduled maintenance window.
+  The baseline also shows that deploy-svc regularly operates at 02:00 UTC — time-keyed
+  frequency entries confirm this is a recurring pattern.
+
+  '
+trap_resolved_means: 'If the model escalates this, it is ignoring positive contextual
+  evidence: the maintenance_window flag in metadata and the established baseline of
+  02:00 activity. A model that treats off-hours timing as automatically suspicious
+  regardless of supporting context will produce unacceptable false positive rates
+  in environments with scheduled maintenance windows.
+
+  '
+finding:
+  id: fnd_shk_101
+  detector: unusual-timing
+  title: 'Unusual timing: deploy-svc active at 02:00 UTC'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  metadata:
+    actor: deploy-svc
+    source: azure
+    event_type: container_restart
+events:
+- id: evt_001
+  timestamp: '2026-03-10T02:00:00Z'
+  ingested_at: '2026-03-10T02:01:00Z'
+  source: azure
+  event_type: container_restart
+  actor: deploy-svc
+  action: restart_container
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api
+  severity: info
+  metadata:
+    ip: 192.0.2.50
+    user_agent: Azure-CLI/2.55.0
+    maintenance_window: 'true'
+    scheduled: 'true'
+    window_id: mw-2026-03-10-0200
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T02:03:00Z'
+  ingested_at: '2026-03-10T02:04:00Z'
+  source: azure
+  event_type: config_update
+  actor: deploy-svc
+  action: update_config
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api
+  severity: info
+  metadata:
+    ip: 192.0.2.50
+    user_agent: Azure-CLI/2.55.0
+    maintenance_window: 'true'
+    scheduled: 'true'
+    window_id: mw-2026-03-10-0200
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-10T02:08:00Z'
+  ingested_at: '2026-03-10T02:09:00Z'
+  source: azure
+  event_type: container_restart
+  actor: deploy-svc
+  action: restart_container
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot
+  severity: info
+  metadata:
+    ip: 192.0.2.50
+    user_agent: Azure-CLI/2.55.0
+    maintenance_window: 'true'
+    scheduled: 'true'
+    window_id: mw-2026-03-10-0200
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+  frequency_tables:
+    azure:container_restart:deploy-svc: 156
+    azure:config_update:deploy-svc: 48
+    azure:login:admin-user: 340
+    time:02:deploy-svc: 24
+  relationships:
+    deploy-svc:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api:
+      count: 89
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-03'
+    deploy-svc:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot:
+      count: 72
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-03'
+ground_truth:
+  expected_conclusion: 'Triage escalates (off-hours service account activity) but
+    chain resolves after investigation confirms maintenance window — all three events
+    carry maintenance_window: ''true'' and scheduled: ''true'' metadata with matching
+    window_id mw-2026-03-10-0200, and the baseline shows time:02:deploy-svc count
+    of 24 confirming this is a recurring 2am pattern.'
+  trap: The 02:00 UTC timestamp on a service account looks suspicious; the model may
+    escalate without reading the maintenance_window and scheduled flags in the event
+    metadata.
+expected:
+  chain_action: resolved
+  triage_action: escalated
+  reasoning_must_mention:
+  - maintenance
+  - scheduled
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

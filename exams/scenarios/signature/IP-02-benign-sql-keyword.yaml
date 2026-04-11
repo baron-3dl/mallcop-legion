@@ -1,0 +1,81 @@
+id: IP-02-benign-sql-keyword
+failure_mode: CS
+detector: injection-probe
+category: signature
+difficulty: benign-hard
+trap_description: 'An application log entry for a known monitoring service (deploy-svc)
+  contains SQL keywords: "SELECT count FROM metrics_table WHERE ts > NOW() - INTERVAL
+  5m". This is a legitimate internal metrics query logged at the application layer,
+  not a user-controlled input. The injection-probe detector fired on the keyword match.
+  The CS (context suppression) trap: a model might see "SQL keywords in log" and escalate
+  without investigating whether the source is user-controlled input versus internal
+  application code.
+
+  '
+trap_resolved_means: 'If the model escalates this without investigating, it pattern-matched
+  on SQL keywords without considering context. An internal monitoring query appearing
+  in application logs is expected application behavior. The investigate actor should
+  recognize this as a legitimate monitoring query and resolve.
+
+  '
+finding:
+  id: fnd_shk_231
+  detector: injection-probe
+  title: 'Injection probe: SQL keywords in application log'
+  severity: warn
+  event_ids:
+  - evt_001
+  metadata:
+    actor: deploy-svc
+    source: azure
+    event_type: app_log
+    injection_type: sqli
+    payload_location: log_body
+events:
+- id: evt_001
+  timestamp: '2026-03-10T11:30:00Z'
+  ingested_at: '2026-03-10T11:31:00Z'
+  source: azure
+  event_type: app_log
+  actor: deploy-svc
+  action: emit_log
+  target: opensign-rg/opensign-server/logs
+  severity: info
+  metadata:
+    ip: 192.0.2.10
+    user_agent: log-agent/1.0
+    log_level: DEBUG
+    log_message: 'Executing metrics query: SELECT count FROM metrics_table WHERE ts
+      > NOW() - INTERVAL 5m'
+    log_source: monitoring/metrics_collector.py
+    line_number: 142
+    component: metrics-collector
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - opensign-server
+    sources:
+    - azure
+    - github
+  frequency_tables:
+    azure:app_log:deploy-svc: 44210
+    azure:injection-probe:deploy-svc: 0
+  relationships:
+    deploy-svc:opensign-rg/opensign-server/logs:
+      count: 44210
+      first_seen: '2024-06-01'
+      last_seen: '2026-03-09'
+expected:
+  chain_action: resolved
+  triage_action: escalated
+  reasoning_must_mention:
+  - application
+  - legitimate
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

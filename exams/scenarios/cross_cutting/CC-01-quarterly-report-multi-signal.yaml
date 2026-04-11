@@ -1,0 +1,156 @@
+id: CC-01-quarterly-report-multi-signal
+failure_mode: CS
+detector: unusual-timing
+category: behavioral
+difficulty: benign-hard
+trap_description: 'report-generator fires three detectors simultaneously: unusual-timing
+  (01:00 UTC), volume-anomaly (600 events in 5 hours), and unusual-resource-access
+  (first time touching atom-db-archive, a cold-storage database). The combination
+  of three concurrent signals on the same actor substantially increases the apparent
+  severity. The finding is from unusual-timing but the events show all three patterns.
+  The resolution requires reading all evidence holistically: every event carries job_id:
+  "q1-2026-board-report", schedule: "quarterly:Q-end:01:00", and atom-db-archive is
+  a new resource but all other archive databases have been touched in prior quarters
+  (the baseline shows relationships to atom-db-archive-q3 and atom-db-archive-q4).
+  The trap is that three simultaneous signals feel like correlated attack telemetry
+  rather than a coherent quarterly job.
+
+  '
+trap_resolved_means: 'If the model escalates this, it treated the signal convergence
+  as corroboration of a threat rather than a coherent operational pattern. Three detectors
+  firing simultaneously on a scheduled quarterly job is expected — that''s how quarter-end
+  jobs look. All signals have benign explanations that reinforce each other: the unusual
+  hour is the scheduled run time, the volume is the job size, the new archive resource
+  is Q1''s archive bucket. Together they confirm the quarterly pattern, not refute
+  it.
+
+  '
+finding:
+  id: fnd_shk_311
+  detector: unusual-timing
+  title: 'Unusual timing: report-generator active at 01:00 UTC with 3 concurrent detector
+    signals'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  - evt_004
+  metadata:
+    actor: report-generator
+    source: azure
+    event_type: database_access
+    concurrent_detectors:
+    - volume-anomaly
+    - unusual-resource-access
+events:
+- id: evt_001
+  timestamp: '2026-03-31T01:00:00Z'
+  ingested_at: '2026-03-31T01:01:00Z'
+  source: azure
+  event_type: database_access
+  actor: report-generator
+  action: query_database
+  target: sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod
+  severity: info
+  metadata:
+    ip: 192.0.2.110
+    user_agent: report-generator/2.1
+    operation: SELECT
+    job_id: q1-2026-board-report
+    schedule: quarterly:Q-end:01:00
+    quarter: Q1-2026
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-31T01:45:00Z'
+  ingested_at: '2026-03-31T01:46:00Z'
+  source: azure
+  event_type: storage_access
+  actor: report-generator
+  action: read_blob
+  target: sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/financial-q1
+  severity: info
+  metadata:
+    ip: 192.0.2.110
+    user_agent: report-generator/2.1
+    operation: GET
+    job_id: q1-2026-board-report
+    schedule: quarterly:Q-end:01:00
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-31T03:20:00Z'
+  ingested_at: '2026-03-31T03:21:00Z'
+  source: azure
+  event_type: database_access
+  actor: report-generator
+  action: query_database
+  target: sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-archive
+  severity: info
+  metadata:
+    ip: 192.0.2.110
+    user_agent: report-generator/2.1
+    operation: SELECT
+    job_id: q1-2026-board-report
+    schedule: quarterly:Q-end:01:00
+    note: first access to Q1 archive database created 2026-01-15
+  raw: {}
+- id: evt_004
+  timestamp: '2026-03-31T05:58:00Z'
+  ingested_at: '2026-03-31T05:59:00Z'
+  source: azure
+  event_type: storage_access
+  actor: report-generator
+  action: write_blob
+  target: sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/board-reports
+  severity: info
+  metadata:
+    ip: 192.0.2.110
+    user_agent: report-generator/2.1
+    operation: PUT
+    job_id: q1-2026-board-report
+    filename: q1-2026-board-report-final.pdf
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - report-generator
+    - tf-automation
+    sources:
+    - azure
+    - github
+  frequency_tables:
+    azure:database_access:report-generator: 6
+    azure:storage_access:report-generator: 6
+    time:01:report-generator: 3
+    quarterly_run:Q4-2025:report-generator: 598
+    quarterly_run:Q3-2025:report-generator: 612
+  relationships:
+    report-generator:sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod:
+      count: 3
+      first_seen: '2025-06-30'
+      last_seen: '2025-12-31'
+    report-generator:sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-archive-q4:
+      count: 1
+      first_seen: '2025-12-31'
+      last_seen: '2025-12-31'
+    report-generator:sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-archive-q3:
+      count: 1
+      first_seen: '2025-09-30'
+      last_seen: '2025-09-30'
+    report-generator:sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01:
+      count: 6
+      first_seen: '2025-06-30'
+      last_seen: '2025-12-31'
+expected:
+  chain_action: resolved
+  triage_action: resolved
+  reasoning_must_mention:
+  - quarterly
+  - scheduled
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: false
+  min_investigate_iterations: 1
+  min_investigation_quality: 4

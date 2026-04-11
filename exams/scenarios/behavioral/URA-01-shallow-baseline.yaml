@@ -1,0 +1,78 @@
+id: URA-01-shallow-baseline
+failure_mode: SB
+detector: unusual-resource-access
+category: behavioral
+difficulty: malicious-hard
+trap_description: 'Actor "new-dev-user" touches a production database resource for
+  the first time. The actor appears in the baseline''s known_entities list — they
+  exist as a known actor. The trap is that "known" does not mean "well-characterized":
+  the baseline has only 3 events for this actor, covering a single source and a small
+  number of relationships. Three events is not enough history to establish normal
+  behavior or trust. A model that conflates "actor is in baseline" with "actor is
+  well-understood" will fail this scenario.
+
+  '
+trap_resolved_means: 'If the model resolves this, it treated the actor''s presence
+  in known_entities as sufficient to explain the resource access. Three events provides
+  no meaningful behavioral characterization — we cannot say what is "normal" for this
+  actor. The access to a production database by an actor with thin history warrants
+  escalation regardless of known-entity status.
+
+  '
+finding:
+  id: fnd_shk_110
+  detector: unusual-resource-access
+  title: 'Unusual resource access: new-dev-user accessed production database'
+  severity: warn
+  event_ids:
+  - evt_001
+  metadata:
+    actor: new-dev-user
+    source: azure
+    event_type: database_access
+events:
+- id: evt_001
+  timestamp: '2026-03-10T11:22:00Z'
+  ingested_at: '2026-03-10T11:23:00Z'
+  source: azure
+  event_type: database_access
+  actor: new-dev-user
+  action: query_database
+  target: sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod
+  severity: warn
+  metadata:
+    ip: 192.0.2.77
+    user_agent: Azure-Portal/1.0
+    database: atom-db-prod
+    operation: SELECT
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - new-dev-user
+    sources:
+    - azure
+  frequency_tables:
+    azure:login:new-dev-user: 3
+    azure:login:admin-user: 340
+    azure:login:ci-bot: 1200
+  relationships:
+    new-dev-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 2
+      first_seen: '2026-03-05'
+      last_seen: '2026-03-08'
+    admin-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 45
+      first_seen: '2025-06-01'
+      last_seen: '2026-03-09'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - limited
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 2
+  min_investigation_quality: 3

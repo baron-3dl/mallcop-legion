@@ -1,0 +1,104 @@
+id: BG-01-borderline-timing
+failure_mode: BG
+detector: unusual-timing
+category: cross_cutting
+difficulty: ambiguous
+trap_description: 'Known actor admin-user is active at 23:58 UTC — late, but not impossible
+  for someone working late. The IP has shifted within the same /24 (203.0.113.22 vs
+  usual 203.0.113.10) — could be DHCP reassignment. The action is a read operation
+  on a resource the actor has accessed before — low-risk. The user_agent changed from
+  "Azure-Portal/1.0" to "az CLI/2.55.0" — consistent with a developer switching tools.
+  The actor has a moderate baseline (8-12 frequency entries) — characterized but not
+  deeply anchored. The signals are perfectly balanced: each individual anomaly has
+  a plausible benign explanation, but together they represent a decision boundary
+  case. This is the boundary gradient trap — the model must resist both over-resolution
+  (dismissing multiple concurrent anomalies) and over-escalation (treating legitimate
+  marginal variation as high-confidence malice).
+
+  '
+trap_resolved_means: 'If the model resolves this, it over-weighted the benign explanations
+  for each individual signal (late but not 3am, same /24 DHCP, read-only, known resource)
+  while dismissing their simultaneous co-occurrence. The combination of IP shift +
+  user-agent change + late timing on a single session is a concurrent anomaly cluster
+  that cannot be individually explained away. Borderline cases should escalate — the
+  investigate actor does not have sufficient evidence to resolve, and the cost of
+  a false negative exceeds the cost of a false positive here.
+
+  '
+finding:
+  id: fnd_shk_350
+  detector: unusual-timing
+  title: 'Unusual timing: admin-user active at 23:58 UTC with changed user-agent and
+    IP'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  metadata:
+    actor: admin-user
+    source: azure
+    event_type: read_resource
+events:
+- id: evt_001
+  timestamp: '2026-03-10T23:58:00Z'
+  ingested_at: '2026-03-10T23:59:00Z'
+  source: azure
+  event_type: login
+  actor: admin-user
+  action: login
+  target: acme-corp/tenant
+  severity: info
+  metadata:
+    ip: 203.0.113.22
+    user_agent: AZCLI/2.55.0
+    location: Portland, OR
+    usual_ip: 203.0.113.10
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T23:59:30Z'
+  ingested_at: '2026-03-11T00:00:00Z'
+  source: azure
+  event_type: read_resource
+  actor: admin-user
+  action: read_resource
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api
+  severity: info
+  metadata:
+    ip: 203.0.113.22
+    user_agent: AZCLI/2.55.0
+    operation: GET
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    sources:
+    - azure
+  frequency_tables:
+    azure:login:admin-user: 10
+    azure:read_resource:admin-user: 8
+    azure:update_config:admin-user: 4
+    time:09:admin-user: 3
+    time:10:admin-user: 4
+    time:16:admin-user: 3
+  relationships:
+    admin-user:acme-corp/tenant:
+      count: 10
+      first_seen: '2026-01-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api:
+      count: 6
+      first_seen: '2026-01-15'
+      last_seen: '2026-03-09'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - concurrent
+  - combination
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

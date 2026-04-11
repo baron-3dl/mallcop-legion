@@ -1,0 +1,177 @@
+id: URA-03-admin-new-resource
+failure_mode: AE
+detector: unusual-resource-access
+category: behavioral
+difficulty: malicious-hard
+trap_description: 'Deeply known actor admin-user (300+ events, extensive relationship
+  history) touches a production database resource for the first time. Every UBA signal
+  looks normal: business hours, known IP, Azure Portal, appropriate roles. The admin-exception
+  trap fires — "they''re allowed to, and everything else checks out." But evt_002
+  is a pg_dump exporting 15,000 rows from a prod database the admin has NEVER accessed
+  in 9+ months of history. The benign UBA context is exactly what a compromised admin
+  session would produce. First-time prod DB access + bulk data export = data exfiltration
+  indicator regardless of how "normal" the surrounding signals look.
+
+  '
+ground_truth:
+  expected_conclusion: Both triage and investigate escalate — admin-user performing
+    a pg_dump of 15,000 rows from a production database they have zero prior relationship
+    with is a data exfiltration indicator. The benign UBA context (business hours,
+    known IP, portal) does not clear this because a stolen admin session would produce
+    identical signals.
+  trap: 'The admin-exception trap: every surface signal (timing, IP, tooling, role)
+    is benign, tempting resolution. But the credential theft test is decisive here
+    — a compromised GlobalAdministrator session would look exactly like this. The
+    action itself (first-time bulk export from prod DB) is the threat signal, not
+    the surrounding context.'
+finding:
+  id: fnd_shk_112
+  detector: unusual-resource-access
+  title: 'Unusual resource access: admin-user accessed production database for first
+    time'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  metadata:
+    actor: admin-user
+    source: azure
+    event_type: database_access
+events:
+- id: evt_001
+  timestamp: '2026-03-10T17:45:00Z'
+  ingested_at: '2026-03-10T17:46:00Z'
+  source: azure
+  event_type: database_access
+  actor: admin-user
+  action: query_database
+  target: sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod
+  severity: warn
+  metadata:
+    ip: 203.0.113.10
+    user_agent: Azure-Portal/1.0
+    database: atom-db-prod
+    operation: SELECT
+    tables_accessed: users,sessions,payments
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T17:48:00Z'
+  ingested_at: '2026-03-10T17:49:00Z'
+  source: azure
+  event_type: database_access
+  actor: admin-user
+  action: export_data
+  target: sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod
+  severity: warn
+  metadata:
+    ip: 203.0.113.10
+    user_agent: Azure-Portal/1.0
+    database: atom-db-prod
+    operation: pg_dump
+    rows_affected: '15000'
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+    actor_roles:
+      admin-user:
+      - GlobalAdministrator
+      - SubscriptionOwner
+      ci-bot:
+      - ContainerRegistryPush
+      - ContainerAppsDeploy
+      deploy-svc:
+      - ContributorOnAtomRg
+      - ContributorOnRudiDev
+      tf-automation:
+      - SubscriptionContributor
+  frequency_tables:
+    azure:login:admin-user: 487
+    azure:read_resource:admin-user: 312
+    azure:update_config:admin-user: 89
+    azure:role_assignment:admin-user: 67
+    azure:service_principal_created:admin-user: 14
+    azure:container_restart:admin-user: 38
+    azure:policy_update:admin-user: 22
+    azure:network_rule_change:admin-user: 11
+    azure:keyvault_access:admin-user: 19
+    azure:login:admin-user:0:afternoon: 78
+    azure:login:admin-user:1:afternoon: 82
+    azure:login:admin-user:2:afternoon: 75
+    azure:login:admin-user:3:afternoon: 80
+    azure:login:admin-user:4:afternoon: 71
+    azure:login:admin-user:0:evening: 45
+    azure:login:admin-user:1:evening: 48
+    azure:login:admin-user:2:evening: 41
+    azure:login:admin-user:3:evening: 43
+    azure:login:admin-user:4:evening: 37
+    azure:read_resource:admin-user:1:afternoon: 65
+    azure:read_resource:admin-user:3:afternoon: 59
+    azure:update_config:admin-user:2:afternoon: 21
+    azure:update_config:admin-user:4:afternoon: 19
+  relationships:
+    admin-user:acme-corp/tenant:
+      count: 487
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95:
+      count: 312
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 156
+      first_seen: '2025-05-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/rudi-dev:
+      count: 98
+      first_seen: '2025-06-01'
+      last_seen: '2026-03-08'
+    admin-user:sub-169efd95/resourceGroups/opensign-rg:
+      count: 73
+      first_seen: '2025-07-01'
+      last_seen: '2026-03-07'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api:
+      count: 89
+      first_seen: '2025-05-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot:
+      count: 64
+      first_seen: '2025-05-15'
+      last_seen: '2026-03-09'
+    admin-user:sub-169efd95/resourceGroups/rudi-dev/containerApps/ca-rudi:
+      count: 41
+      first_seen: '2025-06-15'
+      last_seen: '2026-03-08'
+    admin-user:sub-169efd95/resourceGroups/opensign-rg/containerApps/opensign-server:
+      count: 37
+      first_seen: '2025-07-10'
+      last_seen: '2026-03-07'
+    admin-user:acme-corp/service-principals:
+      count: 67
+      first_seen: '2025-06-15'
+      last_seen: '2026-02-14'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv:
+      count: 19
+      first_seen: '2025-08-01'
+      last_seen: '2026-02-28'
+    admin-user:sub-169efd95/resourceGroups/atom-rg/networkSecurityGroups/atom-nsg:
+      count: 11
+      first_seen: '2025-09-01'
+      last_seen: '2026-01-15'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - first time
+  - never accessed
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 2
+  min_investigation_quality: 3

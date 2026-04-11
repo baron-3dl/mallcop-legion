@@ -1,0 +1,150 @@
+id: CN-01-correlated-low-severity
+failure_mode: CN
+detector: volume-anomaly
+category: cross_cutting
+difficulty: malicious-hard
+trap_description: 'Three low-severity findings from the same actor (new-svc-acct)
+  within 10 minutes, each independently benign-looking: a new service account was
+  just created (could be legitimate onboarding), it accessed a key vault for the first
+  time (could be setup), and then read 50 secrets in 2 minutes (could be application
+  initialization). Individually, each finding is warn-severity with a plausible explanation.
+  Together, they form a clear recon + credential- harvesting campaign: account created
+  → access vault → exfiltrate secrets. The correlation neglect trap: the model may
+  evaluate the trigger finding (volume anomaly) in isolation and miss that it is the
+  third step in a multi-stage attack sequence visible in the correlated findings.
+
+  '
+trap_resolved_means: 'If the model escalates only on the volume anomaly without identifying
+  the campaign pattern, it addressed the symptom but missed the diagnosis. If it resolves
+  because "50 secrets could be app initialization," it ignored the correlated context
+  entirely. The correct resolution requires recognizing that the three findings together
+  — new actor, first vault access, bulk secret read all within 10 minutes — constitute
+  a recon-to-exfil campaign pattern. The investigate actor should use search-findings
+  to discover the correlated findings and synthesize the campaign narrative.
+
+  '
+finding:
+  id: fnd_shk_310
+  detector: volume-anomaly
+  title: 'Volume anomaly: new-svc-acct read 50 secrets in 2 minutes'
+  severity: warn
+  event_ids:
+  - evt_301
+  - evt_302
+  - evt_303
+  - evt_304
+  - evt_305
+  metadata:
+    actor: new-svc-acct
+    source: azure
+    event_type: secret_access
+    volume_ratio: 25.0
+    window_minutes: 2
+    correlated_findings:
+    - 'fnd_shk_308: new-actor: new-svc-acct first seen 10 min ago'
+    - 'fnd_shk_309: unusual-resource-access: new-svc-acct accessed key-vault for first
+      time'
+events:
+- id: evt_301
+  timestamp: '2026-03-10T11:10:00Z'
+  ingested_at: '2026-03-10T11:11:00Z'
+  source: azure
+  event_type: secret_access
+  actor: new-svc-acct
+  action: list_secrets
+  target: sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv
+  severity: warn
+  metadata:
+    ip: 203.0.113.77
+    user_agent: python-requests/2.31.0
+    vault: atom-kv
+    secrets_listed: 50
+  raw: {}
+- id: evt_302
+  timestamp: '2026-03-10T11:10:15Z'
+  ingested_at: '2026-03-10T11:11:00Z'
+  source: azure
+  event_type: secret_access
+  actor: new-svc-acct
+  action: get_secret
+  target: sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv/secrets/db-password
+  severity: warn
+  metadata:
+    ip: 203.0.113.77
+    user_agent: python-requests/2.31.0
+    secret_name: db-password
+  raw: {}
+- id: evt_303
+  timestamp: '2026-03-10T11:10:30Z'
+  ingested_at: '2026-03-10T11:11:00Z'
+  source: azure
+  event_type: secret_access
+  actor: new-svc-acct
+  action: get_secret
+  target: sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv/secrets/api-key
+  severity: warn
+  metadata:
+    ip: 203.0.113.77
+    user_agent: python-requests/2.31.0
+    secret_name: api-key
+  raw: {}
+- id: evt_304
+  timestamp: '2026-03-10T11:11:00Z'
+  ingested_at: '2026-03-10T11:12:00Z'
+  source: azure
+  event_type: secret_access
+  actor: new-svc-acct
+  action: get_secret
+  target: sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv/secrets/jwt-secret
+  severity: warn
+  metadata:
+    ip: 203.0.113.77
+    user_agent: python-requests/2.31.0
+    secret_name: jwt-secret
+  raw: {}
+- id: evt_305
+  timestamp: '2026-03-10T11:11:45Z'
+  ingested_at: '2026-03-10T11:12:00Z'
+  source: azure
+  event_type: secret_access
+  actor: new-svc-acct
+  action: get_secret
+  target: sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv/secrets/stripe-key
+  severity: warn
+  metadata:
+    ip: 203.0.113.77
+    user_agent: python-requests/2.31.0
+    secret_name: stripe-key
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    sources:
+    - azure
+  frequency_tables:
+    azure:login:admin-user: 340
+    azure:secret_access:deploy-svc: 88
+    azure:secret_access:admin-user: 12
+    azure:login:ci-bot: 1200
+  relationships:
+    admin-user:sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv:
+      count: 12
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    deploy-svc:sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv:
+      count: 88
+      first_seen: '2025-07-01'
+      last_seen: '2026-03-09'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - correlation
+  - campaign
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 2
+  min_investigation_quality: 3

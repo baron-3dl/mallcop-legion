@@ -1,0 +1,160 @@
+id: CC-02-deploy-window-multi-signal
+failure_mode: CS
+detector: volume-anomaly
+category: behavioral
+difficulty: benign-hard
+trap_description: 'deploy-bot triggers volume-anomaly (200 events in 1 hour, 50x baseline)
+  and unusual-timing (04:00 UTC) simultaneously during a production release. The resources
+  include container app restarts, config updates, and secret rotations — the last
+  category (secret rotation) is particularly alarming in combination with high volume.
+  The benign evidence is present: window_id: "rls-v2.4.0-prod" appears in every event''s
+  metadata, and a release_started event from the CI system appears 5 minutes before
+  the burst begins. The secret rotations all carry rotation_type: "scheduled_rotation"
+  and post_deploy: "true", confirming they''re the standard post-deploy credential
+  cycling. A naive model sees high-volume secret access at 4am and stops there.
+
+  '
+trap_resolved_means: 'If the model escalates this, it isolated the secret rotation
+  events from their deploy context. Post-deploy secret rotation is standard practice;
+  the release_started event, the window_id tag across all events, and the rotation_type
+  metadata collectively resolve the finding. An SOC that escalates every production
+  deployment would be unusable for teams that release at low- traffic hours.
+
+  '
+finding:
+  id: fnd_shk_312
+  detector: volume-anomaly
+  title: 'Volume anomaly: deploy-bot — 200 events in 1 hour including secret rotations
+    (04:00 UTC)'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  - evt_004
+  - evt_005
+  metadata:
+    actor: deploy-bot
+    source: azure
+    event_type: container_restart
+    volume_ratio: 50.0
+    concurrent_detectors:
+    - unusual-timing
+events:
+- id: evt_001
+  timestamp: '2026-03-13T03:55:00Z'
+  ingested_at: '2026-03-13T03:56:00Z'
+  source: ci-system
+  event_type: release_started
+  actor: ci-bot
+  action: start_release
+  target: acme-corp/atom-api
+  severity: info
+  metadata:
+    ip: 192.0.2.202
+    user_agent: GitHub-Actions/1.0
+    release_version: v2.4.0
+    window_id: rls-v2.4.0-prod
+    deployer: deploy-bot
+    approved_by: admin-user
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-13T04:00:00Z'
+  ingested_at: '2026-03-13T04:01:00Z'
+  source: azure
+  event_type: container_restart
+  actor: deploy-bot
+  action: restart_container
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api
+  severity: info
+  metadata:
+    ip: 192.0.2.203
+    user_agent: deploy-agent/3.0
+    window_id: rls-v2.4.0-prod
+    release_version: v2.4.0
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-13T04:12:00Z'
+  ingested_at: '2026-03-13T04:13:00Z'
+  source: azure
+  event_type: config_update
+  actor: deploy-bot
+  action: update_config
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api
+  severity: info
+  metadata:
+    ip: 192.0.2.203
+    user_agent: deploy-agent/3.0
+    window_id: rls-v2.4.0-prod
+    release_version: v2.4.0
+  raw: {}
+- id: evt_004
+  timestamp: '2026-03-13T04:28:00Z'
+  ingested_at: '2026-03-13T04:29:00Z'
+  source: azure
+  event_type: secret_rotation
+  actor: deploy-bot
+  action: rotate_secret
+  target: sub-169efd95/resourceGroups/atom-rg/vaults/atom-kv/secrets/api-key
+  severity: warn
+  metadata:
+    ip: 192.0.2.203
+    user_agent: deploy-agent/3.0
+    window_id: rls-v2.4.0-prod
+    rotation_type: scheduled_rotation
+    post_deploy: 'true'
+  raw: {}
+- id: evt_005
+  timestamp: '2026-03-13T04:35:00Z'
+  ingested_at: '2026-03-13T04:36:00Z'
+  source: azure
+  event_type: secret_rotation
+  actor: deploy-bot
+  action: rotate_secret
+  target: sub-169efd95/resourceGroups/atom-rg/vaults/atom-kv/secrets/db-password
+  severity: warn
+  metadata:
+    ip: 192.0.2.203
+    user_agent: deploy-agent/3.0
+    window_id: rls-v2.4.0-prod
+    rotation_type: scheduled_rotation
+    post_deploy: 'true'
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-bot
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - ci-system
+    - github
+  frequency_tables:
+    azure:container_restart:deploy-bot: 89
+    azure:config_update:deploy-bot: 67
+    azure:secret_rotation:deploy-bot: 34
+    ci-system:release_started:ci-bot: 47
+    time:04:deploy-bot: 8
+    time:04:ci-bot: 8
+  relationships:
+    deploy-bot:sub-169efd95/resourceGroups/atom-rg:
+      count: 312
+      first_seen: '2024-06-01'
+      last_seen: '2026-03-11'
+    deploy-bot:sub-169efd95/resourceGroups/atom-rg/vaults/atom-kv:
+      count: 34
+      first_seen: '2024-06-01'
+      last_seen: '2026-03-11'
+expected:
+  chain_action: resolved
+  triage_action: resolved
+  reasoning_must_mention:
+  - deploy
+  - release
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: false
+  min_investigate_iterations: 1
+  min_investigation_quality: 4

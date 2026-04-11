@@ -1,0 +1,252 @@
+id: VA-03-data-exfil
+failure_mode: KA
+detector: volume-anomaly
+category: behavioral
+difficulty: malicious-hard
+trap_description: 'Known actor ci-bot generates a high-volume spike of read operations
+  on storage accounts — 500 blob reads in 2 hours versus a baseline of 10 reads per
+  day. ci-bot is deeply characterized (1200+ logins, 450 GitHub pushes, 380 deploys)
+  which creates strong pressure to trust the known actor. The trap: ci-bot''s established
+  baseline is for deployment operations, NOT for bulk reads on storage accounts. Reading
+  500 blobs across multiple storage accounts is entirely outside ci-bot''s documented
+  operational pattern. A compromised CI token is a common vector for bulk data exfiltration
+  because CI accounts have broad read access.
+
+  '
+trap_resolved_means: 'If the model resolves this, it over-relied on ci-bot''s strong
+  baseline characterization (known actor = trustworthy) while ignoring that the operation
+  type is completely outside ci-bot''s known scope. A CI service account that has
+  never performed bulk storage reads suddenly reading 500 objects across multiple
+  accounts is data exfiltration regardless of how many legitimate deployments the
+  same account has previously performed.
+
+  '
+finding:
+  id: fnd_shk_122
+  detector: volume-anomaly
+  title: 'Volume anomaly: ci-bot performed 500 blob reads in 2 hours (baseline: 10/day)'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  - evt_004
+  - evt_005
+  - evt_006
+  - evt_007
+  - evt_008
+  metadata:
+    actor: ci-bot
+    source: azure
+    event_type: storage_access
+    volume_ratio: 50.0
+    window_hours: 2
+events:
+- id: evt_001
+  timestamp: '2026-03-10T08:00:00Z'
+  ingested_at: '2026-03-10T08:01:00Z'
+  source: azure
+  event_type: storage_access
+  actor: ci-bot
+  action: read_blob
+  target: sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/backups
+  severity: warn
+  metadata:
+    ip: 192.0.2.100
+    user_agent: Azure-CLI/2.55.0
+    operation: GET
+    blobs_accessed: 80
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T08:15:00Z'
+  ingested_at: '2026-03-10T08:16:00Z'
+  source: azure
+  event_type: storage_access
+  actor: ci-bot
+  action: read_blob
+  target: sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/user-uploads
+  severity: warn
+  metadata:
+    ip: 192.0.2.100
+    user_agent: Azure-CLI/2.55.0
+    operation: GET
+    blobs_accessed: 95
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-10T08:30:00Z'
+  ingested_at: '2026-03-10T08:31:00Z'
+  source: azure
+  event_type: storage_access
+  actor: ci-bot
+  action: read_blob
+  target: sub-169efd95/resourceGroups/opensign-rg/storageAccounts/opensignstorage/containers/documents
+  severity: warn
+  metadata:
+    ip: 192.0.2.100
+    user_agent: Azure-CLI/2.55.0
+    operation: GET
+    blobs_accessed: 120
+  raw: {}
+- id: evt_004
+  timestamp: '2026-03-10T08:45:00Z'
+  ingested_at: '2026-03-10T08:46:00Z'
+  source: azure
+  event_type: storage_access
+  actor: ci-bot
+  action: read_blob
+  target: sub-169efd95/resourceGroups/rudi-dev/storageAccounts/rudistorage/containers/data
+  severity: warn
+  metadata:
+    ip: 192.0.2.100
+    user_agent: Azure-CLI/2.55.0
+    operation: GET
+    blobs_accessed: 75
+  raw: {}
+- id: evt_005
+  timestamp: '2026-03-10T09:00:00Z'
+  ingested_at: '2026-03-10T09:01:00Z'
+  source: azure
+  event_type: storage_access
+  actor: ci-bot
+  action: read_blob
+  target: sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/logs
+  severity: warn
+  metadata:
+    ip: 192.0.2.100
+    user_agent: Azure-CLI/2.55.0
+    operation: GET
+    blobs_accessed: 60
+  raw: {}
+- id: evt_006
+  timestamp: '2026-03-10T09:15:00Z'
+  ingested_at: '2026-03-10T09:16:00Z'
+  source: azure
+  event_type: storage_access
+  actor: ci-bot
+  action: read_blob
+  target: sub-169efd95/resourceGroups/atom-rg/storageAccounts/atombackup/containers/database-dumps
+  severity: warn
+  metadata:
+    ip: 192.0.2.100
+    user_agent: Azure-CLI/2.55.0
+    operation: GET
+    blobs_accessed: 40
+  raw: {}
+- id: evt_007
+  timestamp: '2026-03-10T09:30:00Z'
+  ingested_at: '2026-03-10T09:31:00Z'
+  source: azure
+  event_type: storage_access
+  actor: ci-bot
+  action: read_blob
+  target: sub-169efd95/resourceGroups/opensign-rg/storageAccounts/opensignstorage/containers/signatures
+  severity: warn
+  metadata:
+    ip: 192.0.2.100
+    user_agent: Azure-CLI/2.55.0
+    operation: GET
+    blobs_accessed: 15
+  raw: {}
+- id: evt_008
+  timestamp: '2026-03-10T09:45:00Z'
+  ingested_at: '2026-03-10T09:46:00Z'
+  source: azure
+  event_type: storage_access
+  actor: ci-bot
+  action: read_blob
+  target: sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/secrets-archive
+  severity: warn
+  metadata:
+    ip: 192.0.2.100
+    user_agent: Azure-CLI/2.55.0
+    operation: GET
+    blobs_accessed: 15
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+    actor_roles:
+      admin-user:
+      - GlobalAdministrator
+      - SubscriptionOwner
+      ci-bot:
+      - ContainerRegistryPush
+      - ContainerAppsDeploy
+      - AcrPush
+      deploy-svc:
+      - ContributorOnAtomRg
+      - ContributorOnRudiDev
+      tf-automation:
+      - SubscriptionContributor
+  frequency_tables:
+    azure:login:ci-bot: 1200
+    github:push:ci-bot: 450
+    azure:container_deploy:ci-bot: 380
+    azure:container_restart:ci-bot: 210
+    github:workflow_run:ci-bot: 520
+    azure:image_push:ci-bot: 448
+    github:pr_merge:ci-bot: 89
+    azure:container_build:ci-bot: 163
+    azure:storage_access:ci-bot: 10
+    azure:login:ci-bot:0:afternoon: 198
+    azure:login:ci-bot:1:afternoon: 245
+    azure:login:ci-bot:2:afternoon: 221
+    azure:login:ci-bot:3:afternoon: 234
+    azure:login:ci-bot:4:afternoon: 187
+    azure:login:ci-bot:0:morning: 42
+    azure:login:ci-bot:1:morning: 51
+    azure:login:ci-bot:2:morning: 47
+    azure:container_deploy:ci-bot:1:afternoon: 89
+    azure:container_deploy:ci-bot:3:afternoon: 82
+    azure:image_push:ci-bot:1:afternoon: 112
+    azure:image_push:ci-bot:3:afternoon: 104
+  relationships:
+    ci-bot:sub-169efd95/resourceGroups/atom-rg/containerRegistries/atomregistry:
+      count: 450
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    ci-bot:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api:
+      count: 380
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    ci-bot:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot:
+      count: 280
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    ci-bot:sub-169efd95/resourceGroups/rudi-dev/containerRegistries/rudiregistry:
+      count: 163
+      first_seen: '2025-06-10'
+      last_seen: '2026-03-08'
+    ci-bot:sub-169efd95/resourceGroups/rudi-dev/containerApps/ca-rudi:
+      count: 148
+      first_seen: '2025-06-10'
+      last_seen: '2026-03-08'
+    ci-bot:sub-169efd95/resourceGroups/opensign-rg/containerRegistries/opensignregistry:
+      count: 97
+      first_seen: '2025-07-20'
+      last_seen: '2026-03-07'
+    ci-bot:sub-169efd95/resourceGroups/opensign-rg/containerApps/opensign-server:
+      count: 87
+      first_seen: '2025-07-20'
+      last_seen: '2026-03-07'
+    ci-bot:acme-corp/repositories:
+      count: 520
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - bulk
+  - read
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 2
+  min_investigation_quality: 3

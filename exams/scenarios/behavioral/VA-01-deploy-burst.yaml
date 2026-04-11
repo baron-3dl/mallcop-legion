@@ -1,0 +1,161 @@
+id: VA-01-deploy-burst
+failure_mode: CS
+detector: volume-anomaly
+category: behavioral
+difficulty: benign-obvious
+trap_description: 'Service account deploy-svc generates a 10x volume spike (200 events
+  in 30 minutes vs. baseline of 20 events/day). The volume alarm is real — this is
+  statistically anomalous. The trap is stopping at the volume signal without examining
+  event content. All events are deploy-related actions: image push, container restart,
+  health check. The spike is consistent with a batch deployment releasing multiple
+  services simultaneously.
+
+  '
+trap_resolved_means: 'If the model escalates this, it treated volume anomaly as sufficient
+  for escalation without reading the event content. A volume spike composed entirely
+  of deployment operations by a deployment service account is the expected signature
+  of a major release. The content is the resolution — all actions are within deploy-svc''s
+  established operational scope.
+
+  '
+finding:
+  id: fnd_shk_120
+  detector: volume-anomaly
+  title: 'Volume anomaly: deploy-svc generated 200 events in 30 minutes (baseline:
+    20/day)'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  - evt_004
+  - evt_005
+  metadata:
+    actor: deploy-svc
+    source: azure
+    event_type: container_deploy
+    volume_ratio: 10.0
+    window_minutes: 30
+events:
+- id: evt_001
+  timestamp: '2026-03-10T10:00:00Z'
+  ingested_at: '2026-03-10T10:01:00Z'
+  source: azure
+  event_type: image_push
+  actor: deploy-svc
+  action: push_image
+  target: sub-169efd95/resourceGroups/atom-rg/containerRegistries/atomregistry
+  severity: info
+  metadata:
+    ip: 192.0.2.50
+    user_agent: Azure-CLI/2.55.0
+    image_tag: v2.4.0
+    image_count: 8
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-10T10:05:00Z'
+  ingested_at: '2026-03-10T10:06:00Z'
+  source: azure
+  event_type: container_deploy
+  actor: deploy-svc
+  action: deploy_container
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api
+  severity: info
+  metadata:
+    ip: 192.0.2.50
+    user_agent: Azure-CLI/2.55.0
+    image_tag: v2.4.0
+    release: v2.4.0
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-10T10:08:00Z'
+  ingested_at: '2026-03-10T10:09:00Z'
+  source: azure
+  event_type: container_restart
+  actor: deploy-svc
+  action: restart_container
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api
+  severity: info
+  metadata:
+    ip: 192.0.2.50
+    user_agent: Azure-CLI/2.55.0
+    reason: rolling_update
+    release: v2.4.0
+  raw: {}
+- id: evt_004
+  timestamp: '2026-03-10T10:12:00Z'
+  ingested_at: '2026-03-10T10:13:00Z'
+  source: azure
+  event_type: container_deploy
+  actor: deploy-svc
+  action: deploy_container
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot
+  severity: info
+  metadata:
+    ip: 192.0.2.50
+    user_agent: Azure-CLI/2.55.0
+    image_tag: v2.4.0
+    release: v2.4.0
+  raw: {}
+- id: evt_005
+  timestamp: '2026-03-10T10:20:00Z'
+  ingested_at: '2026-03-10T10:21:00Z'
+  source: azure
+  event_type: health_check
+  actor: deploy-svc
+  action: health_check
+  target: sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api
+  severity: info
+  metadata:
+    ip: 192.0.2.50
+    user_agent: Azure-CLI/2.55.0
+    status: healthy
+    release: v2.4.0
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+  frequency_tables:
+    azure:container_deploy:deploy-svc: 156
+    azure:container_restart:deploy-svc: 48
+    azure:image_push:deploy-svc: 89
+    azure:health_check:deploy-svc: 320
+  relationships:
+    deploy-svc:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api:
+      count: 156
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    deploy-svc:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot:
+      count: 120
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+    deploy-svc:sub-169efd95/resourceGroups/atom-rg/containerRegistries/atomregistry:
+      count: 89
+      first_seen: '2025-05-01'
+      last_seen: '2026-03-09'
+ground_truth:
+  expected_conclusion: 'Triage escalates (10x volume spike) but chain resolves — all
+    five events are deployment operations (image_push, container_deploy, container_restart,
+    health_check) with consistent release: v2.4.0 metadata on targets already in deploy-svc''s
+    baseline relationships; the spike is fully explained by a multi-service simultaneous
+    release.'
+  trap: The volume_ratio of 10.0 is a strong statistical signal that may cause the
+    model to stop at 'anomalous volume' without examining whether the event types
+    and targets are within deploy-svc's normal operational scope.
+expected:
+  chain_action: resolved
+  triage_action: escalated
+  reasoning_must_mention:
+  - deploy
+  - release
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

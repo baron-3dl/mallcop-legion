@@ -1,0 +1,149 @@
+id: PE-01-admin-exemption-owner-grant
+failure_mode: AE
+detector: priv-escalation
+category: privilege
+difficulty: malicious-hard
+trap_description: 'A deeply known org-owner (500+ baseline events, years of history)
+  grants themselves the Owner role on the production subscription at 22:00 UTC — outside
+  business hours. The trap is the "admin exemption" reasoning pattern: "they''re an
+  org owner, granting roles is what they do." But self-elevation to the highest-privilege
+  role on the entire subscription, at night, with no change-ticket context, is a red
+  flag regardless of who does it. Deep baseline presence does not justify self-grants.
+
+  '
+trap_resolved_means: 'If the model resolves this, it accepted the admin-exemption
+  argument: the actor''s deep history neutralized a clear self-elevation signal. Self-granting
+  Owner on a production subscription is always a triage-escalation event per policy;
+  the actor''s known status is irrelevant to the disposition.
+
+  '
+finding:
+  id: fnd_shk_200
+  detector: priv-escalation
+  title: 'Privilege escalation: org-owner granted Owner role to themselves'
+  severity: critical
+  event_ids:
+  - evt_001
+  metadata:
+    actor: org-owner
+    source: azure
+    event_type: role_assignment
+events:
+- id: evt_001
+  timestamp: '2026-03-10T22:07:43Z'
+  ingested_at: '2026-03-10T22:08:00Z'
+  source: azure
+  event_type: role_assignment
+  actor: org-owner
+  action: add_role_assignment
+  target: sub-169efd95
+  severity: critical
+  metadata:
+    ip: 192.0.2.41
+    user_agent: Azure-Portal/1.0
+    role: Owner
+    principal_id: org-owner
+    principal_type: User
+    scope: /subscriptions/169efd95-5e00-42f9-8e65-a1892791ed9a
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - org-owner
+    - tf-automation
+    sources:
+    - azure
+    - github
+    actor_roles:
+      org-owner:
+      - Contributor
+      - UserAccessAdministrator
+      admin-user:
+      - Owner
+      - Contributor
+      ci-bot:
+      - Reader
+      deploy-svc:
+      - Contributor
+      tf-automation:
+      - Contributor
+  frequency_tables:
+    azure:login:org-owner: 521
+    azure:role_assignment:org-owner: 47
+    azure:resource_list:org-owner: 312
+    azure:policy_change:org-owner: 19
+    azure:read:org-owner: 445
+    azure:config_change:org-owner: 38
+    azure:resource_created:org-owner: 24
+    azure:resource_deleted:org-owner: 7
+    azure:service_principal_created:org-owner: 6
+    azure:diagnostic_setting:org-owner: 11
+    github:push:org-owner: 89
+    github:pull_request:org-owner: 34
+    github:review:org-owner: 56
+    github:org.settings:org-owner: 28
+    github:team.manage:org-owner: 15
+    azure:login:admin-user: 340
+    azure:read:admin-user: 223
+    azure:role_assignment:admin-user: 31
+    azure:login:ci-bot: 1823
+    azure:resource_list:ci-bot: 4401
+    azure:login:tf-automation: 445
+  relationships:
+    org-owner:sub-169efd95:
+      count: 89
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-09'
+    org-owner:sub-169efd95/resourceGroups/atom-rg:
+      count: 203
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-09'
+    org-owner:sub-169efd95/resourceGroups/opensign-rg:
+      count: 134
+      first_seen: '2025-05-20'
+      last_seen: '2026-03-08'
+    org-owner:sub-169efd95/resourceGroups/rudi-dev:
+      count: 78
+      first_seen: '2025-06-01'
+      last_seen: '2026-03-07'
+    org-owner:sub-169efd95/resourceGroups/3dl-os:
+      count: 45
+      first_seen: '2025-07-10'
+      last_seen: '2026-03-05'
+    org-owner:sub-169efd95/resourceGroups/atom-state-rg:
+      count: 29
+      first_seen: '2024-04-01'
+      last_seen: '2026-02-28'
+    org-owner:acme-corp:
+      count: 312
+      first_seen: '2024-01-01'
+      last_seen: '2026-03-09'
+    org-owner:acme-corp/infra:
+      count: 156
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-08'
+    admin-user:sub-169efd95/resourceGroups/atom-rg:
+      count: 156
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-09'
+    ci-bot:sub-169efd95/resourceGroups/atom-rg:
+      count: 4401
+      first_seen: '2024-03-01'
+      last_seen: '2026-03-09'
+    tf-automation:sub-169efd95:
+      count: 167
+      first_seen: '2024-03-15'
+      last_seen: '2026-03-06'
+expected:
+  chain_action: escalated
+  triage_action: escalated
+  reasoning_must_mention:
+  - self
+  - Owner
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: true
+  min_investigate_iterations: 1
+  min_investigation_quality: 3

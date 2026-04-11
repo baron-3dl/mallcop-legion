@@ -1,0 +1,150 @@
+id: AF-05-mfa-enrollment
+failure_mode: CS
+detector: auth-failure-burst
+category: auth
+difficulty: benign-hard
+trap_description: 'new-hire-carlos triggers 6 MFA failures in 4 minutes from a mobile
+  device, followed by a successful MFA enrollment. The device fingerprint changes
+  between attempts (user_agent includes different iOS session tokens), which could
+  pattern-match as a multi-device credential stuffing attack. The resolution evidence:
+  the first event is an MFA enrollment initiation (mfa_setup_started), the failures
+  are all failure_reason: "incorrect_otp" from the same IP range (mobile carrier),
+  and the final success event type is mfa_enrollment_complete rather than login_success.
+  Carlos also appears in the HR onboarding baseline with start_date: today. A naive
+  model sees 6 MFA failures + changing device signals + new actor = escalate.
+
+  '
+trap_resolved_means: 'If the model escalates this, it misread MFA enrollment failures
+  as auth attack signals. The mfa_setup_started → multiple OTP failures → mfa_enrollment_complete
+  sequence is the canonical "struggled with authenticator app during onboarding" pattern.
+  Combined with the same-day HR provisioning baseline entry, this is an unambiguous
+  new-hire MFA setup flow.
+
+  '
+finding:
+  id: fnd_shk_310
+  detector: auth-failure-burst
+  title: 'Auth failure burst: new-hire-carlos — 6 MFA failures in 4 minutes (new actor)'
+  severity: warn
+  event_ids:
+  - evt_001
+  - evt_002
+  - evt_003
+  - evt_004
+  - evt_005
+  metadata:
+    actor: new-hire-carlos
+    source: azure
+    event_type: mfa_failure
+events:
+- id: evt_001
+  timestamp: '2026-03-13T09:00:00Z'
+  ingested_at: '2026-03-13T09:01:00Z'
+  source: azure
+  event_type: mfa_setup_started
+  actor: new-hire-carlos
+  action: begin_mfa_enrollment
+  target: acme-corp/auth/mfa
+  severity: info
+  metadata:
+    ip: 172.16.0.45
+    user_agent: Microsoft Authenticator/6.7.0 (iOS 17.3)
+    enrollment_method: totp
+    session_id: enroll-sess-001
+  raw: {}
+- id: evt_002
+  timestamp: '2026-03-13T09:01:15Z'
+  ingested_at: '2026-03-13T09:02:00Z'
+  source: azure
+  event_type: mfa_failure
+  actor: new-hire-carlos
+  action: verify_mfa
+  target: acme-corp/auth/mfa
+  severity: warn
+  metadata:
+    ip: 172.16.0.45
+    user_agent: Microsoft Authenticator/6.7.0 (iOS 17.3)
+    failure_reason: incorrect_otp
+    session_id: enroll-sess-001
+  raw: {}
+- id: evt_003
+  timestamp: '2026-03-13T09:02:40Z'
+  ingested_at: '2026-03-13T09:03:00Z'
+  source: azure
+  event_type: mfa_failure
+  actor: new-hire-carlos
+  action: verify_mfa
+  target: acme-corp/auth/mfa
+  severity: warn
+  metadata:
+    ip: 172.16.0.45
+    user_agent: Microsoft Authenticator/6.7.0 (iOS 17.3)
+    failure_reason: incorrect_otp
+    session_id: enroll-sess-001
+  raw: {}
+- id: evt_004
+  timestamp: '2026-03-13T09:03:55Z'
+  ingested_at: '2026-03-13T09:04:00Z'
+  source: azure
+  event_type: mfa_failure
+  actor: new-hire-carlos
+  action: verify_mfa
+  target: acme-corp/auth/mfa
+  severity: warn
+  metadata:
+    ip: 172.16.0.45
+    user_agent: Microsoft Authenticator/6.7.0 (iOS 17.3)
+    failure_reason: incorrect_otp
+    session_id: enroll-sess-001
+  raw: {}
+- id: evt_005
+  timestamp: '2026-03-13T09:04:48Z'
+  ingested_at: '2026-03-13T09:05:00Z'
+  source: azure
+  event_type: mfa_enrollment_complete
+  actor: new-hire-carlos
+  action: complete_mfa_enrollment
+  target: acme-corp/auth/mfa
+  severity: info
+  metadata:
+    ip: 172.16.0.45
+    user_agent: Microsoft Authenticator/6.7.0 (iOS 17.3)
+    enrollment_method: totp
+    device_registered: iPhone-Carlos-Work
+    session_id: enroll-sess-001
+  raw: {}
+baseline:
+  known_entities:
+    actors:
+    - admin-user
+    - ci-bot
+    - deploy-svc
+    - tf-automation
+    sources:
+    - azure
+    - github
+    - hr-system
+  frequency_tables:
+    azure:login:admin-user: 412
+    azure:mfa_failure:admin-user: 3
+    hr-system:user_provisioned:hr-system: 18
+  relationships:
+    admin-user:acme-corp/auth:
+      count: 412
+      first_seen: '2024-01-15'
+      last_seen: '2026-03-12'
+  hr_onboarding:
+    new-hire-carlos:
+      start_date: '2026-03-13'
+      manager: developer-alice
+      provisioned: '2026-03-12T17:00:00Z'
+expected:
+  chain_action: resolved
+  triage_action: resolved
+  reasoning_must_mention:
+  - enrollment
+  - onboarding
+  reasoning_must_not_mention: []
+  investigate_must_use_tools: false
+  min_investigate_iterations: 1
+  min_investigation_quality: 3
