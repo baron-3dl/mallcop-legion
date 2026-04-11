@@ -12,21 +12,22 @@
 //  1. Reads the template file.
 //  2. Replaces {{RUN_ID}} with --run and {{FORGE_API_URL}} with --forge-url.
 //  3. Creates .run/exam-<run>/ directory.
-//  4. Generates a fresh ed25519 keypair and writes the private key as JSON
-//     to .run/exam-<run>/identity.json (format: {"private_key":"<hex>"}).
+//  4. Generates a fresh ed25519 keypair and writes identity.json to
+//     .run/exam-<run>/identity.json using campfire identity.Generate()+Save().
+//     The file format is compatible with campfire identity.Load() and legion's
+//     loadIdentity helper: base64-encoded public_key, private_key, version=1,
+//     and created_at timestamp.
 //  5. Writes the rendered chart to --out.
 package main
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/campfire-net/campfire/pkg/identity"
 )
 
 func main() {
@@ -90,31 +91,23 @@ func renderTemplate(tmplPath, runID, forgeURL string) (string, error) {
 	return out, nil
 }
 
-// identityFile is the JSON structure written for the legion identity.
-// The private key is hex-encoded (lowercase) per legion's ed25519 identity format.
-type identityFile struct {
-	PrivateKey string `json:"private_key"`
-}
-
 // writeIdentity generates a fresh ed25519 keypair and writes identity.json
-// under runDir.
+// under runDir using the campfire identity package. The resulting file is
+// compatible with campfire identity.Load() (which legion's loadIdentity calls).
+//
+// The file contains: version=1, public_key (base64), private_key (base64),
+// created_at (Unix nanoseconds). The hex-encoded format previously used was
+// incompatible — Go JSON decodes []byte as base64, so loading a hex string
+// into ed25519.PrivateKey yielded 96 bytes, failing the 64-byte size check.
 func writeIdentity(runDir string) error {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	id, err := identity.Generate()
 	if err != nil {
-		return fmt.Errorf("generating ed25519 key: %w", err)
-	}
-
-	payload := identityFile{
-		PrivateKey: hex.EncodeToString(priv),
-	}
-	data, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshalling identity: %w", err)
+		return fmt.Errorf("generating identity: %w", err)
 	}
 
 	identityPath := filepath.Join(runDir, "identity.json")
-	if err := os.WriteFile(identityPath, data, 0o600); err != nil {
-		return fmt.Errorf("writing %s: %w", identityPath, err)
+	if err := id.Save(identityPath); err != nil {
+		return fmt.Errorf("saving identity to %s: %w", identityPath, err)
 	}
 	return nil
 }
