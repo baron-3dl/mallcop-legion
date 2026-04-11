@@ -1,0 +1,85 @@
+name: exam
+
+# .github/workflows/exam.yml — mallcop-legion exam smoke
+#
+# Runs TestExamID01 (the Phase 1 capstone test) against a pinned legion
+# release. Currently gated to workflow_dispatch only — TestExamID01 is
+# blocked on legion v0.1.1 upstream bugs (mallcoppro-9df curator stream-
+# json, mallcoppro-ee3 worker commit translation, mallcoppro-a85
+# max_tasks_per_session scoping). When legion v0.1.2 ships these fixes,
+# add `pull_request` to the `on:` block to gate PR merges on exam pass.
+
+on:
+  workflow_dispatch:  # manual trigger only until legion v0.1.2
+  # TODO(mallcoppro-9df,ee3,a85): add pull_request trigger when legion v0.1.2 fixes land
+
+concurrency:
+  group: exam-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  exam:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Download legion release tarball
+        run: |
+          # Same pattern as scan.yml in mallcop-v2-deploy — pinned version
+          LEGION_VERSION=$(cat .we-version | xargs)
+          mkdir -p bin
+          curl -fsSL -o /tmp/we.tar.gz \
+            "https://github.com/baron-3dl/legion/releases/download/${LEGION_VERSION}/we-linux-amd64.tar.gz"
+          tar -xzf /tmp/we.tar.gz -C bin/
+          chmod +x bin/we
+          ./bin/we --version
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Run TestExamID01
+        id: exam-test
+        run: go test -tags e2e ./test/quality/ -run TestExamID01 -timeout 5m -v
+        continue-on-error: true  # Remove when legion v0.1.2 fixes land
+
+      - name: Upload exam report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exam-report-${{ github.run_id }}
+          path: |
+            exams/reports/**/report.json
+            exams/reports/**/report.md
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Comment on PR on failure
+        if: steps.exam-test.outcome == 'failure' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Parse report.json if it exists, else post a generic failure comment
+          FAIL_N=0
+          FAIL_IDS=""
+          REPORT_PATH=$(find exams/reports -name "report.json" -type f | head -1)
+          if [ -f "$REPORT_PATH" ]; then
+            FAIL_N=$(jq -r '.summary.fail_n // 0' "$REPORT_PATH")
+            FAIL_IDS=$(jq -r '.scenarios[] | select(.verdict == "fail") | .id' "$REPORT_PATH" | head -3 | tr '\n' ', ')
+          fi
+          gh pr comment ${{ github.event.pull_request.number }} --body "Exam failed: $FAIL_N scenarios (first 3: $FAIL_IDS). See workflow artifact for full report."
+
+      - name: Fail the job on test failure
+        if: steps.exam-test.outcome == 'failure'
+        run: |
+          echo "::error::TestExamID01 failed — see upload-artifact step for report.json"
+          # NOTE: continue-on-error on the test step means this job will only fail here.
+          # When legion v0.1.2 ships, remove continue-on-error above and this step
+          # becomes redundant.
+          exit 1
