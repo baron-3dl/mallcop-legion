@@ -31,6 +31,13 @@ name = "investigate"
 match = ["task:investigate"]
 tools = ["bash", "read", "check-baseline", "search-events", "search-findings", "load-skill"]
 model = "sonnet"
+# check-baseline, search-events, search-findings are served by mallcop-investigate-tools
+# (cmd/mallcop-investigate-tools) via --tool flag. legion resolves logical tool names to
+# the backing binary declared below.
+
+[[capabilities.tool_binaries]]
+binary = "mallcop-investigate-tools"
+tools  = ["check-baseline", "search-events", "search-findings"]
 
 [[capabilities.seed]]
 name = "heal"
