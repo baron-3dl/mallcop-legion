@@ -55,19 +55,20 @@ func TestJudgePromptLint(t *testing.T) {
 		{label: "taxonomy code NE", pattern: `(?i)\bNE\b`},
 		{label: "taxonomy code VN", pattern: `(?i)\bVN\b`},
 		{label: "taxonomy code TT", pattern: `(?i)\bTT\b`},
-		// Scenario category labels
-		{label: "known-actor",            pattern: `(?i)known[-\s]actor`},
-		{label: "known actor abuse",      pattern: `(?i)known\s+actor\s+abuse`},
-		{label: "new-entity",             pattern: `(?i)new[-\s]entity`},
-		{label: "automated execution",    pattern: `(?i)automated\s+execution`},
-		{label: "credential sharing",     pattern: `(?i)credential\s+sharing`},
-		{label: "credential abuse",       pattern: `(?i)credential\s+abuse`},
-		{label: "volume anomaly",         pattern: `(?i)volume\s+anomaly`},
-		{label: "timing trap",            pattern: `(?i)timing\s+trap`},
+		// Scenario category labels — separators now include space, hyphen, and underscore
+		{label: "known-actor",             pattern: `(?i)known[_\s-]actor`},
+		{label: "known actor abuse",       pattern: `(?i)known[_\s-]actor[_\s-]abuse`},
+		{label: "new-entity",              pattern: `(?i)new[_\s-]entity`},
+		{label: "automated execution",     pattern: `(?i)automated[_\s-]execution`},
+		{label: "credential sharing",      pattern: `(?i)credential[_\s-]sharing`},
+		{label: "credential abuse",        pattern: `(?i)credential[_\s-]abuse`},
+		{label: "credential theft",        pattern: `(?i)credential[_\s-]theft`},
+		{label: "volume anomaly",          pattern: `(?i)volume[_\s-]anomaly`},
+		{label: "timing trap",             pattern: `(?i)timing[_\s-]trap`},
 		// Scenario template field names
-		{label: "trap_description",       pattern: `(?i)trap_description`},
-		{label: "trap_resolved_means",    pattern: `(?i)trap_resolved_means`},
-		{label: "expected_resolution",    pattern: `(?i)expected_resolution`},
+		{label: "trap_description",        pattern: `(?i)trap_description`},
+		{label: "trap_resolved_means",     pattern: `(?i)trap_resolved_means`},
+		{label: "expected_resolution",     pattern: `(?i)expected_resolution`},
 	}
 
 	var failures []string
@@ -112,5 +113,44 @@ func TestJudgePromptLint(t *testing.T) {
 		for _, msg := range failures {
 			t.Errorf("  • %s", msg)
 		}
+	}
+}
+
+// TestForbiddenPatternsActuallyFire verifies that each widened pattern
+// correctly matches space, hyphen, and underscore separators.
+// This prevents accidentally widening the net in a way that still misses variants.
+func TestForbiddenPatternsActuallyFire(t *testing.T) {
+	testCases := []struct {
+		pattern string
+		input   string
+		label   string
+	}{
+		// Test underscore variants of multi-word patterns
+		{pattern: `(?i)known[_\s-]actor`, input: "known_actor", label: "known_actor"},
+		{pattern: `(?i)known[_\s-]actor[_\s-]abuse`, input: "known_actor_abuse", label: "known_actor_abuse"},
+		{pattern: `(?i)new[_\s-]entity`, input: "new_entity", label: "new_entity"},
+		{pattern: `(?i)automated[_\s-]execution`, input: "automated_execution", label: "automated_execution"},
+		{pattern: `(?i)credential[_\s-]sharing`, input: "credential_sharing", label: "credential_sharing"},
+		{pattern: `(?i)credential[_\s-]abuse`, input: "credential_abuse", label: "credential_abuse"},
+		{pattern: `(?i)credential[_\s-]theft`, input: "credential_theft", label: "credential_theft"},
+		{pattern: `(?i)volume[_\s-]anomaly`, input: "volume_anomaly", label: "volume_anomaly"},
+		{pattern: `(?i)timing[_\s-]trap`, input: "timing_trap", label: "timing_trap"},
+		// Test hyphen variants
+		{pattern: `(?i)known[_\s-]actor`, input: "known-actor", label: "known-actor"},
+		{pattern: `(?i)credential[_\s-]sharing`, input: "credential-sharing", label: "credential-sharing"},
+		// Test space variants (original form should still work)
+		{pattern: `(?i)volume[_\s-]anomaly`, input: "volume anomaly", label: "volume anomaly (space)"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.label, func(t *testing.T) {
+			re, err := regexp.Compile(tc.pattern)
+			if err != nil {
+				t.Fatalf("invalid pattern %q: %v", tc.pattern, err)
+			}
+			if !re.MatchString(tc.input) {
+				t.Errorf("pattern %q did not match input %q", tc.pattern, tc.input)
+			}
+		})
 	}
 }
