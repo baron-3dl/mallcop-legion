@@ -94,10 +94,23 @@ func (s *cfSender) SendWithAntecedents(campfireID, payload string, tags []string
 
 // scenarioPayload is the sanitized per-scenario work:create payload.
 // It deliberately omits ExpectedResolution, TrapDescription, TrapResolvedMeans.
+//
+// The top-level fields (id, title, skill) satisfy the ReadyWorkSource
+// workCreatePayload contract so that `we`'s PollForWork can discover and
+// claim these items. The exam-specific fields (scenario_id, fixture_path,
+// finding) carry the data the triage worker needs and are stored in the
+// campfire message payload. The worker reads them by replaying the work:create
+// message from the campfire.
 type scenarioPayload struct {
-	ScenarioID  string          `json:"scenario_id"`
-	FixturePath string          `json:"fixture_path"`
-	Finding     findingPayload  `json:"finding"`
+	// Ready convention fields — required by ReadyWorkSource.PollForWork.
+	ID    string `json:"id"`    // finding ID (e.g. fnd_shk_001)
+	Title string `json:"title"` // finding title (e.g. "New actor observed: deploy-svc-new")
+	Skill string `json:"skill"` // capability routing tag (always "exam:scenario")
+
+	// Exam-specific fields.
+	ScenarioID  string         `json:"scenario_id"`
+	FixturePath string         `json:"fixture_path"`
+	Finding     findingPayload `json:"finding"`
 }
 
 // findingPayload mirrors ScenarioFinding without any ground-truth fields.
@@ -200,7 +213,11 @@ func scrubMap(m map[string]interface{}) map[string]interface{} {
 }
 
 // reportPayload is the work:create payload for the exam:report item.
+// Top-level id/title/skill satisfy ReadyWorkSource.workCreatePayload.
 type reportPayload struct {
+	ID    string `json:"id"`    // e.g. "exam-report-<runID>"
+	Title string `json:"title"` // e.g. "exam report: <runID>"
+	Skill string `json:"skill"` // "exam:report"
 	RunID string `json:"run_id"`
 }
 
@@ -268,7 +285,12 @@ func seed(sender ReadySender, runID, campfireID, scenariosDir, fixturesDir, scen
 	}
 
 	// Post the exam:report item with all scenario message IDs as antecedents.
-	rp := reportPayload{RunID: runID}
+	rp := reportPayload{
+		ID:    "exam-report-" + runID,
+		Title: "exam report: " + runID,
+		Skill: "exam:report",
+		RunID: runID,
+	}
 	rpJSON, err := json.Marshal(rp)
 	if err != nil {
 		return fmt.Errorf("marshal report payload: %w", err)
@@ -343,6 +365,9 @@ func seedScenario(sender ReadySender, s *exam.Scenario, runID, campfireID, fixtu
 		Metadata: filterMetadata(s.Finding.Metadata),
 	}
 	sp := scenarioPayload{
+		ID:          s.Finding.ID,
+		Title:       s.Finding.Title,
+		Skill:       "exam:scenario",
 		ScenarioID:  s.ID,
 		FixturePath: fixturePath,
 		Finding:     fp,
