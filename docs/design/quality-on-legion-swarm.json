@@ -1,0 +1,964 @@
+{
+  "parent": "mallcoppro-9fd",
+  "design_doc": "docs/design/quality-on-legion.md",
+  "design_campfire": "74560d7d779998a781657b37a053e2501e07a382933e4ebe909883bc01f9fd50",
+  "items": [
+    {
+      "id": "mallcoppro-0bd1",
+      "title": "Review: Q_P3_03",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-f1f"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-0e1",
+      "title": "Review: Q_P2_10 investigate-tools",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-6cd"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-0fb",
+      "title": "Sweep: test coverage \u2014 quality-on-legion",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-e9b",
+        "mallcoppro-c4f",
+        "mallcoppro-d0f",
+        "mallcoppro-3a8",
+        "mallcoppro-e93",
+        "mallcoppro-b86",
+        "mallcoppro-61f",
+        "mallcoppro-a694",
+        "mallcoppro-027",
+        "mallcoppro-a9b",
+        "mallcoppro-9e3",
+        "mallcoppro-f15",
+        "mallcoppro-3a3",
+        "mallcoppro-a3a",
+        "mallcoppro-ea2",
+        "mallcoppro-3e8",
+        "mallcoppro-0b2",
+        "mallcoppro-8dc",
+        "mallcoppro-6cd",
+        "mallcoppro-1d0",
+        "mallcoppro-c417",
+        "mallcoppro-f1f",
+        "mallcoppro-2fa",
+        "mallcoppro-36f"
+      ],
+      "agent_type": "sweeper-testcoverage",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-183",
+      "title": "Sweep: dead code \u2014 quality-on-legion",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-e9b",
+        "mallcoppro-c4f",
+        "mallcoppro-d0f",
+        "mallcoppro-3a8",
+        "mallcoppro-e93",
+        "mallcoppro-b86",
+        "mallcoppro-61f",
+        "mallcoppro-a694",
+        "mallcoppro-027",
+        "mallcoppro-a9b",
+        "mallcoppro-9e3",
+        "mallcoppro-f15",
+        "mallcoppro-3a3",
+        "mallcoppro-a3a",
+        "mallcoppro-ea2",
+        "mallcoppro-3e8",
+        "mallcoppro-0b2",
+        "mallcoppro-8dc",
+        "mallcoppro-6cd",
+        "mallcoppro-1d0",
+        "mallcoppro-c417",
+        "mallcoppro-f1f",
+        "mallcoppro-2fa",
+        "mallcoppro-36f"
+      ],
+      "agent_type": "sweeper-deadcode",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-28a",
+      "title": "Review: Q_P2_06",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-ea2"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-360",
+      "title": "Review: Q_P3_02",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-c417"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-37d",
+      "title": "Security sweep: fixer no-auto-apply hook",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-2fa"
+      ],
+      "agent_type": "sweeper-security",
+      "test_depth": "review",
+      "model_tier": "opus",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-385",
+      "title": "Review: Q_P3_04",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-2fa"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-3d6",
+      "title": "Review: Q_P1_04",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-e93"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-4d3",
+      "title": "Review: Q_P2_09",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-8dc"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-54c",
+      "title": "Review: Q_P2_05",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a3a"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-562",
+      "title": "Security sweep: credential-theft hook gate",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-f15"
+      ],
+      "agent_type": "sweeper-security",
+      "test_depth": "review",
+      "model_tier": "opus",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-5aa",
+      "title": "Review: Q_P2_01",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a9b"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-63c",
+      "title": "Sweep: antipatterns \u2014 quality-on-legion",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-e9b",
+        "mallcoppro-c4f",
+        "mallcoppro-d0f",
+        "mallcoppro-3a8",
+        "mallcoppro-e93",
+        "mallcoppro-b86",
+        "mallcoppro-61f",
+        "mallcoppro-a694",
+        "mallcoppro-027",
+        "mallcoppro-a9b",
+        "mallcoppro-9e3",
+        "mallcoppro-f15",
+        "mallcoppro-3a3",
+        "mallcoppro-a3a",
+        "mallcoppro-ea2",
+        "mallcoppro-3e8",
+        "mallcoppro-0b2",
+        "mallcoppro-8dc",
+        "mallcoppro-6cd",
+        "mallcoppro-1d0",
+        "mallcoppro-c417",
+        "mallcoppro-f1f",
+        "mallcoppro-2fa",
+        "mallcoppro-36f"
+      ],
+      "agent_type": "sweeper-antipatterns",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-783",
+      "title": "Review: Q_P3_05",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-36f"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-815",
+      "title": "Review: Q_P2_07",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-3e8"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-853",
+      "title": "Review: Q_P1_05",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-b86"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-8d6",
+      "title": "Review: Q_P1_02",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-d0f"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-a83",
+      "title": "Review: Q_P2_02",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-9e3"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-ab7",
+      "title": "Review: Q_P2_04",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-3a3"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-b40",
+      "title": "Security sweep: exam-seed trap-strip enforcement",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-d0f"
+      ],
+      "agent_type": "sweeper-security",
+      "test_depth": "review",
+      "model_tier": "opus",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-b9d",
+      "title": "Security sweep: checklist hook gate",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-9e3"
+      ],
+      "agent_type": "sweeper-security",
+      "test_depth": "review",
+      "model_tier": "opus",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-bd8",
+      "title": "E2E: exam cycle against a real PR (failure injection + recovery)",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-c08",
+        "mallcoppro-be3",
+        "mallcoppro-183",
+        "mallcoppro-63c",
+        "mallcoppro-0fb"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "e2e",
+      "model_tier": "opus",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-be3",
+      "title": "Sweep: bugs \u2014 quality-on-legion",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-e9b",
+        "mallcoppro-c4f",
+        "mallcoppro-d0f",
+        "mallcoppro-3a8",
+        "mallcoppro-e93",
+        "mallcoppro-b86",
+        "mallcoppro-61f",
+        "mallcoppro-a694",
+        "mallcoppro-027",
+        "mallcoppro-a9b",
+        "mallcoppro-9e3",
+        "mallcoppro-f15",
+        "mallcoppro-3a3",
+        "mallcoppro-a3a",
+        "mallcoppro-ea2",
+        "mallcoppro-3e8",
+        "mallcoppro-0b2",
+        "mallcoppro-8dc",
+        "mallcoppro-6cd",
+        "mallcoppro-1d0",
+        "mallcoppro-c417",
+        "mallcoppro-f1f",
+        "mallcoppro-2fa",
+        "mallcoppro-36f"
+      ],
+      "agent_type": "sweeper-bugs",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-bfc",
+      "title": "Review: Q_P1_01",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-c4f"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-c08",
+      "title": "Sweep: security \u2014 quality-on-legion",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-e9b",
+        "mallcoppro-c4f",
+        "mallcoppro-d0f",
+        "mallcoppro-3a8",
+        "mallcoppro-e93",
+        "mallcoppro-b86",
+        "mallcoppro-61f",
+        "mallcoppro-a694",
+        "mallcoppro-027",
+        "mallcoppro-a9b",
+        "mallcoppro-9e3",
+        "mallcoppro-f15",
+        "mallcoppro-3a3",
+        "mallcoppro-a3a",
+        "mallcoppro-ea2",
+        "mallcoppro-3e8",
+        "mallcoppro-0b2",
+        "mallcoppro-8dc",
+        "mallcoppro-6cd",
+        "mallcoppro-1d0",
+        "mallcoppro-c417",
+        "mallcoppro-f1f",
+        "mallcoppro-2fa",
+        "mallcoppro-36f"
+      ],
+      "agent_type": "sweeper-security",
+      "test_depth": "review",
+      "model_tier": "opus",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-cea",
+      "title": "Review: Q_P1_08",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-027"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-d77",
+      "title": "Veracity audit \u2014 Phase 1 wave",
+      "type": "review",
+      "status": "inbox",
+      "blocked_by": [],
+      "agent_type": "veracity-adversary",
+      "test_depth": "review",
+      "model_tier": "opus",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-db2",
+      "title": "Review: Q_P1_06",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-61f"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-dd3",
+      "title": "Review: Q_P1_07",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a694"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-e8a",
+      "title": "Review: Q_P2_08",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-0b2"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-f23",
+      "title": "Review: Q_P2_03",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-f15"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-f48",
+      "title": "Veracity audit \u2014 Phase 2 wave",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-d77"
+      ],
+      "agent_type": "veracity-adversary",
+      "test_depth": "review",
+      "model_tier": "opus",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-f5c",
+      "title": "Veracity audit \u2014 Phase 3 wave",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-f48"
+      ],
+      "agent_type": "veracity-adversary",
+      "test_depth": "review",
+      "model_tier": "opus",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-f80",
+      "title": "Review: Q_P3_01",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-1d0"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-fb8",
+      "title": "Review: Q_P1_03",
+      "type": "review",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-3a8"
+      ],
+      "agent_type": "reviewer",
+      "test_depth": "review",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-027",
+      "title": ".github/workflows/exam.yml \u2014 smoke exam on PR",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a694"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature (CI run IS the test)",
+      "model_tier": "haiku",
+      "artifact_type": "ops (CI workflow)"
+    },
+    {
+      "id": "mallcoppro-0b2",
+      "title": "CI: nightly bakeoff job in .github/workflows/exam.yml",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a694",
+        "mallcoppro-d77",
+        "mallcoppro-3e8",
+        "mallcoppro-027"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature (CI run)",
+      "model_tier": "haiku",
+      "artifact_type": "ops"
+    },
+    {
+      "id": "mallcoppro-1d0",
+      "title": "charts/exam-fixer.toml + agents/fixer/POST.md",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-3e8",
+        "mallcoppro-f48"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "ops + spec"
+    },
+    {
+      "id": "mallcoppro-2fa",
+      "title": "cmd/mallcop-fixer-no-auto-apply: hook gate on fixer writes",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-3e8",
+        "mallcoppro-f48",
+        "mallcoppro-f1f"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-36f",
+      "title": "docs/ops/fixer-runbook.md \u2014 reviewing fixer diffs",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-3e8",
+        "mallcoppro-f48",
+        "mallcoppro-1d0",
+        "mallcoppro-c417",
+        "mallcoppro-f1f",
+        "mallcoppro-2fa"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "test-only (docs)",
+      "model_tier": "haiku",
+      "artifact_type": "ops (runbook)"
+    },
+    {
+      "id": "mallcoppro-3a3",
+      "title": "agents/investigate/POST.md \u2014 full port of checklist + credential-theft sections",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a694",
+        "mallcoppro-d77",
+        "mallcoppro-9e3",
+        "mallcoppro-f15",
+        "mallcoppro-6cd"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature (lint test IS the gate)",
+      "model_tier": "sonnet (reading + faithful port, no novel reasoning)",
+      "artifact_type": "spec (disposition prompt)"
+    },
+    {
+      "id": "mallcoppro-3a8",
+      "title": "cmd/exam-transcript-dump: sanitized transcript for judge disposition",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-c4f"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-3e8",
+      "title": "TestExamFull + TestExamBakeoff \u2014 56 scenarios + 3-model bakeoff green",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a694",
+        "mallcoppro-d77",
+        "mallcoppro-e9b",
+        "mallcoppro-9e3",
+        "mallcoppro-f15",
+        "mallcoppro-3a3",
+        "mallcoppro-a3a",
+        "mallcoppro-ea2",
+        "mallcoppro-6cd"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature (real we processes, real canned backend, 56-scenario coverage)",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-61f",
+      "title": "agents/report + cmd/mallcop-exam-report verdict aggregator",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-b86"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "code + spec"
+    },
+    {
+      "id": "mallcoppro-6cd",
+      "title": "cmd/mallcop-investigate-tools: check-baseline, search-events, search-findings",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-c4f",
+        "mallcoppro-d0f",
+        "mallcoppro-d77"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-8dc",
+      "title": "TestScanShParity: legion exam vs scan.sh divergence watchdog",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a694",
+        "mallcoppro-d77",
+        "mallcoppro-3e8"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature (two real paths compared)",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-9e3",
+      "title": "cmd/mallcop-checklist-verify: pre-resolution checklist hook CLI",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a694",
+        "mallcoppro-d77"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-a3a",
+      "title": "charts/exam-bakeoff-{haiku,sonnet,opus}.toml.tmpl + renderer",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a694",
+        "mallcoppro-d77",
+        "mallcoppro-a9b",
+        "mallcoppro-e93"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "ops + code"
+    },
+    {
+      "id": "mallcoppro-a694",
+      "title": "TestExamID01: ID-01 end-to-end green with --exit-on-idle",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-e9b",
+        "mallcoppro-c4f",
+        "mallcoppro-d0f",
+        "mallcoppro-3a8",
+        "mallcoppro-e93",
+        "mallcoppro-b86",
+        "mallcoppro-61f"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature (real we subprocess, real canned backend, no mocking the chain)",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-a9b",
+      "title": "Legion upstream: [inference].forge_api_url chart field (~10 LOC)",
+      "type": "task",
+      "status": "inbox",
+      "blocked_by": [],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "code (cross-repo)"
+    },
+    {
+      "id": "mallcoppro-b86",
+      "title": "agents/judge/POST.md \u2014 blind judge prompt with lint test",
+      "type": "task",
+      "status": "inbox",
+      "blocked_by": [],
+      "agent_type": "implementer",
+      "test_depth": "feature (lint test IS the integration)",
+      "model_tier": "sonnet",
+      "artifact_type": "spec (disposition prompt)"
+    },
+    {
+      "id": "mallcoppro-c417",
+      "title": "mallcop-exam-report --seed-fix-suggestions: cluster failing verdicts",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-3e8",
+        "mallcoppro-f48",
+        "mallcoppro-61f"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-c4f",
+      "title": "Scenario Go struct + YAML validator (internal/exam/scenario.go)",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-e9b"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-d0f",
+      "title": "cmd/exam-seed: walk scenarios, strip ground truth, post work:create",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-c4f"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature (integration against temp campfire)",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-e93",
+      "title": "charts/exam.toml.tmpl + cmd/exam-render-chart renderer",
+      "type": "task",
+      "status": "inbox",
+      "blocked_by": [],
+      "agent_type": "implementer",
+      "test_depth": "feature (chart parses through legion, not just TOML lint)",
+      "model_tier": "sonnet",
+      "artifact_type": "ops (chart template) + code (renderer)"
+    },
+    {
+      "id": "mallcoppro-e9b",
+      "title": "56 Academy scenarios ported to mallcop-legion/exams/scenarios/",
+      "type": "task",
+      "status": "inbox",
+      "blocked_by": [],
+      "agent_type": "implementer",
+      "test_depth": "test-only",
+      "model_tier": "haiku",
+      "artifact_type": "spec"
+    },
+    {
+      "id": "mallcoppro-ea2",
+      "title": "cmd/mallcop-bakeoff-report: aggregate N per-model reports",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a694",
+        "mallcoppro-d77",
+        "mallcoppro-61f"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-f15",
+      "title": "cmd/mallcop-credential-theft-verify: credential-theft hook CLI",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-a694",
+        "mallcoppro-d77"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "code"
+    },
+    {
+      "id": "mallcoppro-f1f",
+      "title": "Fixer diff emission protocol + Go types",
+      "type": "task",
+      "status": "blocked",
+      "blocked_by": [
+        "mallcoppro-3e8",
+        "mallcoppro-f48",
+        "mallcoppro-1d0"
+      ],
+      "agent_type": "implementer",
+      "test_depth": "feature",
+      "model_tier": "sonnet",
+      "artifact_type": "spec + code"
+    }
+  ],
+  "summary": {
+    "total": 60,
+    "by_agent_type": {
+      "reviewer": 24,
+      "sweeper-testcoverage": 1,
+      "sweeper-deadcode": 1,
+      "sweeper-security": 5,
+      "sweeper-antipatterns": 1,
+      "sweeper-bugs": 1,
+      "veracity-adversary": 3,
+      "implementer": 24
+    },
+    "by_status": {
+      "blocked": 55,
+      "inbox": 5
+    },
+    "ready_now": [
+      "mallcoppro-d77",
+      "mallcoppro-a9b",
+      "mallcoppro-b86",
+      "mallcoppro-e93",
+      "mallcoppro-e9b"
+    ]
+  }
+}

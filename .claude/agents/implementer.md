@@ -1,0 +1,1 @@
+/home/baron/projects/resonant/docs/practice/agents/implementer.md
