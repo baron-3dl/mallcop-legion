@@ -69,6 +69,9 @@ declare -A SHA256_MAP=(
   ["v0.1.0:linux-amd64"]="0fa01906fc78f8b3434944d4d42b3f99d9e5592f28af76f7ed55bc0a637b635f"
   ["v0.1.0:linux-arm64"]="392fb893238fbfc00e7fa1e4ed081bbcb430093a5e2f4f00be90e20ae262df74"
   ["v0.1.0:darwin-arm64"]="0b5cbc6e8cd51e5e965c5a27a278a5fd6e2e3b4b911951117b905eef254a26d4"
+  ["v0.1.1:linux-amd64"]="6d388a33fe3fd55ea424d7083d5a0435e6a43bce508c55b7b1c8ed2030b311bd"
+  ["v0.1.1:linux-arm64"]="f6a399a57dcfe4153655d8353b96fe01ca9626f8806419e414ee2eafcb66f288"
+  ["v0.1.1:darwin-arm64"]="3d64bdc8e4cf7578864b9df289de59c3ab5f4a5e68fadfd4b5f9b79568e10660"
 )
 
 EXPECTED_SHA="${SHA256_MAP["${VERSION}:${PLATFORM}"]:-}"

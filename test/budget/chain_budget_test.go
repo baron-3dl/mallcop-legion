@@ -324,17 +324,16 @@ func TestWeStartsAndExitsOnIdle(t *testing.T) {
 	root := repoRoot(t)
 	weBin := weWrapper(root)
 
-	// Preflight: does the installed `we` support --exit-on-idle? The flag
-	// exists on legion main but is not in tagged release v0.1.0 (the version
-	// pinned in .we-version). Skip with a clear, actionable message until a
-	// newer legion release includes it.
-	helpOut, _ := exec.Command(weBin, "start", "--help").CombinedOutput()
-	if !strings.Contains(string(helpOut), "exit-on-idle") {
+	// Preflight: does the installed `we` support --exit-on-idle? We can't
+	// trust `we start --help` because the flag is registered but not listed
+	// there in v0.1.1. Instead, try the flag against a non-existent chart:
+	// unsupported-flag → "flag provided but not defined", supported → some
+	// other error mentioning the chart.
+	probe := exec.Command(weBin, "start", "--exit-on-idle", "--chart", "/nonexistent-preflight")
+	probeOut, _ := probe.CombinedOutput()
+	if bytes.Contains(probeOut, []byte("flag provided but not defined")) {
 		t.Skip("BLOCKED: installed `we` release does not support --exit-on-idle. " +
-			"The flag is implemented on legion's main branch but not in tagged " +
-			"release v0.1.0 (pinned in .we-version). " +
-			"To unblock: ask the legion team to cut a new release (e.g. v0.1.1) " +
-			"that includes the --exit-on-idle flag, then bump .we-version and " +
+			"Bump .we-version to a legion release that includes the flag and " +
 			"update SHA256_MAP in bin/we.")
 	}
 
