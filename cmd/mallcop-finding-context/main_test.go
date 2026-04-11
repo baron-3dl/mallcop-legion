@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/thirdiv/mallcop-legion/pkg/baseline"
 	"github.com/thirdiv/mallcop-legion/pkg/event"
@@ -393,3 +396,169 @@ func max(a, b int) int {
 	return b
 }
 
+// --------------------------------------------------------------------------
+// relevantEvents / emitExternalMessages filter tests (mallcoppro-014)
+// --------------------------------------------------------------------------
+
+func mkEvent(id, actor string) event.Event {
+	return event.Event{
+		ID:        id,
+		Source:    "github",
+		Type:      "workflows.completed_workflow_run",
+		Actor:     actor,
+		Timestamp: time.Date(2026, 4, 11, 0, 0, 0, 0, time.UTC),
+		Payload:   json.RawMessage(`{"k":"v"}`),
+	}
+}
+
+// TestRelevantEvents_FilterByEvidenceEventID verifies that a finding whose
+// evidence carries a single `event_id` string selects exactly that event.
+func TestRelevantEvents_FilterByEvidenceEventID(t *testing.T) {
+	fi := &finding.Finding{
+		ID:       "f1",
+		Actor:    "alice",
+		Evidence: json.RawMessage(`{"event_id":"evt-2"}`),
+	}
+	events := []event.Event{
+		mkEvent("evt-1", "alice"),
+		mkEvent("evt-2", "alice"),
+		mkEvent("evt-3", "bob"),
+	}
+	got := relevantEvents(fi, events)
+	if len(got) != 1 || got[0].ID != "evt-2" {
+		t.Errorf("got %v, want [evt-2]", got)
+	}
+}
+
+// TestRelevantEvents_FilterByEvidenceEventIDs verifies the plural form
+// (evidence.event_ids []string) selects the named events.
+func TestRelevantEvents_FilterByEvidenceEventIDs(t *testing.T) {
+	fi := &finding.Finding{
+		ID:       "f1",
+		Actor:    "alice",
+		Evidence: json.RawMessage(`{"event_ids":["evt-1","evt-3"]}`),
+	}
+	events := []event.Event{
+		mkEvent("evt-1", "alice"),
+		mkEvent("evt-2", "alice"),
+		mkEvent("evt-3", "bob"),
+		mkEvent("evt-4", "carol"),
+	}
+	got := relevantEvents(fi, events)
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2", len(got))
+	}
+	ids := map[string]bool{}
+	for _, e := range got {
+		ids[e.ID] = true
+	}
+	if !ids["evt-1"] || !ids["evt-3"] {
+		t.Errorf("got %v, want [evt-1 evt-3]", ids)
+	}
+}
+
+// TestRelevantEvents_FallbackToActor verifies that when evidence carries
+// no event_ids, selection falls back to matching the finding's actor.
+func TestRelevantEvents_FallbackToActor(t *testing.T) {
+	fi := &finding.Finding{
+		ID:       "f1",
+		Actor:    "alice",
+		Evidence: json.RawMessage(`{"note":"something"}`),
+	}
+	events := []event.Event{
+		mkEvent("evt-1", "alice"),
+		mkEvent("evt-2", "bob"),
+		mkEvent("evt-3", "alice"),
+		mkEvent("evt-4", "carol"),
+	}
+	got := relevantEvents(fi, events)
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2", len(got))
+	}
+	for _, e := range got {
+		if e.Actor != "alice" {
+			t.Errorf("event %s actor = %q, want alice", e.ID, e.Actor)
+		}
+	}
+}
+
+// TestRelevantEvents_EmptyWhenNoCriteria verifies that a finding with no
+// event_ids and no actor returns no events — we never fall all the way
+// back to dumping everything (that was the whole bug).
+func TestRelevantEvents_EmptyWhenNoCriteria(t *testing.T) {
+	fi := &finding.Finding{
+		ID:       "f1",
+		Actor:    "", // empty
+		Evidence: json.RawMessage(`{}`),
+	}
+	events := []event.Event{
+		mkEvent("evt-1", "alice"),
+		mkEvent("evt-2", "bob"),
+		mkEvent("evt-3", "carol"),
+	}
+	got := relevantEvents(fi, events)
+	if len(got) != 0 {
+		t.Errorf("got %d events, want 0 (regression: filter must not fall through to all-events)", len(got))
+	}
+}
+
+// TestRelevantEvents_EventIDsWinOverActor verifies that when both rules
+// would match, the explicit event_ids take precedence (tighter wins).
+func TestRelevantEvents_EventIDsWinOverActor(t *testing.T) {
+	fi := &finding.Finding{
+		ID:       "f1",
+		Actor:    "alice",
+		Evidence: json.RawMessage(`{"event_id":"evt-2"}`),
+	}
+	events := []event.Event{
+		mkEvent("evt-1", "alice"),
+		mkEvent("evt-2", "alice"),
+		mkEvent("evt-3", "alice"),
+		mkEvent("evt-4", "bob"),
+	}
+	got := relevantEvents(fi, events)
+	if len(got) != 1 || got[0].ID != "evt-2" {
+		t.Errorf("got %v, want [evt-2] (actor would return 3, event_id must win)", got)
+	}
+}
+
+// TestEmitExternalMessages_FiltersIrrelevant verifies the end-to-end emit
+// path: 100 events for different actors, finding references 3 by ID,
+// output contains exactly the 3 payload blocks. This is the regression
+// test for the mallcoppro-014 bug: the prior implementation dumped all
+// 100 events, costing tokens and degrading triage quality.
+func TestEmitExternalMessages_FiltersIrrelevant(t *testing.T) {
+	fi := &finding.Finding{
+		ID:       "f1",
+		Actor:    "baron-3dl",
+		Evidence: json.RawMessage(`{"event_ids":["evt-7","evt-42","evt-99"]}`),
+	}
+	var events []event.Event
+	for i := 0; i < 100; i++ {
+		events = append(events, mkEvent(fmt.Sprintf("evt-%d", i), "noise"))
+	}
+	// flip three of them to the finding's actor so actor-fallback would
+	// also wrongly expand if the event_id rule weren't the primary.
+	events[7].Actor = "baron-3dl"
+	events[42].Actor = "baron-3dl"
+	events[99].Actor = "baron-3dl"
+
+	got := captureOutput(t, func() {
+		emitExternalMessages(fi, events)
+	})
+
+	// Each emitted event contributes one "event_id:" line. Count them.
+	lines := strings.Count(got, "event_id:")
+	if lines != 3 {
+		t.Errorf("emitted %d event_id lines, want 3\noutput:\n%s", lines, got)
+	}
+	for _, want := range []string{"evt-7", "evt-42", "evt-99"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+	// Sanity: an evt-0 (noise actor, not referenced) must NOT appear.
+	if strings.Contains(got, "event_id: evt-0") {
+		t.Errorf("output leaked noise event evt-0:\n%s", got)
+	}
+}

@@ -92,9 +92,93 @@ func loadEvents(path string) ([]event.Event, error) {
 	return events, nil
 }
 
+// relevantEvents picks the subset of events that relate to the finding.
+//
+// Selection order (first match wins):
+//  1. Event IDs referenced by the finding's evidence:
+//       {"event_id": "..."}       (single, as emitted by the V3 detectors)
+//       {"event_ids": ["...", ...]} (plural, for multi-event findings)
+//  2. Events matching the finding's actor (fi.Actor), when the actor is
+//     non-empty. This is the fallback for detectors that don't pin specific
+//     events — it still narrows from "everything pulled this scan" to
+//     "everything this actor did this scan" (usually 10–100x reduction).
+//  3. If neither rule matches and the finding is otherwise related to the
+//     events (empty actor, no evidence), emit nothing. The triage agent
+//     will see an empty [USER_DATA_*] block and can escalate for missing
+//     context rather than being drowned in unrelated events.
+//
+// The previous implementation dumped every event blindly, which cost tokens
+// and degraded triage quality. Surfaced during the v2-deploy dogfood scan
+// on 2026-04-11: 648 events pulled → 13k-token prompt for a single-actor
+// finding. rd: mallcoppro-014.
+func relevantEvents(fi *finding.Finding, events []event.Event) []event.Event {
+	// Rule 1: explicit event_id(s) from evidence.
+	if idSet := extractEvidenceEventIDs(fi.Evidence); len(idSet) > 0 {
+		out := make([]event.Event, 0, len(idSet))
+		for _, ev := range events {
+			if _, ok := idSet[ev.ID]; ok {
+				out = append(out, ev)
+			}
+		}
+		return out
+	}
+
+	// Rule 2: actor match.
+	if fi.Actor != "" {
+		out := make([]event.Event, 0)
+		for _, ev := range events {
+			if ev.Actor == fi.Actor {
+				out = append(out, ev)
+			}
+		}
+		return out
+	}
+
+	// Rule 3: no selection criteria — emit nothing. Let the triage agent
+	// decide what to do with a finding that has no anchoring context.
+	return nil
+}
+
+// extractEvidenceEventIDs pulls event_id / event_ids values out of a
+// finding's Evidence blob. The evidence shape is detector-defined, but by
+// convention the keys are "event_id" (string) and "event_ids" (array of
+// strings). Returns nil when no IDs are present.
+func extractEvidenceEventIDs(evidence json.RawMessage) map[string]struct{} {
+	if len(evidence) == 0 {
+		return nil
+	}
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(evidence, &parsed); err != nil {
+		return nil
+	}
+
+	ids := make(map[string]struct{})
+	if raw, ok := parsed["event_id"]; ok {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil && s != "" {
+			ids[s] = struct{}{}
+		}
+	}
+	if raw, ok := parsed["event_ids"]; ok {
+		var xs []string
+		if err := json.Unmarshal(raw, &xs); err == nil {
+			for _, s := range xs {
+				if s != "" {
+					ids[s] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
+
 func emitExternalMessages(fi *finding.Finding, events []event.Event) {
+	selected := relevantEvents(fi, events)
 	var sb strings.Builder
-	for i, ev := range events {
+	for i, ev := range selected {
 		if i > 0 {
 			sb.WriteString("\n")
 		}
