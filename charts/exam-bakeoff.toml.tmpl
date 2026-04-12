@@ -1,0 +1,98 @@
+# Bakeoff chart template. Usage:
+# sed 's/{{MODEL}}/glm-4.7-flash/g; s/{{RUN_ID}}/20260412/g' exam-bakeoff.toml.tmpl > exam-glm.toml
+
+[identity]
+name     = "mallcop-bakeoff-{{RUN_ID}}-{{MODEL}}"
+type     = "worker"
+key_file = ".run/exam-{{RUN_ID}}/identity.json"    # fresh per run
+
+[[worksources]]
+type     = "ready"
+campfire = "exam-{{RUN_ID}}"
+skills   = ["exam:scenario", "task:investigate", "task:heal", "exam:judge", "exam:report"]
+
+[budget]
+max_tokens_per_session = 50000       # per scenario ceiling (A-04)
+max_tokens_per_task    = 15000
+
+[autonomy]
+max_tasks_per_session  = 1           # one scenario per session; budget resets between (A-04)
+
+[capabilities]
+gate_policy    = "gated"
+authority      = "baron@3dl.dev"
+tool_allowlist = ["bash", "read", "grep", "glob"]
+
+[[capabilities.seed]]
+name = "triage"
+match = ["exam:scenario", "task:triage"]
+tools = ["bash", "read", "check-baseline", "search-events"]
+model = "{{MODEL}}"
+
+[[capabilities.seed]]
+name = "investigate"
+match = ["task:investigate"]
+tools = ["bash", "read", "check-baseline", "search-events", "search-findings", "load-skill"]
+model = "{{MODEL}}"
+# check-baseline, search-events, search-findings are served by mallcop-investigate-tools
+# (cmd/mallcop-investigate-tools) via --tool flag. legion resolves logical tool names to
+# the backing binary declared below.
+
+[[capabilities.tool_binaries]]
+binary = "mallcop-investigate-tools"
+tools  = ["check-baseline", "search-events", "search-findings"]
+
+[[capabilities.seed]]
+name = "heal"
+match = ["task:heal"]
+tools = ["bash", "read", "exam-transcript-dump"]   # NO real write tools in exam
+model = "{{MODEL}}"
+
+[[capabilities.seed]]
+name = "judge"
+match = ["exam:judge"]
+tools = ["read"]                      # jail sees transcripts/ only (see [sandbox])
+model = "{{MODEL}}"
+
+[[capabilities.seed]]
+name = "report"
+match = ["exam:report"]
+tools = ["read", "bash"]
+model = "haiku"
+
+# Phase 1 note: mallcop-checklist-verify and mallcop-credential-theft-verify
+# are no-ops until Phase 2 ships the verify binaries in mallcop-legion/cmd/.
+# The hooks are declared here so the chart is structurally complete and legion
+# can validate them at boot; the commands exit 0 until Phase 2.
+[[hooks]]
+point   = "pre_bead_close"
+type    = "veracity_gate"
+command = "mallcop-checklist-verify"      # Go CLI in mallcop-legion/cmd/
+
+[[hooks]]
+point   = "pre_bead_close"
+type    = "veracity_gate"
+command = "mallcop-credential-theft-verify"
+
+[lifecycle]
+max_workers   = 3
+time_limit    = "90m"
+poll_interval = "2s"
+
+[inference]
+forge_api_url = "{{FORGE_API_URL}}"       # NEW legion field — Gap 1
+[inference.local_model_mapping]
+local = "qwen3-coder-30b"
+
+[agents]
+dir = "agents"
+
+[campfire]
+transport_dir = ".run/exam-{{RUN_ID}}/campfires"
+
+[sandbox]
+extra_ro = [
+  "exams/fixtures/{{RUN_ID}}/",      # chain steps read fixtures here
+  "exams/transcripts/{{RUN_ID}}/",   # judge reads transcripts here
+  "agents/",
+]
