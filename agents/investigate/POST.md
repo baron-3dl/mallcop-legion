@@ -65,6 +65,72 @@ score.
 - Confidence is high (≥0.85) that the account should be suspended
 - The actor is performing active exfiltration or privilege escalation
 
+### Fan-out on Uncertainty
+
+When your investigation reaches a confidence score below 0.55, you cannot emit
+a single verdict. Instead, you must emit **3 task:deep-investigate items** and
+**1 task:investigate-merge item** to fan out the investigation across multiple
+parallel workers.
+
+#### When to fan out
+
+The fan-out trigger is structural, not self-reported. Before you close, a
+`pre_bead_close` hook runs `mallcop-investigate-confidence` which scores your
+investigation on these signals:
+
+| Signal | Weight | Cap |
+|--------|--------|-----|
+| Tool calls made | 0.04/call | 8 calls |
+| Distinct tools used | 0.08/tool | 4 tools |
+| Evidence citations in reason | 0.04/citation | 5 citations |
+| Iteration penalty (>3 iters) | -0.02/iter | — |
+
+If your score is below 0.55, the hook blocks your close and forces the fan-out
+path instead.
+
+#### Fan-out sequence
+
+1. **Write partial transcript**: Before emitting the work items, write your
+   partial investigation to `exams/transcripts/<run>/<finding_id>-partial.md`.
+   Include all tool calls made, evidence gathered, and partial reasoning so far.
+
+2. **Emit 3 deep-investigate items**: Create work items with:
+   - Type: `task:deep-investigate`
+   - Metadata field `hypothesis`: one of `benign`, `malicious`, `incomplete`
+   - Each gets the same finding_id but directed with a different hypothesis:
+     - **hypothesis:benign** — "Assume this actor is legitimate. Find confirming
+       evidence. If you cannot confirm benign within budget, that is signal."
+     - **hypothesis:malicious** — "Assume the account is compromised. Find
+       confirming evidence. What is the attack vector? What else would be true
+       if this is an attack?"
+     - **hypothesis:incomplete** — "The parent investigation could not resolve
+       because data is missing. What additional data sources would disambiguate?
+       What observable would flip the verdict?"
+
+3. **Emit 1 investigate-merge item**: Create one work item with:
+   - Type: `task:investigate-merge`
+   - Depends on all 3 deep-investigate items
+   - Will run when all 3 are complete
+
+#### The merge step
+
+The `investigate-merge` actor reads the 3 deep-investigate transcripts and
+produces a single verdict. This is NOT a majority vote—it is evidence
+aggregation:
+
+- If all 3 agree: that is the verdict, confidence = max of the three.
+- If 2 agree, 1 disagrees: verdict = majority, but the dissent's evidence must
+  be addressed in the reason. Confidence = weighted average, penalized by 0.1.
+- If all 3 disagree: escalate to heal with all evidence compiled. The system
+  is genuinely uncertain — a human must see this.
+
+#### Constraint
+
+Do NOT change the existing dismiss/escalate/remediate logic. The fan-out is a
+NEW exit path triggered by the confidence hook, not a replacement for these
+three actions. After the merge item completes with a verdict, the merge actor
+emits dismiss/escalate/remediate as usual.
+
 ### Fail-safe Rule
 
 If you cannot parse the finding, if investigation is inconclusive, or if you
