@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/thirdiv/mallcop-legion/internal/exam"
@@ -233,6 +234,22 @@ type fixtureBaseline struct {
 	Relationships   map[string]exam.RelationshipEntry `json:"relationships,omitempty"`
 }
 
+// repoRootForExecPath returns the absolute path to the repo root by walking
+// up from this file using runtime.Caller.
+func repoRootForExecPath() (string, error) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", fmt.Errorf("runtime.Caller failed")
+	}
+	// cmd/exam-seed/main.go → ../.. → repo root
+	root := filepath.Join(filepath.Dir(filename), "..", "..")
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	return abs, nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "exam-seed: %v\n", err)
@@ -243,8 +260,8 @@ func main() {
 func run() error {
 	runID := flag.String("run", "", "run identifier (required)")
 	campfireID := flag.String("campfire", "", "campfire ID or beacon to post messages to (required)")
-	scenariosDir := flag.String("scenarios-dir", "exams/scenarios", "directory containing scenario YAML files")
-	fixturesDir := flag.String("fixtures-dir", "exams/fixtures", "directory for materialized fixture files")
+	scenariosDir := flag.String("scenarios-dir", "", "directory containing scenario YAML files (default: repo-root/exams/scenarios)")
+	fixturesDir := flag.String("fixtures-dir", "", "directory for materialized fixture files (default: repo-root/exams/fixtures)")
 	scenarioFilter := flag.String("scenario", "", "optional: limit to one scenario ID")
 	flag.Parse()
 
@@ -253,6 +270,22 @@ func run() error {
 	}
 	if *campfireID == "" {
 		return fmt.Errorf("--campfire is required")
+	}
+
+	// Resolve default directories to absolute paths using repo root.
+	if *scenariosDir == "" {
+		root, err := repoRootForExecPath()
+		if err != nil {
+			return fmt.Errorf("determine repo root: %w", err)
+		}
+		*scenariosDir = filepath.Join(root, "exams", "scenarios")
+	}
+	if *fixturesDir == "" {
+		root, err := repoRootForExecPath()
+		if err != nil {
+			return fmt.Errorf("determine repo root: %w", err)
+		}
+		*fixturesDir = filepath.Join(root, "exams", "fixtures")
 	}
 
 	cfBin, err := exec.LookPath("cf")
