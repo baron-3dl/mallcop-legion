@@ -1,0 +1,94 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T10:00:00Z",
+      "IngestedAt": "2026-03-10T10:01:00Z",
+      "Source": "azure",
+      "EventType": "image_push",
+      "Actor": "deploy-svc",
+      "Action": "push_image",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerRegistries/atomregistry",
+      "Severity": "info",
+      "Metadata": {
+        "image_count": 8,
+        "image_tag": "v2.4.0",
+        "ip": "192.0.2.50",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T10:05:00Z",
+      "IngestedAt": "2026-03-10T10:06:00Z",
+      "Source": "azure",
+      "EventType": "container_deploy",
+      "Actor": "deploy-svc",
+      "Action": "deploy_container",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "image_tag": "v2.4.0",
+        "ip": "192.0.2.50",
+        "release": "v2.4.0",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T10:08:00Z",
+      "IngestedAt": "2026-03-10T10:09:00Z",
+      "Source": "azure",
+      "EventType": "container_restart",
+      "Actor": "deploy-svc",
+      "Action": "restart_container",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.50",
+        "reason": "rolling_update",
+        "release": "v2.4.0",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-10T10:12:00Z",
+      "IngestedAt": "2026-03-10T10:13:00Z",
+      "Source": "azure",
+      "EventType": "container_deploy",
+      "Actor": "deploy-svc",
+      "Action": "deploy_container",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot",
+      "Severity": "info",
+      "Metadata": {
+        "image_tag": "v2.4.0",
+        "ip": "192.0.2.50",
+        "release": "v2.4.0",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_005",
+      "Timestamp": "2026-03-10T10:20:00Z",
+      "IngestedAt": "2026-03-10T10:21:00Z",
+      "Source": "azure",
+      "EventType": "health_check",
+      "Actor": "deploy-svc",
+      "Action": "health_check",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.50",
+        "release": "v2.4.0",
+        "status": "healthy",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-13T09:00:00Z",
+      "IngestedAt": "2026-03-13T09:01:00Z",
+      "Source": "azure",
+      "EventType": "mfa_setup_started",
+      "Actor": "new-hire-carlos",
+      "Action": "begin_mfa_enrollment",
+      "Target": "acme-corp/auth/mfa",
+      "Severity": "info",
+      "Metadata": {
+        "enrollment_method": "totp",
+        "ip": "172.16.0.45",
+        "session_id": "enroll-sess-001",
+        "user_agent": "Microsoft Authenticator/6.7.0 (iOS 17.3)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-13T09:01:15Z",
+      "IngestedAt": "2026-03-13T09:02:00Z",
+      "Source": "azure",
+      "EventType": "mfa_failure",
+      "Actor": "new-hire-carlos",
+      "Action": "verify_mfa",
+      "Target": "acme-corp/auth/mfa",
+      "Severity": "warn",
+      "Metadata": {
+        "failure_reason": "incorrect_otp",
+        "ip": "172.16.0.45",
+        "session_id": "enroll-sess-001",
+        "user_agent": "Microsoft Authenticator/6.7.0 (iOS 17.3)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-13T09:02:40Z",
+      "IngestedAt": "2026-03-13T09:03:00Z",
+      "Source": "azure",
+      "EventType": "mfa_failure",
+      "Actor": "new-hire-carlos",
+      "Action": "verify_mfa",
+      "Target": "acme-corp/auth/mfa",
+      "Severity": "warn",
+      "Metadata": {
+        "failure_reason": "incorrect_otp",
+        "ip": "172.16.0.45",
+        "session_id": "enroll-sess-001",
+        "user_agent": "Microsoft Authenticator/6.7.0 (iOS 17.3)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-13T09:03:55Z",
+      "IngestedAt": "2026-03-13T09:04:00Z",
+      "Source": "azure",
+      "EventType": "mfa_failure",
+      "Actor": "new-hire-carlos",
+      "Action": "verify_mfa",
+      "Target": "acme-corp/auth/mfa",
+      "Severity": "warn",
+      "Metadata": {
+        "failure_reason": "incorrect_otp",
+        "ip": "172.16.0.45",
+        "session_id": "enroll-sess-001",
+        "user_agent": "Microsoft Authenticator/6.7.0 (iOS 17.3)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_005",
+      "Timestamp": "2026-03-13T09:04:48Z",
+      "IngestedAt": "2026-03-13T09:05:00Z",
+      "Source": "azure",
+      "EventType": "mfa_enrollment_complete",
+      "Actor": "new-hire-carlos",
+      "Action": "complete_mfa_enrollment",
+      "Target": "acme-corp/auth/mfa",
+      "Severity": "info",
+      "Metadata": {
+        "device_registered": "iPhone-Carlos-Work",
+        "enrollment_method": "totp",
+        "ip": "172.16.0.45",
+        "session_id": "enroll-sess-001",
+        "user_agent": "Microsoft Authenticator/6.7.0 (iOS 17.3)"
+      },
+      "Raw": {}
+    }
+  ]
+}

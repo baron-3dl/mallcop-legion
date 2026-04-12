@@ -1,0 +1,41 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T02:00:00Z",
+      "IngestedAt": "2026-03-10T02:01:00Z",
+      "Source": "azure",
+      "EventType": "bulk_read",
+      "Actor": "admin-user",
+      "Action": "list_users",
+      "Target": "acme-corp/tenant/users",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.10",
+        "operation_count": 1,
+        "result_count": 847,
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T02:01:00Z",
+      "IngestedAt": "2026-03-10T02:02:00Z",
+      "Source": "azure",
+      "EventType": "bulk_read",
+      "Actor": "admin-user",
+      "Action": "get_user_details",
+      "Target": "acme-corp/tenant/users",
+      "Severity": "warn",
+      "Metadata": {
+        "export_format": "json",
+        "includes_pii": true,
+        "ip": "203.0.113.10",
+        "operation_count": 100,
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

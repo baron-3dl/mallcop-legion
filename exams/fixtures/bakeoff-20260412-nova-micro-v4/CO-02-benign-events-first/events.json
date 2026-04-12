@@ -1,0 +1,119 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T14:00:00Z",
+      "IngestedAt": "2026-03-10T14:01:00Z",
+      "Source": "azure",
+      "EventType": "deployment",
+      "Actor": "deploy-svc",
+      "Action": "update_container_app",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.50",
+        "revision": "v2.4.1"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T14:02:00Z",
+      "IngestedAt": "2026-03-10T14:03:00Z",
+      "Source": "azure",
+      "EventType": "health_check",
+      "Actor": "deploy-svc",
+      "Action": "check_health",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.50",
+        "status": "healthy"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T14:03:30Z",
+      "IngestedAt": "2026-03-10T14:04:00Z",
+      "Source": "azure",
+      "EventType": "deployment",
+      "Actor": "deploy-svc",
+      "Action": "update_container_app",
+      "Target": "sub-169efd95/resourceGroups/rudi-dev/containerApps/ca-rudi",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.50",
+        "revision": "v1.9.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-10T14:04:15Z",
+      "IngestedAt": "2026-03-10T14:05:00Z",
+      "Source": "azure",
+      "EventType": "health_check",
+      "Actor": "deploy-svc",
+      "Action": "check_health",
+      "Target": "sub-169efd95/resourceGroups/rudi-dev/containerApps/ca-rudi",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.50",
+        "status": "healthy"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_005",
+      "Timestamp": "2026-03-10T14:05:00Z",
+      "IngestedAt": "2026-03-10T14:06:00Z",
+      "Source": "azure",
+      "EventType": "bulk_read",
+      "Actor": "deploy-svc",
+      "Action": "list_blobs",
+      "Target": "sub-169efd95/resourceGroups/atom-state-rg/storageAccounts/atomstate/containers/user-data",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "192.0.2.50",
+        "object_type": "user-records",
+        "operation_count": 847
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_006",
+      "Timestamp": "2026-03-10T14:06:00Z",
+      "IngestedAt": "2026-03-10T14:07:00Z",
+      "Source": "azure",
+      "EventType": "bulk_read",
+      "Actor": "deploy-svc",
+      "Action": "get_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-state-rg/storageAccounts/atomstate/containers/user-data",
+      "Severity": "warn",
+      "Metadata": {
+        "bytes_read": "2147483648",
+        "ip": "192.0.2.50",
+        "operation_count": 400
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_007",
+      "Timestamp": "2026-03-10T14:13:00Z",
+      "IngestedAt": "2026-03-10T14:14:00Z",
+      "Source": "azure",
+      "EventType": "bulk_read",
+      "Actor": "deploy-svc",
+      "Action": "get_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-state-rg/storageAccounts/atomstate/containers/user-data",
+      "Severity": "warn",
+      "Metadata": {
+        "bytes_read": "2684354560",
+        "ip": "192.0.2.50",
+        "operation_count": 447
+      },
+      "Raw": {}
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "report-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:database_read:report-svc": 4,
+    "azure:login:report-svc": 8,
+    "azure:storage_access:report-svc": 4,
+    "quarterly_burst:Q3-2025:report-svc": 768,
+    "quarterly_burst:Q4-2025:report-svc": 792
+  },
+  "relationships": {
+    "report-svc:sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod": {
+      "Count": 4,
+      "FirstSeen": "2025-06-30",
+      "LastSeen": "2025-12-31"
+    },
+    "report-svc:sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01": {
+      "Count": 8,
+      "FirstSeen": "2025-06-30",
+      "LastSeen": "2025-12-31"
+    }
+  }
+}

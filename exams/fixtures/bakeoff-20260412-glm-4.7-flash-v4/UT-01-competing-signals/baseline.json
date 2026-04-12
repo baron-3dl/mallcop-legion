@@ -1,0 +1,38 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:login:admin-user": 340,
+    "azure:login:ci-bot": 1200,
+    "azure:read_resource:admin-user": 89,
+    "azure:update_config:admin-user": 12,
+    "github:push:ci-bot": 450
+  },
+  "relationships": {
+    "admin-user:acme-corp/tenant": {
+      "Count": 340,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 45,
+      "FirstSeen": "2025-06-01",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/rudi-dev": {
+      "Count": 28,
+      "FirstSeen": "2025-07-10",
+      "LastSeen": "2026-03-08"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T02:17:04Z",
+      "IngestedAt": "2026-03-10T02:18:00Z",
+      "Source": "azure",
+      "EventType": "resource_write",
+      "Actor": "tf-automation",
+      "Action": "create_resource",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/providers/Microsoft.Storage/storageAccounts/atomstate001",
+      "Severity": "info",
+      "Metadata": {
+        "correlation_id": "tf-run-20260310-0217",
+        "ip": "198.51.100.20",
+        "resource_type": "Microsoft.Storage/storageAccounts",
+        "user_agent": "terraform-provider-azurerm/3.90.0 (+https://www.terraform.io)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T02:17:31Z",
+      "IngestedAt": "2026-03-10T02:18:00Z",
+      "Source": "azure",
+      "EventType": "resource_write",
+      "Actor": "tf-automation",
+      "Action": "create_resource",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/providers/Microsoft.Network/virtualNetworks/atom-vnet",
+      "Severity": "info",
+      "Metadata": {
+        "correlation_id": "tf-run-20260310-0217",
+        "ip": "198.51.100.20",
+        "resource_type": "Microsoft.Network/virtualNetworks",
+        "user_agent": "terraform-provider-azurerm/3.90.0 (+https://www.terraform.io)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T02:19:55Z",
+      "IngestedAt": "2026-03-10T02:20:00Z",
+      "Source": "azure",
+      "EventType": "resource_write",
+      "Actor": "tf-automation",
+      "Action": "update_resource",
+      "Target": "sub-169efd95/resourceGroups/atom-rg",
+      "Severity": "info",
+      "Metadata": {
+        "correlation_id": "tf-run-20260310-0217",
+        "ip": "198.51.100.20",
+        "operation": "terraform apply",
+        "user_agent": "terraform-provider-azurerm/3.90.0 (+https://www.terraform.io)"
+      },
+      "Raw": {}
+    }
+  ]
+}

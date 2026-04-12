@@ -1,0 +1,61 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T01:00:00Z",
+      "IngestedAt": "2026-03-10T01:01:00Z",
+      "Source": "azure",
+      "EventType": "login",
+      "Actor": "unknown-actor-x",
+      "Action": "login",
+      "Target": "acme-corp/tenant",
+      "Severity": "critical",
+      "Metadata": {
+        "ip": "198.51.100.200",
+        "location": "Unknown",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T01:01:30Z",
+      "IngestedAt": "2026-03-10T01:02:00Z",
+      "Source": "azure",
+      "EventType": "bulk_read",
+      "Actor": "unknown-actor-x",
+      "Action": "list_resources",
+      "Target": "sub-169efd95",
+      "Severity": "critical",
+      "Metadata": {
+        "ip": "198.51.100.200",
+        "operation_count": 42,
+        "resource_groups": [
+          "atom-rg",
+          "opensign-rg",
+          "rudi-dev",
+          "atom-state-rg",
+          "opensign-state-rg"
+        ],
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T01:03:00Z",
+      "IngestedAt": "2026-03-10T01:04:00Z",
+      "Source": "azure",
+      "EventType": "secret_access",
+      "Actor": "unknown-actor-x",
+      "Action": "list_secrets",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv",
+      "Severity": "critical",
+      "Metadata": {
+        "ip": "198.51.100.200",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

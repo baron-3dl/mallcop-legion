@@ -1,0 +1,25 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T16:55:09Z",
+      "IngestedAt": "2026-03-10T16:56:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "admin-user",
+      "Action": "add_role_assignment",
+      "Target": "sub-169efd95/resourceGroups/atom-rg",
+      "Severity": "critical",
+      "Metadata": {
+        "ip": "192.0.2.41",
+        "principal_id": "ext-sp-9c2f1a8b-4d3e-4f5a-b6c7-d8e9f0a1b2c3",
+        "principal_tenant_id": "ffffffff-dead-beef-dead-000000000000",
+        "principal_type": "ServicePrincipal",
+        "role": "Contributor",
+        "scope": "/subscriptions/169efd95-5e00-42f9-8e65-a1892791ed9a/resourceGroups/atom-rg",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc"
+    ],
+    "Sources": [
+      "azure"
+    ]
+  },
+  "frequency_tables": {
+    "azure:login:admin-user": 10,
+    "azure:read_resource:admin-user": 8,
+    "azure:update_config:admin-user": 4,
+    "time:09:admin-user": 3,
+    "time:10:admin-user": 4,
+    "time:16:admin-user": 3
+  },
+  "relationships": {
+    "admin-user:acme-corp/tenant": {
+      "Count": 10,
+      "FirstSeen": "2026-01-15",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api": {
+      "Count": 6,
+      "FirstSeen": "2026-01-15",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

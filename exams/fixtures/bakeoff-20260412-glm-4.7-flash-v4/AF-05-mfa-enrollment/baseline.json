@@ -1,0 +1,27 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github",
+      "hr-system"
+    ]
+  },
+  "frequency_tables": {
+    "azure:login:admin-user": 412,
+    "azure:mfa_failure:admin-user": 3,
+    "hr-system:user_provisioned:hr-system": 18
+  },
+  "relationships": {
+    "admin-user:acme-corp/auth": {
+      "Count": 412,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-12"
+    }
+  }
+}

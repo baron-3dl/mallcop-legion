@@ -1,0 +1,42 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-13T10:30:00Z",
+      "IngestedAt": "2026-03-13T10:31:00Z",
+      "Source": "azure",
+      "EventType": "database_access",
+      "Actor": "infra-admin",
+      "Action": "query_database",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-staging",
+      "Severity": "info",
+      "Metadata": {
+        "database": "atom-db-staging",
+        "ip": "192.0.2.15",
+        "operation": "SELECT",
+        "resource_group": "atom-rg",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-13T10:35:00Z",
+      "IngestedAt": "2026-03-13T10:36:00Z",
+      "Source": "azure",
+      "EventType": "config_update",
+      "Actor": "infra-admin",
+      "Action": "update_config",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-staging",
+      "Severity": "info",
+      "Metadata": {
+        "config_key": "max_connections",
+        "ip": "192.0.2.15",
+        "operation": "PATCH",
+        "resource_group": "atom-rg",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

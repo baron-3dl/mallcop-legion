@@ -1,0 +1,53 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "infra-admin",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:config_update:infra-admin": 189,
+    "azure:database_access:infra-admin": 412,
+    "azure:login:infra-admin": 523,
+    "azure:resource_list:infra-admin": 1204
+  },
+  "relationships": {
+    "infra-admin:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 892,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-12"
+    },
+    "infra-admin:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api": {
+      "Count": 234,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-12"
+    },
+    "infra-admin:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot": {
+      "Count": 178,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-11"
+    },
+    "infra-admin:sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod": {
+      "Count": 389,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-12"
+    },
+    "infra-admin:sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01": {
+      "Count": 201,
+      "FirstSeen": "2024-02-01",
+      "LastSeen": "2026-03-11"
+    },
+    "infra-admin:sub-169efd95/resourceGroups/atom-rg/vaults/atom-kv": {
+      "Count": 156,
+      "FirstSeen": "2024-03-01",
+      "LastSeen": "2026-03-10"
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-13T14:00:00Z",
+      "IngestedAt": "2026-03-13T14:01:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "tf-automation",
+      "Action": "add_role_assignment",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage-financial",
+      "Severity": "warn",
+      "Metadata": {
+        "approved_change": "CHG-2026-0891",
+        "context": "temporary_elevation",
+        "elevation_duration_minutes": 30,
+        "ip": "192.0.2.201",
+        "principal_id": "data-analyst",
+        "principal_type": "User",
+        "role": "Contributor",
+        "user_agent": "Terraform/1.7.4"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-13T14:31:00Z",
+      "IngestedAt": "2026-03-13T14:32:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "tf-automation",
+      "Action": "remove_role_assignment",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage-financial",
+      "Severity": "info",
+      "Metadata": {
+        "approved_change": "CHG-2026-0891",
+        "context": "auto_revert",
+        "ip": "192.0.2.201",
+        "principal_id": "data-analyst",
+        "role": "Contributor",
+        "user_agent": "Terraform/1.7.4"
+      },
+      "Raw": {}
+    }
+  ]
+}

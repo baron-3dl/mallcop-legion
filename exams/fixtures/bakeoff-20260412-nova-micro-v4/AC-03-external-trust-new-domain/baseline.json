@@ -1,0 +1,93 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:config_change:admin-user": 54,
+    "azure:directory_settings_update:admin-user": 2,
+    "azure:federation_settings_update:admin-user": 0,
+    "azure:login:admin-user": 412,
+    "azure:login:ci-bot": 1823,
+    "azure:login:tf-automation": 445,
+    "azure:policy_assignment:admin-user": 12,
+    "azure:read:admin-user": 289,
+    "azure:resource_created:admin-user": 37,
+    "azure:resource_deleted:admin-user": 6,
+    "azure:resource_list:ci-bot": 4401,
+    "azure:role_assignment:admin-user": 28,
+    "azure:service_principal_created:admin-user": 9,
+    "azure:write:admin-user": 67,
+    "azure:write:tf-automation": 312,
+    "github:issue:admin-user": 45,
+    "github:pull_request:admin-user": 112,
+    "github:push:admin-user": 256,
+    "github:push:ci-bot": 891,
+    "github:review:admin-user": 98
+  },
+  "relationships": {
+    "admin-user:acme-corp/atom-api": {
+      "Count": 401,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:acme-corp/infra": {
+      "Count": 213,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-08"
+    },
+    "admin-user:acme-corp/tenant/bd7184bc": {
+      "Count": 88,
+      "FirstSeen": "2024-01-01",
+      "LastSeen": "2026-03-08"
+    },
+    "admin-user:sub-169efd95": {
+      "Count": 512,
+      "FirstSeen": "2024-01-01",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/3dl-os": {
+      "Count": 34,
+      "FirstSeen": "2025-07-10",
+      "LastSeen": "2026-03-05"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 156,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/opensign-rg": {
+      "Count": 89,
+      "FirstSeen": "2025-05-20",
+      "LastSeen": "2026-03-08"
+    },
+    "admin-user:sub-169efd95/resourceGroups/rudi-dev": {
+      "Count": 67,
+      "FirstSeen": "2025-06-01",
+      "LastSeen": "2026-03-07"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 4401,
+      "FirstSeen": "2024-03-01",
+      "LastSeen": "2026-03-09"
+    },
+    "tf-automation:sub-169efd95": {
+      "Count": 167,
+      "FirstSeen": "2024-03-15",
+      "LastSeen": "2026-03-06"
+    },
+    "tf-automation:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 89,
+      "FirstSeen": "2024-03-15",
+      "LastSeen": "2026-03-06"
+    }
+  }
+}

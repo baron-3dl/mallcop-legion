@@ -1,0 +1,34 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "developer-alice",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github",
+      "hr-system"
+    ]
+  },
+  "frequency_tables": {
+    "azure:login:admin-user": 412,
+    "github:org.member_added:developer-alice": 3,
+    "github:push:developer-alice": 287,
+    "hr-system:user_provisioned:hr-system": 18
+  },
+  "relationships": {
+    "developer-alice:acme-corp": {
+      "Count": 456,
+      "FirstSeen": "2024-03-15",
+      "LastSeen": "2026-03-13"
+    },
+    "developer-alice:acme-corp/atom-api": {
+      "Count": 312,
+      "FirstSeen": "2024-03-15",
+      "LastSeen": "2026-03-13"
+    }
+  }
+}

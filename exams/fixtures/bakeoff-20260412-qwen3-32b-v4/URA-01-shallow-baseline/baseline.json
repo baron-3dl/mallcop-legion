@@ -1,0 +1,29 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "new-dev-user"
+    ],
+    "Sources": [
+      "azure"
+    ]
+  },
+  "frequency_tables": {
+    "azure:login:admin-user": 340,
+    "azure:login:ci-bot": 1200,
+    "azure:login:new-dev-user": 3
+  },
+  "relationships": {
+    "admin-user:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 45,
+      "FirstSeen": "2025-06-01",
+      "LastSeen": "2026-03-09"
+    },
+    "new-dev-user:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 2,
+      "FirstSeen": "2026-03-05",
+      "LastSeen": "2026-03-08"
+    }
+  }
+}

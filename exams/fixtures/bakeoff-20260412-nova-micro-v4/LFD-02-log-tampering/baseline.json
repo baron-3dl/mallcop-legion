@@ -1,0 +1,26 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "ca-rudi"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:log_format_drift:ca-rudi": 0,
+    "azure:log_sequence_gap:ca-rudi": 0,
+    "azure:login:ca-rudi": 0
+  },
+  "relationships": {
+    "ca-rudi:rudi-dev/ca-rudi/logs": {
+      "Count": 18200,
+      "FirstSeen": "2025-01-10",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

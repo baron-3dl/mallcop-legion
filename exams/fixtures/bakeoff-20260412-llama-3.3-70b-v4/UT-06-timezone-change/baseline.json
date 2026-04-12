@@ -1,0 +1,38 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "developer-alice",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:location_change:developer-alice": 1,
+    "github:pull_request:developer-alice": 78,
+    "github:push:developer-alice": 287,
+    "github:review:developer-alice": 134,
+    "time:07:developer-alice": 0,
+    "time:15:developer-alice": 89,
+    "time:16:developer-alice": 102,
+    "time:17:developer-alice": 118,
+    "time:18:developer-alice": 97
+  },
+  "relationships": {
+    "developer-alice:acme-corp": {
+      "Count": 456,
+      "FirstSeen": "2024-03-15",
+      "LastSeen": "2026-03-12"
+    },
+    "developer-alice:acme-corp/atom-api": {
+      "Count": 312,
+      "FirstSeen": "2024-03-15",
+      "LastSeen": "2026-03-12"
+    }
+  }
+}

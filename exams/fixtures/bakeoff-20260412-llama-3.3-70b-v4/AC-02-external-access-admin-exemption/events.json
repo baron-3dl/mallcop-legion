@@ -1,0 +1,43 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T10:05:00Z",
+      "IngestedAt": "2026-03-10T10:06:00Z",
+      "Source": "github",
+      "EventType": "org.add_member",
+      "Actor": "admin-user",
+      "Action": "add_member",
+      "Target": "acme-corp",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "192.0.2.15",
+        "member": "contractor-dev99",
+        "org": "acme-corp",
+        "role": "outside_collaborator",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T10:06:00Z",
+      "IngestedAt": "2026-03-10T10:07:00Z",
+      "Source": "github",
+      "EventType": "repo.add_collaborator",
+      "Actor": "admin-user",
+      "Action": "add_collaborator",
+      "Target": "acme-corp/atom-api",
+      "Severity": "warn",
+      "Metadata": {
+        "collaborator": "contractor-dev99",
+        "ip": "192.0.2.15",
+        "org": "acme-corp",
+        "permission": "read",
+        "repo": "atom-api",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+      },
+      "Raw": {}
+    }
+  ]
+}

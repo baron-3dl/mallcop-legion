@@ -1,0 +1,31 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:resource_list:admin-user": 45,
+    "azure:secrets_access:admin-user": 12,
+    "azure:secrets_access:deploy-svc": 88
+  },
+  "relationships": {
+    "admin-user:sub-169efd95/resourceGroups/atom-rg/providers/Microsoft.KeyVault/vaults/atom-kv": {
+      "Count": 12,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-08"
+    },
+    "deploy-svc:sub-169efd95/resourceGroups/atom-rg/providers/Microsoft.KeyVault/vaults/atom-kv": {
+      "Count": 88,
+      "FirstSeen": "2025-07-01",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

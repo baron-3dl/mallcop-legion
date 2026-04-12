@@ -1,0 +1,148 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T08:00:00Z",
+      "IngestedAt": "2026-03-10T08:01:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "ci-bot",
+      "Action": "read_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/backups",
+      "Severity": "warn",
+      "Metadata": {
+        "blobs_accessed": 80,
+        "ip": "192.0.2.100",
+        "operation": "GET",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T08:15:00Z",
+      "IngestedAt": "2026-03-10T08:16:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "ci-bot",
+      "Action": "read_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/user-uploads",
+      "Severity": "warn",
+      "Metadata": {
+        "blobs_accessed": 95,
+        "ip": "192.0.2.100",
+        "operation": "GET",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T08:30:00Z",
+      "IngestedAt": "2026-03-10T08:31:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "ci-bot",
+      "Action": "read_blob",
+      "Target": "sub-169efd95/resourceGroups/opensign-rg/storageAccounts/opensignstorage/containers/documents",
+      "Severity": "warn",
+      "Metadata": {
+        "blobs_accessed": 120,
+        "ip": "192.0.2.100",
+        "operation": "GET",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-10T08:45:00Z",
+      "IngestedAt": "2026-03-10T08:46:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "ci-bot",
+      "Action": "read_blob",
+      "Target": "sub-169efd95/resourceGroups/rudi-dev/storageAccounts/rudistorage/containers/data",
+      "Severity": "warn",
+      "Metadata": {
+        "blobs_accessed": 75,
+        "ip": "192.0.2.100",
+        "operation": "GET",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_005",
+      "Timestamp": "2026-03-10T09:00:00Z",
+      "IngestedAt": "2026-03-10T09:01:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "ci-bot",
+      "Action": "read_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/logs",
+      "Severity": "warn",
+      "Metadata": {
+        "blobs_accessed": 60,
+        "ip": "192.0.2.100",
+        "operation": "GET",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_006",
+      "Timestamp": "2026-03-10T09:15:00Z",
+      "IngestedAt": "2026-03-10T09:16:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "ci-bot",
+      "Action": "read_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atombackup/containers/database-dumps",
+      "Severity": "warn",
+      "Metadata": {
+        "blobs_accessed": 40,
+        "ip": "192.0.2.100",
+        "operation": "GET",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_007",
+      "Timestamp": "2026-03-10T09:30:00Z",
+      "IngestedAt": "2026-03-10T09:31:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "ci-bot",
+      "Action": "read_blob",
+      "Target": "sub-169efd95/resourceGroups/opensign-rg/storageAccounts/opensignstorage/containers/signatures",
+      "Severity": "warn",
+      "Metadata": {
+        "blobs_accessed": 15,
+        "ip": "192.0.2.100",
+        "operation": "GET",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_008",
+      "Timestamp": "2026-03-10T09:45:00Z",
+      "IngestedAt": "2026-03-10T09:46:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "ci-bot",
+      "Action": "read_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/secrets-archive",
+      "Severity": "warn",
+      "Metadata": {
+        "blobs_accessed": 15,
+        "ip": "192.0.2.100",
+        "operation": "GET",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

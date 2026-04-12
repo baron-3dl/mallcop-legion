@@ -1,0 +1,24 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T22:07:43Z",
+      "IngestedAt": "2026-03-10T22:08:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "org-owner",
+      "Action": "add_role_assignment",
+      "Target": "sub-169efd95",
+      "Severity": "critical",
+      "Metadata": {
+        "ip": "192.0.2.41",
+        "principal_id": "org-owner",
+        "principal_type": "User",
+        "role": "Owner",
+        "scope": "/subscriptions/169efd95-5e00-42f9-8e65-a1892791ed9a",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T04:47:00Z",
+      "IngestedAt": "2026-03-10T04:48:00Z",
+      "Source": "github",
+      "EventType": "repo.add_collaborator",
+      "Actor": "admin-user",
+      "Action": "add_collaborator",
+      "Target": "acme-corp/atom-api",
+      "Severity": "critical",
+      "Metadata": {
+        "collaborator": "evil-actor-x",
+        "ip": "203.0.113.55",
+        "org": "acme-corp",
+        "permission": "write",
+        "repo": "atom-api",
+        "user_agent": "python-requests/2.28.2"
+      },
+      "Raw": {}
+    }
+  ]
+}

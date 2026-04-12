@@ -1,0 +1,31 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:login:admin-user": 412,
+    "azure:resource_write:ci-bot": 520,
+    "azure:resource_write:deploy-svc": 188,
+    "github:workflow_run:ci-bot": 304
+  },
+  "relationships": {
+    "ci-bot:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 88,
+      "FirstSeen": "2025-04-10",
+      "LastSeen": "2026-03-09"
+    },
+    "deploy-svc:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 35,
+      "FirstSeen": "2025-07-01",
+      "LastSeen": "2026-03-08"
+    }
+  }
+}

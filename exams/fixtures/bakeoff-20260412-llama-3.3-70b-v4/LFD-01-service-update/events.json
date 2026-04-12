@@ -1,0 +1,45 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T06:00:00Z",
+      "IngestedAt": "2026-03-10T06:01:00Z",
+      "Source": "azure",
+      "EventType": "container_image_update",
+      "Actor": "deploy-svc",
+      "Action": "update_container_image",
+      "Target": "opensign-rg/opensign-server",
+      "Severity": "info",
+      "Metadata": {
+        "deployment_id": "deploy-abc123",
+        "ip": "192.0.2.77",
+        "new_image": "acme-corp/opensign-server:1.5.0",
+        "previous_image": "acme-corp/opensign-server:1.4.2",
+        "user_agent": "GitHub-Actions-Runner/2.312.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T06:05:33Z",
+      "IngestedAt": "2026-03-10T06:06:00Z",
+      "Source": "azure",
+      "EventType": "log_format_drift",
+      "Actor": "opensign-server",
+      "Action": "emit_logs",
+      "Target": "opensign-rg/opensign-server/logs",
+      "Severity": "warn",
+      "Metadata": {
+        "drift_started_at": "2026-03-10T06:04:11Z",
+        "image_version": "1.5.0",
+        "ip": "192.0.2.10",
+        "parser_template": "opensign-server-v1",
+        "total_lines_sampled": 1000,
+        "unmatched_lines": 150,
+        "unmatched_percent": 15,
+        "user_agent": "log-agent/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

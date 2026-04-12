@@ -1,0 +1,61 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T02:00:00Z",
+      "IngestedAt": "2026-03-10T02:01:00Z",
+      "Source": "azure",
+      "EventType": "container_restart",
+      "Actor": "deploy-svc",
+      "Action": "restart_container",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.50",
+        "maintenance_window": "true",
+        "scheduled": "true",
+        "user_agent": "Azure-CLI/2.55.0",
+        "window_id": "mw-2026-03-10-0200"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T02:03:00Z",
+      "IngestedAt": "2026-03-10T02:04:00Z",
+      "Source": "azure",
+      "EventType": "config_update",
+      "Actor": "deploy-svc",
+      "Action": "update_config",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.50",
+        "maintenance_window": "true",
+        "scheduled": "true",
+        "user_agent": "Azure-CLI/2.55.0",
+        "window_id": "mw-2026-03-10-0200"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T02:08:00Z",
+      "IngestedAt": "2026-03-10T02:09:00Z",
+      "Source": "azure",
+      "EventType": "container_restart",
+      "Actor": "deploy-svc",
+      "Action": "restart_container",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.50",
+        "maintenance_window": "true",
+        "scheduled": "true",
+        "user_agent": "Azure-CLI/2.55.0",
+        "window_id": "mw-2026-03-10-0200"
+      },
+      "Raw": {}
+    }
+  ]
+}

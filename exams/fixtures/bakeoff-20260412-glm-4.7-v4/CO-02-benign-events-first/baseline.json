@@ -1,0 +1,30 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc"
+    ],
+    "Sources": [
+      "azure"
+    ]
+  },
+  "frequency_tables": {
+    "azure:bulk_read:deploy-svc": 2,
+    "azure:deployment:deploy-svc": 280,
+    "azure:health_check:deploy-svc": 560,
+    "azure:login:admin-user": 340
+  },
+  "relationships": {
+    "deploy-svc:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api": {
+      "Count": 280,
+      "FirstSeen": "2025-04-01",
+      "LastSeen": "2026-03-09"
+    },
+    "deploy-svc:sub-169efd95/resourceGroups/atom-state-rg/storageAccounts/atomstate/containers/user-data": {
+      "Count": 2,
+      "FirstSeen": "2026-01-15",
+      "LastSeen": "2026-01-15"
+    }
+  }
+}

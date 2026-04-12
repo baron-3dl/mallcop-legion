@@ -1,0 +1,24 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T03:14:22Z",
+      "IngestedAt": "2026-03-10T03:15:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "ci-bot",
+      "Action": "add_role_assignment",
+      "Target": "sub-169efd95/resourceGroups/atom-rg",
+      "Severity": "critical",
+      "Metadata": {
+        "ip": "192.0.2.77",
+        "principal_id": "ci-bot",
+        "principal_type": "ServicePrincipal",
+        "role": "Contributor",
+        "scope": "/subscriptions/169efd95-5e00-42f9-8e65-a1892791ed9a/resourceGroups/atom-rg",
+        "user_agent": "GitHub-Actions-Runner/2.312.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

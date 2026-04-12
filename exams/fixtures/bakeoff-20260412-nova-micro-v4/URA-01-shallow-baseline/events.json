@@ -1,0 +1,22 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T11:22:00Z",
+      "IngestedAt": "2026-03-10T11:23:00Z",
+      "Source": "azure",
+      "EventType": "database_access",
+      "Actor": "new-dev-user",
+      "Action": "query_database",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod",
+      "Severity": "warn",
+      "Metadata": {
+        "database": "atom-db-prod",
+        "ip": "192.0.2.77",
+        "operation": "SELECT",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

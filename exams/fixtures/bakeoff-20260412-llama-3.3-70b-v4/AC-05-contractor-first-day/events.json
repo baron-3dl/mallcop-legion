@@ -1,0 +1,66 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-16T09:05:00Z",
+      "IngestedAt": "2026-03-16T09:06:00Z",
+      "Source": "hr-system",
+      "EventType": "user_provisioned",
+      "Actor": "hr-system",
+      "Action": "provision_user",
+      "Target": "acme-corp/contractors/contractor-bob",
+      "Severity": "info",
+      "Metadata": {
+        "approved_by": "hr-director",
+        "contractor_email": "contractor-bob@ext.example.com",
+        "contractor_type": "short-term",
+        "end_date": "2026-06-16",
+        "ip": "192.0.2.250",
+        "manager": "developer-alice",
+        "start_date": "2026-03-16",
+        "ticket": "HR-2026-0234",
+        "user_agent": "HR-Platform/4.1"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-16T09:42:00Z",
+      "IngestedAt": "2026-03-16T09:43:00Z",
+      "Source": "github",
+      "EventType": "org.member_added",
+      "Actor": "developer-alice",
+      "Action": "add_member",
+      "Target": "acme-corp",
+      "Severity": "warn",
+      "Metadata": {
+        "hr_ticket": "HR-2026-0234",
+        "ip": "192.0.2.16",
+        "member": "contractor-bob-ext",
+        "repos": [
+          "atom-api"
+        ],
+        "role": "outside_collaborator",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-16T09:55:00Z",
+      "IngestedAt": "2026-03-16T09:56:00Z",
+      "Source": "github",
+      "EventType": "repo.clone",
+      "Actor": "contractor-bob@ext.example.com",
+      "Action": "clone",
+      "Target": "acme-corp/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "branch": "main",
+        "ip": "198.51.100.44",
+        "user_agent": "git/2.43.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "opensign-client"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:container_image_update:ci-bot": 89,
+    "azure:log_format_drift:opensign-client": 0
+  },
+  "relationships": {
+    "ci-bot:opensign-rg/opensign-client": {
+      "Count": 89,
+      "FirstSeen": "2024-06-01",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

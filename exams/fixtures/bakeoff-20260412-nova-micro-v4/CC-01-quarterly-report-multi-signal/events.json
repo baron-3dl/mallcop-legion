@@ -1,0 +1,82 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-31T01:00:00Z",
+      "IngestedAt": "2026-03-31T01:01:00Z",
+      "Source": "azure",
+      "EventType": "database_access",
+      "Actor": "report-generator",
+      "Action": "query_database",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.110",
+        "job_id": "q1-2026-board-report",
+        "operation": "SELECT",
+        "quarter": "Q1-2026",
+        "schedule": "quarterly:Q-end:01:00",
+        "user_agent": "report-generator/2.1"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-31T01:45:00Z",
+      "IngestedAt": "2026-03-31T01:46:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "report-generator",
+      "Action": "read_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/financial-q1",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.110",
+        "job_id": "q1-2026-board-report",
+        "operation": "GET",
+        "schedule": "quarterly:Q-end:01:00",
+        "user_agent": "report-generator/2.1"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-31T03:20:00Z",
+      "IngestedAt": "2026-03-31T03:21:00Z",
+      "Source": "azure",
+      "EventType": "database_access",
+      "Actor": "report-generator",
+      "Action": "query_database",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-archive",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.110",
+        "job_id": "q1-2026-board-report",
+        "note": "first access to Q1 archive database created 2026-01-15",
+        "operation": "SELECT",
+        "schedule": "quarterly:Q-end:01:00",
+        "user_agent": "report-generator/2.1"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-31T05:58:00Z",
+      "IngestedAt": "2026-03-31T05:59:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "report-generator",
+      "Action": "write_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/board-reports",
+      "Severity": "info",
+      "Metadata": {
+        "filename": "q1-2026-board-report-final.pdf",
+        "ip": "192.0.2.110",
+        "job_id": "q1-2026-board-report",
+        "operation": "PUT",
+        "user_agent": "report-generator/2.1"
+      },
+      "Raw": {}
+    }
+  ]
+}

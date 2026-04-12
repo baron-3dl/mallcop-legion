@@ -1,0 +1,59 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-13T07:12:00Z",
+      "IngestedAt": "2026-03-13T07:13:00Z",
+      "Source": "github",
+      "EventType": "push",
+      "Actor": "developer-alice",
+      "Action": "push",
+      "Target": "acme-corp/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "branch": "feature/auth-refactor",
+        "commits": 3,
+        "ip": "2.26.214.88",
+        "location": "London, UK",
+        "user_agent": "git/2.43.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-13T07:45:00Z",
+      "IngestedAt": "2026-03-13T07:46:00Z",
+      "Source": "github",
+      "EventType": "pull_request",
+      "Actor": "developer-alice",
+      "Action": "open_pull_request",
+      "Target": "acme-corp/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "2.26.214.88",
+        "location": "London, UK",
+        "pr_number": 214,
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-13T08:20:00Z",
+      "IngestedAt": "2026-03-13T08:21:00Z",
+      "Source": "github",
+      "EventType": "review",
+      "Actor": "developer-alice",
+      "Action": "submit_review",
+      "Target": "acme-corp/atom-api/pull/210",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "2.26.214.88",
+        "location": "London, UK",
+        "review_state": "approved",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+      },
+      "Raw": {}
+    }
+  ]
+}

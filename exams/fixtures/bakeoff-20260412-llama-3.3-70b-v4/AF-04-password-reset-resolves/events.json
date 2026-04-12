@@ -1,0 +1,108 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-13T11:02:10Z",
+      "IngestedAt": "2026-03-13T11:03:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "developer-alice",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "2.26.214.88",
+        "reason": "InvalidPassword",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-13T11:02:45Z",
+      "IngestedAt": "2026-03-13T11:03:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "developer-alice",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "2.26.214.88",
+        "reason": "InvalidPassword",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-13T11:04:20Z",
+      "IngestedAt": "2026-03-13T11:05:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "developer-alice",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "2.26.214.88",
+        "reason": "InvalidPassword",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-13T11:04:58Z",
+      "IngestedAt": "2026-03-13T11:05:00Z",
+      "Source": "azure",
+      "EventType": "password_reset",
+      "Actor": "developer-alice",
+      "Action": "reset_password",
+      "Target": "acme-corp/auth",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "2.26.214.88",
+        "method": "email_link",
+        "reset_reason": "forgot_password",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_005",
+      "Timestamp": "2026-03-13T11:07:33Z",
+      "IngestedAt": "2026-03-13T11:08:00Z",
+      "Source": "azure",
+      "EventType": "login_success",
+      "Actor": "developer-alice",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "2.26.214.88",
+        "mfa_verified": "true",
+        "session_id": "sess-d4e5f6a7",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_006",
+      "Timestamp": "2026-03-13T11:08:00Z",
+      "IngestedAt": "2026-03-13T11:09:00Z",
+      "Source": "azure",
+      "EventType": "push",
+      "Actor": "developer-alice",
+      "Action": "push",
+      "Target": "acme-corp/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "branch": "feature/auth-refactor",
+        "ip": "2.26.214.88",
+        "user_agent": "git/2.43.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

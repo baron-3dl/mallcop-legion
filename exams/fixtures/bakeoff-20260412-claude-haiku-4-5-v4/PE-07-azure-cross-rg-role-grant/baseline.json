@@ -1,0 +1,62 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "contrib-user",
+      "deploy-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:config_change:contrib-user": 43,
+    "azure:login:admin-user": 340,
+    "azure:login:ci-bot": 1823,
+    "azure:login:contrib-user": 214,
+    "azure:login:tf-automation": 445,
+    "azure:read:admin-user": 223,
+    "azure:read:contrib-user": 501,
+    "azure:resource_created:contrib-user": 28,
+    "azure:resource_deleted:contrib-user": 9,
+    "azure:resource_list:ci-bot": 4401,
+    "azure:resource_list:contrib-user": 387,
+    "azure:role_assignment:admin-user": 31,
+    "azure:role_assignment:contrib-user": 0
+  },
+  "relationships": {
+    "admin-user:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 156,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 4401,
+      "FirstSeen": "2024-03-01",
+      "LastSeen": "2026-03-09"
+    },
+    "contrib-user:sub-169efd95": {
+      "Count": 23,
+      "FirstSeen": "2024-03-01",
+      "LastSeen": "2026-03-10"
+    },
+    "contrib-user:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 412,
+      "FirstSeen": "2024-03-01",
+      "LastSeen": "2026-03-13"
+    },
+    "contrib-user:sub-169efd95/resourceGroups/opensign-rg": {
+      "Count": 67,
+      "FirstSeen": "2025-01-10",
+      "LastSeen": "2026-02-28"
+    },
+    "tf-automation:sub-169efd95": {
+      "Count": 167,
+      "FirstSeen": "2024-03-15",
+      "LastSeen": "2026-03-06"
+    }
+  }
+}

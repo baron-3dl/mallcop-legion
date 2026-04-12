@@ -1,0 +1,84 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-31T01:00:00Z",
+      "IngestedAt": "2026-03-31T01:01:00Z",
+      "Source": "azure",
+      "EventType": "database_access",
+      "Actor": "batch-processor",
+      "Action": "query_database",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod",
+      "Severity": "info",
+      "Metadata": {
+        "database": "atom-db-prod",
+        "ip": "192.0.2.200",
+        "job_id": "month-end-report-2026-03",
+        "operation": "SELECT",
+        "schedule": "monthly:last-day:01:00",
+        "scheduled": "true",
+        "user_agent": "batch-runner/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-31T01:30:00Z",
+      "IngestedAt": "2026-03-31T01:31:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "batch-processor",
+      "Action": "read_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/financial",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.200",
+        "job_id": "month-end-report-2026-03",
+        "operation": "GET",
+        "scheduled": "true",
+        "user_agent": "batch-runner/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-31T02:15:00Z",
+      "IngestedAt": "2026-03-31T02:16:00Z",
+      "Source": "azure",
+      "EventType": "database_access",
+      "Actor": "batch-processor",
+      "Action": "query_database",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod",
+      "Severity": "info",
+      "Metadata": {
+        "database": "atom-db-prod",
+        "ip": "192.0.2.200",
+        "job_id": "month-end-report-2026-03",
+        "operation": "SELECT",
+        "scheduled": "true",
+        "tables_accessed": "transactions,invoices,payments",
+        "user_agent": "batch-runner/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-31T04:55:00Z",
+      "IngestedAt": "2026-03-31T04:56:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "batch-processor",
+      "Action": "write_blob",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01/containers/reports",
+      "Severity": "info",
+      "Metadata": {
+        "filename": "march-2026-financial-report.pdf",
+        "ip": "192.0.2.200",
+        "job_id": "month-end-report-2026-03",
+        "operation": "PUT",
+        "user_agent": "batch-runner/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

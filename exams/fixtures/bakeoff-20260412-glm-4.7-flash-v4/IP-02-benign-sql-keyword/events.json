@@ -1,0 +1,25 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T11:30:00Z",
+      "IngestedAt": "2026-03-10T11:31:00Z",
+      "Source": "azure",
+      "EventType": "app_log",
+      "Actor": "deploy-svc",
+      "Action": "emit_log",
+      "Target": "opensign-rg/opensign-server/logs",
+      "Severity": "info",
+      "Metadata": {
+        "component": "metrics-collector",
+        "ip": "192.0.2.10",
+        "line_number": 142,
+        "log_level": "DEBUG",
+        "log_message": "Executing metrics query: SELECT count FROM metrics_table WHERE ts \u003e NOW() - INTERVAL 5m",
+        "log_source": "monitoring/metrics_collector.py",
+        "user_agent": "log-agent/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

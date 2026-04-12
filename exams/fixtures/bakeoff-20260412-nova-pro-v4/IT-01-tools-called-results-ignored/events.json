@@ -1,0 +1,73 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T02:31:00Z",
+      "IngestedAt": "2026-03-10T02:32:00Z",
+      "Source": "azure",
+      "EventType": "secret_access",
+      "Actor": "deploy-svc",
+      "Action": "get_secret",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv/secrets/db-password",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "198.51.100.22",
+        "secret_name": "db-password",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T02:33:00Z",
+      "IngestedAt": "2026-03-10T02:34:00Z",
+      "Source": "azure",
+      "EventType": "secret_access",
+      "Actor": "deploy-svc",
+      "Action": "get_secret",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv/secrets/stripe-key",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "198.51.100.22",
+        "secret_name": "stripe-key",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T02:35:00Z",
+      "IngestedAt": "2026-03-10T02:36:00Z",
+      "Source": "azure",
+      "EventType": "bulk_read",
+      "Actor": "deploy-svc",
+      "Action": "list_blobs",
+      "Target": "sub-169efd95/resourceGroups/opensign-state-rg/storageAccounts/opensignstate/containers/signing-keys",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "198.51.100.22",
+        "operation_count": 34,
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-10T02:48:00Z",
+      "IngestedAt": "2026-03-10T02:49:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "deploy-svc",
+      "Action": "add_role_assignment",
+      "Target": "sub-169efd95",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "198.51.100.22",
+        "role": "Reader",
+        "scope": "subscription",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc"
+    ],
+    "Sources": [
+      "azure"
+    ]
+  },
+  "frequency_tables": {
+    "azure:login:admin-user": 340,
+    "azure:login:unknown-actor-x": 0,
+    "azure:secret_access:unknown-actor-x": 0
+  }
+}

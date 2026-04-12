@@ -1,0 +1,44 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T02:22:00Z",
+      "IngestedAt": "2026-03-10T02:23:00Z",
+      "Source": "azure",
+      "EventType": "login",
+      "Actor": "admin-user",
+      "Action": "login",
+      "Target": "acme-corp/tenant",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "198.51.100.77",
+        "location": "Amsterdam, NL",
+        "user_agent": "Mozilla/5.0 (X11; Linux x86_64) Firefox/124"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T02:24:00Z",
+      "IngestedAt": "2026-03-10T02:25:00Z",
+      "Source": "azure",
+      "EventType": "bulk_read",
+      "Actor": "admin-user",
+      "Action": "list_resources",
+      "Target": "sub-169efd95",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "198.51.100.77",
+        "operation_count": 312,
+        "resource_types": [
+          "virtualMachines",
+          "storageAccounts",
+          "keyVaults",
+          "containerApps"
+        ],
+        "user_agent": "Mozilla/5.0 (X11; Linux x86_64) Firefox/124"
+      },
+      "Raw": {}
+    }
+  ]
+}

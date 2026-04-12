@@ -1,0 +1,111 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T14:00:00Z",
+      "IngestedAt": "2026-03-10T14:01:00Z",
+      "Source": "azure",
+      "EventType": "api_call",
+      "Actor": "admin-user",
+      "Action": "list_role_assignments",
+      "Target": "sub-169efd95",
+      "Severity": "warn",
+      "Metadata": {
+        "api_method": "microsoft.authorization/roleAssignments/read",
+        "ip": "203.0.113.10",
+        "results_count": 145,
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T14:00:30Z",
+      "IngestedAt": "2026-03-10T14:01:00Z",
+      "Source": "azure",
+      "EventType": "api_call",
+      "Actor": "admin-user",
+      "Action": "list_users",
+      "Target": "acme-corp/tenant",
+      "Severity": "warn",
+      "Metadata": {
+        "api_method": "List Users",
+        "ip": "203.0.113.10",
+        "results_count": 28,
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T14:01:00Z",
+      "IngestedAt": "2026-03-10T14:01:30Z",
+      "Source": "azure",
+      "EventType": "api_call",
+      "Actor": "admin-user",
+      "Action": "get_authorization_details",
+      "Target": "sub-169efd95",
+      "Severity": "warn",
+      "Metadata": {
+        "api_method": "microsoft.authorization/roleDefinitions/read",
+        "ip": "203.0.113.10",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-10T14:02:00Z",
+      "IngestedAt": "2026-03-10T14:02:30Z",
+      "Source": "azure",
+      "EventType": "api_call",
+      "Actor": "admin-user",
+      "Action": "list_storage_accounts",
+      "Target": "sub-169efd95",
+      "Severity": "warn",
+      "Metadata": {
+        "api_method": "microsoft.storage/storageAccounts/read",
+        "ip": "203.0.113.10",
+        "results_count": 8,
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_005",
+      "Timestamp": "2026-03-10T14:03:00Z",
+      "IngestedAt": "2026-03-10T14:03:30Z",
+      "Source": "azure",
+      "EventType": "api_call",
+      "Actor": "admin-user",
+      "Action": "list_virtual_machines",
+      "Target": "sub-169efd95",
+      "Severity": "warn",
+      "Metadata": {
+        "api_method": "microsoft.compute/virtualMachines/read",
+        "ip": "203.0.113.10",
+        "results_count": 3,
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_006",
+      "Timestamp": "2026-03-10T14:04:00Z",
+      "IngestedAt": "2026-03-10T14:04:30Z",
+      "Source": "azure",
+      "EventType": "api_call",
+      "Actor": "admin-user",
+      "Action": "list_security_detectors",
+      "Target": "sub-169efd95",
+      "Severity": "warn",
+      "Metadata": {
+        "api_method": "microsoft.security/alerts/read",
+        "comment": "enumerating security monitoring coverage",
+        "ip": "203.0.113.10",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

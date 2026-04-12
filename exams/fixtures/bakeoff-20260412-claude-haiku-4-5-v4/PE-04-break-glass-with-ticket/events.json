@@ -1,0 +1,50 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-13T02:22:00Z",
+      "IngestedAt": "2026-03-13T02:23:00Z",
+      "Source": "incident-system",
+      "EventType": "incident_declared",
+      "Actor": "on-call-system",
+      "Action": "declare_incident",
+      "Target": "acme-corp/incidents/INC-2026-0312",
+      "Severity": "critical",
+      "Metadata": {
+        "affected_service": "atom-api",
+        "incident_id": "INC-2026-0312",
+        "ip": "192.0.2.251",
+        "on_call_engineer": "sre-engineer",
+        "on_call_manager": "on-call-manager",
+        "severity": "P1",
+        "user_agent": "PagerDuty/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-13T02:30:00Z",
+      "IngestedAt": "2026-03-13T02:31:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "sre-engineer",
+      "Action": "add_role_assignment",
+      "Target": "sub-169efd95",
+      "Severity": "critical",
+      "Metadata": {
+        "approved_by": "on-call-manager",
+        "auto_revert": "true",
+        "break_glass": "true",
+        "incident_ticket": "INC-2026-0312",
+        "ip": "192.0.2.30",
+        "principal_id": "sre-engineer",
+        "principal_type": "User",
+        "revert_after_hours": "4",
+        "role": "Owner",
+        "scope": "/subscriptions/169efd95-5e00-42f9-8e65-a1892791ed9a",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

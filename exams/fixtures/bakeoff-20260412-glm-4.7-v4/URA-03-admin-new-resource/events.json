@@ -1,0 +1,42 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T17:45:00Z",
+      "IngestedAt": "2026-03-10T17:46:00Z",
+      "Source": "azure",
+      "EventType": "database_access",
+      "Actor": "admin-user",
+      "Action": "query_database",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod",
+      "Severity": "warn",
+      "Metadata": {
+        "database": "atom-db-prod",
+        "ip": "203.0.113.10",
+        "operation": "SELECT",
+        "tables_accessed": "users,sessions,payments",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T17:48:00Z",
+      "IngestedAt": "2026-03-10T17:49:00Z",
+      "Source": "azure",
+      "EventType": "database_access",
+      "Actor": "admin-user",
+      "Action": "export_data",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod",
+      "Severity": "warn",
+      "Metadata": {
+        "database": "atom-db-prod",
+        "ip": "203.0.113.10",
+        "operation": "pg_dump",
+        "rows_affected": "15000",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

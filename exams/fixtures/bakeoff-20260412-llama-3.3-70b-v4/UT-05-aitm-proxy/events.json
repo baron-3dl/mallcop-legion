@@ -1,0 +1,54 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T16:30:00Z",
+      "IngestedAt": "2026-03-10T16:31:00Z",
+      "Source": "azure",
+      "EventType": "login",
+      "Actor": "admin-user",
+      "Action": "login",
+      "Target": "acme-corp/tenant",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "198.51.100.200",
+        "mfa_satisfied": "true",
+        "user_agent": "Azure-Portal/1.0",
+        "usual_ip": "203.0.113.10"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T16:32:00Z",
+      "IngestedAt": "2026-03-10T16:33:00Z",
+      "Source": "azure",
+      "EventType": "read_resource",
+      "Actor": "admin-user",
+      "Action": "read_resource",
+      "Target": "sub-169efd95/resourceGroups/atom-rg",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "198.51.100.200",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T16:34:00Z",
+      "IngestedAt": "2026-03-10T16:35:00Z",
+      "Source": "azure",
+      "EventType": "read_resource",
+      "Actor": "admin-user",
+      "Action": "read_resource",
+      "Target": "sub-169efd95/resourceGroups/rudi-dev",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "198.51.100.200",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

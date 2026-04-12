@@ -1,0 +1,25 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "org-owner"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:http_request:admin-user": 2210,
+    "azure:http_request:ci-bot": 8841
+  },
+  "relationships": {
+    "admin-user:acme-corp/api": {
+      "Count": 2210,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T14:02:00Z",
+      "IngestedAt": "2026-03-10T14:03:00Z",
+      "Source": "azure",
+      "EventType": "login",
+      "Actor": "admin-user",
+      "Action": "login",
+      "Target": "acme-corp/tenant",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "198.51.100.50",
+        "location": "London, UK",
+        "user_agent": "Azure-Portal/1.0",
+        "usual_ip": "203.0.113.10",
+        "usual_location": "Portland, OR"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T14:05:00Z",
+      "IngestedAt": "2026-03-10T14:06:00Z",
+      "Source": "azure",
+      "EventType": "read_resource",
+      "Actor": "admin-user",
+      "Action": "read_resource",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "198.51.100.50",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T14:08:00Z",
+      "IngestedAt": "2026-03-10T14:09:00Z",
+      "Source": "azure",
+      "EventType": "config_read",
+      "Actor": "admin-user",
+      "Action": "read_config",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "198.51.100.50",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

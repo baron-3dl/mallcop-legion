@@ -1,0 +1,61 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T18:00:01Z",
+      "IngestedAt": "2026-03-10T18:01:00Z",
+      "Source": "azure",
+      "EventType": "http_request",
+      "Actor": "ext-user-7f3a",
+      "Action": "api_request",
+      "Target": "acme-corp/api/v1/users",
+      "Severity": "critical",
+      "Metadata": {
+        "ip": "203.0.113.55",
+        "method": "GET",
+        "path": "/api/v1/users",
+        "status_code": 400,
+        "user_agent": "' OR 1=1 --"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T18:00:04Z",
+      "IngestedAt": "2026-03-10T18:01:00Z",
+      "Source": "azure",
+      "EventType": "http_request",
+      "Actor": "ext-user-7f3a",
+      "Action": "api_request",
+      "Target": "acme-corp/api/v1/accounts",
+      "Severity": "critical",
+      "Metadata": {
+        "ip": "203.0.113.55",
+        "method": "GET",
+        "path": "/api/v1/accounts",
+        "status_code": 400,
+        "user_agent": "' OR 1=1 --"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T18:00:07Z",
+      "IngestedAt": "2026-03-10T18:01:00Z",
+      "Source": "azure",
+      "EventType": "http_request",
+      "Actor": "ext-user-7f3a",
+      "Action": "api_request",
+      "Target": "acme-corp/api/v1/secrets",
+      "Severity": "critical",
+      "Metadata": {
+        "ip": "203.0.113.55",
+        "method": "GET",
+        "path": "/api/v1/secrets",
+        "status_code": 400,
+        "user_agent": "' OR 1=1 --"
+      },
+      "Raw": {}
+    }
+  ]
+}

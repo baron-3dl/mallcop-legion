@@ -1,0 +1,32 @@
+{
+  "known_entities": {
+    "Actors": [
+      "deploy-svc",
+      "admin-user",
+      "ci-bot"
+    ],
+    "Sources": [
+      "aws_cloudtrail",
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "aws_cloudtrail:console_login:deploy-svc": 890,
+    "aws_cloudtrail:iam_change:admin-user": 45,
+    "aws_cloudtrail:iam_change:deploy-svc": 12,
+    "aws_cloudtrail:sts_assume_role:deploy-svc": 2341
+  },
+  "relationships": {
+    "admin-user:arn:aws:iam::123456789012:role/app-role": {
+      "Count": 8,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-02-20"
+    },
+    "deploy-svc:arn:aws:iam::123456789012:role/app-role": {
+      "Count": 12,
+      "FirstSeen": "2024-06-01",
+      "LastSeen": "2026-03-08"
+    }
+  }
+}

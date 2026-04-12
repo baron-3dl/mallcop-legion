@@ -1,0 +1,90 @@
+{
+  "events": [
+    {
+      "ID": "evt_301",
+      "Timestamp": "2026-03-10T11:10:00Z",
+      "IngestedAt": "2026-03-10T11:11:00Z",
+      "Source": "azure",
+      "EventType": "secret_access",
+      "Actor": "new-svc-acct",
+      "Action": "list_secrets",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.77",
+        "secrets_listed": 50,
+        "user_agent": "python-requests/2.31.0",
+        "vault": "atom-kv"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_302",
+      "Timestamp": "2026-03-10T11:10:15Z",
+      "IngestedAt": "2026-03-10T11:11:00Z",
+      "Source": "azure",
+      "EventType": "secret_access",
+      "Actor": "new-svc-acct",
+      "Action": "get_secret",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv/secrets/db-password",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.77",
+        "secret_name": "db-password",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_303",
+      "Timestamp": "2026-03-10T11:10:30Z",
+      "IngestedAt": "2026-03-10T11:11:00Z",
+      "Source": "azure",
+      "EventType": "secret_access",
+      "Actor": "new-svc-acct",
+      "Action": "get_secret",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv/secrets/api-key",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.77",
+        "secret_name": "api-key",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_304",
+      "Timestamp": "2026-03-10T11:11:00Z",
+      "IngestedAt": "2026-03-10T11:12:00Z",
+      "Source": "azure",
+      "EventType": "secret_access",
+      "Actor": "new-svc-acct",
+      "Action": "get_secret",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv/secrets/jwt-secret",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.77",
+        "secret_name": "jwt-secret",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_305",
+      "Timestamp": "2026-03-10T11:11:45Z",
+      "IngestedAt": "2026-03-10T11:12:00Z",
+      "Source": "azure",
+      "EventType": "secret_access",
+      "Actor": "new-svc-acct",
+      "Action": "get_secret",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv/secrets/stripe-key",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.77",
+        "secret_name": "stripe-key",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

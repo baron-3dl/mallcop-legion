@@ -1,0 +1,36 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "on-call-manager",
+      "sre-engineer",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github",
+      "incident-system"
+    ]
+  },
+  "frequency_tables": {
+    "azure:config_change:sre-engineer": 89,
+    "azure:login:sre-engineer": 623,
+    "azure:resource_list:sre-engineer": 1204,
+    "azure:role_assignment:sre-engineer": 2,
+    "incident-system:incident_declared": 12
+  },
+  "relationships": {
+    "sre-engineer:sub-169efd95": {
+      "Count": 45,
+      "FirstSeen": "2025-01-15",
+      "LastSeen": "2026-03-12"
+    },
+    "sre-engineer:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 567,
+      "FirstSeen": "2025-01-15",
+      "LastSeen": "2026-03-12"
+    }
+  }
+}

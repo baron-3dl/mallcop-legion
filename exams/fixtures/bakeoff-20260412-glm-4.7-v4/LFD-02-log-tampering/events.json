@@ -1,0 +1,64 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T14:30:00Z",
+      "IngestedAt": "2026-03-10T14:31:00Z",
+      "Source": "azure",
+      "EventType": "log_format_drift",
+      "Actor": "ca-rudi",
+      "Action": "emit_logs",
+      "Target": "rudi-dev/ca-rudi/logs",
+      "Severity": "critical",
+      "Metadata": {
+        "drift_started_at": "2026-03-10T14:12:07Z",
+        "image_version": "0.9.1",
+        "ip": "192.0.2.20",
+        "last_known_image_version": "0.9.1",
+        "parser_template": "ca-rudi-v2",
+        "total_lines_sampled": 500,
+        "unmatched_lines": 200,
+        "unmatched_percent": 40,
+        "user_agent": "log-agent/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T14:32:15Z",
+      "IngestedAt": "2026-03-10T14:33:00Z",
+      "Source": "azure",
+      "EventType": "log_sequence_gap",
+      "Actor": "ca-rudi",
+      "Action": "emit_logs",
+      "Target": "rudi-dev/ca-rudi/logs",
+      "Severity": "critical",
+      "Metadata": {
+        "gap_detected_at": "2026-03-10T14:11:55Z",
+        "gap_size": 149,
+        "ip": "192.0.2.20",
+        "last_sequence_id": 8801,
+        "next_observed_sequence_id": 8950,
+        "user_agent": "log-agent/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T14:15:00Z",
+      "IngestedAt": "2026-03-10T14:16:00Z",
+      "Source": "azure",
+      "EventType": "login_success",
+      "Actor": "ext-user-7f3a",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "203.0.113.88",
+        "session_id": "sess-deadbeef",
+        "user_agent": "python-requests/2.28.2"
+      },
+      "Raw": {}
+    }
+  ]
+}

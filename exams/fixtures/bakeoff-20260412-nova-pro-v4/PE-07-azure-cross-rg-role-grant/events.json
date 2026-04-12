@@ -1,0 +1,26 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-14T14:23:11Z",
+      "IngestedAt": "2026-03-14T14:24:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "contrib-user",
+      "Action": "add_role_assignment",
+      "Target": "sub-169efd95/resourceGroups/mallcop-rg",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.77",
+        "principal_id": "contrib-user",
+        "principal_type": "User",
+        "resource_group": "mallcop-rg",
+        "role": "Contributor",
+        "scope": "/subscriptions/169efd95-5e00-42f9-8e65-a1892791ed9a/resourceGroups/mallcop-rg",
+        "subscription_id": "169efd95-5e00-42f9-8e65-a1892791ed9a",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

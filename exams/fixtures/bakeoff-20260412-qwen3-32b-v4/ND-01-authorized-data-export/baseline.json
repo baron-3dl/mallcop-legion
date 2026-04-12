@@ -1,0 +1,39 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc"
+    ],
+    "Sources": [
+      "azure"
+    ]
+  },
+  "frequency_tables": {
+    "azure:bulk_read:admin-user": 8,
+    "azure:deployment:admin-user": 67,
+    "azure:login:admin-user": 520,
+    "azure:login:ci-bot": 1200,
+    "azure:read_resource:admin-user": 312,
+    "azure:role_assignment:admin-user": 28,
+    "azure:secret_access:admin-user": 15,
+    "azure:update_config:admin-user": 45
+  },
+  "relationships": {
+    "admin-user:acme-corp/tenant": {
+      "Count": 520,
+      "FirstSeen": "2024-03-01",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:acme-corp/tenant/users": {
+      "Count": 22,
+      "FirstSeen": "2025-01-15",
+      "LastSeen": "2026-02-28"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 180,
+      "FirstSeen": "2024-03-01",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

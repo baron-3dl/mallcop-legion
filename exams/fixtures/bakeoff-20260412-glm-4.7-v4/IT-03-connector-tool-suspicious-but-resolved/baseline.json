@@ -1,0 +1,30 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc"
+    ],
+    "Sources": [
+      "azure"
+    ]
+  },
+  "frequency_tables": {
+    "azure:bulk_read:admin-user": 3,
+    "azure:login:admin-user": 340,
+    "azure:login:ci-bot": 1200,
+    "azure:read_resource:admin-user": 89
+  },
+  "relationships": {
+    "admin-user:acme-corp/tenant": {
+      "Count": 340,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95": {
+      "Count": 89,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

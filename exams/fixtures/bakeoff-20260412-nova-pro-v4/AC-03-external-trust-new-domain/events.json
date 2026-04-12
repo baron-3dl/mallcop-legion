@@ -1,0 +1,42 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T03:02:00Z",
+      "IngestedAt": "2026-03-10T03:03:00Z",
+      "Source": "azure",
+      "EventType": "federation_settings_update",
+      "Actor": "admin-user",
+      "Action": "add_federated_identity_provider",
+      "Target": "acme-corp/tenant/bd7184bc/federationSettings",
+      "Severity": "critical",
+      "Metadata": {
+        "domain": "external-idp.evil-domain.example",
+        "ip": "203.0.113.44",
+        "issuer_uri": "https://external-idp.evil-domain.example/saml2",
+        "metadata_url": "https://external-idp.evil-domain.example/federationmetadata.xml",
+        "user_agent": "python-requests/2.28.2"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T03:02:45Z",
+      "IngestedAt": "2026-03-10T03:03:00Z",
+      "Source": "azure",
+      "EventType": "directory_settings_update",
+      "Actor": "admin-user",
+      "Action": "update_domain_federation",
+      "Target": "acme-corp/tenant/bd7184bc/domains",
+      "Severity": "critical",
+      "Metadata": {
+        "authentication_type": "Federated",
+        "domain_name": "external-idp.evil-domain.example",
+        "ip": "203.0.113.44",
+        "is_managed_domain": false,
+        "user_agent": "python-requests/2.28.2"
+      },
+      "Raw": {}
+    }
+  ]
+}

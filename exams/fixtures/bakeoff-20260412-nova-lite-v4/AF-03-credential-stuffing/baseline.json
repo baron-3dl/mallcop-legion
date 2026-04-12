@@ -1,0 +1,18 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "org-owner"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:login:admin-user": 412,
+    "azure:login_failure:admin-user": 6
+  }
+}

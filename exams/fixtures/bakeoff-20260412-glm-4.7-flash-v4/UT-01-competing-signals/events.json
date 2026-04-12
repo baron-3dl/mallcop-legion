@@ -1,0 +1,39 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T03:14:00Z",
+      "IngestedAt": "2026-03-10T03:15:00Z",
+      "Source": "azure",
+      "EventType": "login",
+      "Actor": "admin-user",
+      "Action": "login",
+      "Target": "acme-corp/tenant",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "203.0.113.10",
+        "location": "Portland, OR",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T03:16:00Z",
+      "IngestedAt": "2026-03-10T03:17:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "admin-user",
+      "Action": "add_role_assignment",
+      "Target": "sub-169efd95/resourceGroups/atom-rg",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.10",
+        "principal_id": "bb99cc11-0001-0002-0003-000000000099",
+        "role": "Owner",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

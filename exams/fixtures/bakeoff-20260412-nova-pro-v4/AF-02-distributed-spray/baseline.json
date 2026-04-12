@@ -1,0 +1,34 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "org-owner",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:login:admin-user": 412,
+    "azure:login:ci-bot": 1823,
+    "azure:login:deploy-svc": 944,
+    "azure:login:org-owner": 521,
+    "azure:login:tf-automation": 307,
+    "azure:login_failure:admin-user": 6,
+    "azure:login_failure:ci-bot": 2,
+    "azure:login_failure:deploy-svc": 1,
+    "azure:login_failure:org-owner": 4,
+    "azure:login_failure:tf-automation": 0
+  },
+  "relationships": {
+    "admin-user:acme-corp/auth": {
+      "Count": 412,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

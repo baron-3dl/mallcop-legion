@@ -1,0 +1,57 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T09:15:00Z",
+      "IngestedAt": "2026-03-10T09:16:00Z",
+      "Source": "azure",
+      "EventType": "login",
+      "Actor": "contractor-jsmith",
+      "Action": "sign_in",
+      "Target": "acme-corp/tenant/bd7184bc",
+      "Severity": "info",
+      "Metadata": {
+        "auth_method": "saml_sso",
+        "ip": "192.0.2.77",
+        "mfa_used": true,
+        "sso_provider": "acme-corp-okta",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T09:22:00Z",
+      "IngestedAt": "2026-03-10T09:23:00Z",
+      "Source": "azure",
+      "EventType": "resource_list",
+      "Actor": "contractor-jsmith",
+      "Action": "list_resources",
+      "Target": "sub-169efd95/resourceGroups/atom-rg",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.77",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T09:31:00Z",
+      "IngestedAt": "2026-03-10T09:32:00Z",
+      "Source": "azure",
+      "EventType": "secrets_access",
+      "Actor": "contractor-jsmith",
+      "Action": "get_secret",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/providers/Microsoft.KeyVault/vaults/atom-kv/secrets/db-password",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "192.0.2.77",
+        "secret_name": "db-password",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "vault": "atom-kv"
+      },
+      "Raw": {}
+    }
+  ]
+}

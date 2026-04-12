@@ -1,0 +1,25 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "opensign-server"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:app_log:deploy-svc": 44210,
+    "azure:injection-probe:deploy-svc": 0
+  },
+  "relationships": {
+    "deploy-svc:opensign-rg/opensign-server/logs": {
+      "Count": 44210,
+      "FirstSeen": "2024-06-01",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:config_update:deploy-svc": 48,
+    "azure:container_restart:deploy-svc": 156,
+    "azure:login:admin-user": 340,
+    "time:02:deploy-svc": 24
+  },
+  "relationships": {
+    "deploy-svc:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api": {
+      "Count": 89,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-03"
+    },
+    "deploy-svc:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot": {
+      "Count": 72,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-03"
+    }
+  }
+}

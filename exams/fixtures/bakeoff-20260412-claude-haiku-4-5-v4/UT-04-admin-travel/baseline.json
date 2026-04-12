@@ -1,0 +1,35 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:config_read:admin-user": 34,
+    "azure:login:admin-user": 340,
+    "azure:read_resource:admin-user": 89,
+    "time:15:admin-user": 95,
+    "time:16:admin-user": 88,
+    "time:17:admin-user": 91,
+    "time:18:admin-user": 72
+  },
+  "relationships": {
+    "admin-user:acme-corp/tenant": {
+      "Count": 340,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api": {
+      "Count": 89,
+      "FirstSeen": "2025-05-15",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

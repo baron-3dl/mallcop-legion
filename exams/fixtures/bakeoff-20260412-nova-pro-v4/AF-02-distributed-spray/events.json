@@ -1,0 +1,89 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T23:01:04Z",
+      "IngestedAt": "2026-03-10T23:02:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "admin-user",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "198.51.100.11",
+        "reason": "InvalidPassword",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T23:03:17Z",
+      "IngestedAt": "2026-03-10T23:04:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "ci-bot",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "198.51.100.22",
+        "reason": "InvalidPassword",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T23:05:44Z",
+      "IngestedAt": "2026-03-10T23:06:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "deploy-svc",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "198.51.100.33",
+        "reason": "InvalidPassword",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-10T23:07:29Z",
+      "IngestedAt": "2026-03-10T23:08:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "org-owner",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "198.51.100.44",
+        "reason": "InvalidPassword",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_005",
+      "Timestamp": "2026-03-10T23:10:02Z",
+      "IngestedAt": "2026-03-10T23:11:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "tf-automation",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "198.51.100.55",
+        "reason": "InvalidPassword",
+        "user_agent": "python-requests/2.31.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

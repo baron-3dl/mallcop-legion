@@ -1,0 +1,40 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T03:47:00Z",
+      "IngestedAt": "2026-03-10T03:48:00Z",
+      "Source": "azure",
+      "EventType": "login",
+      "Actor": "admin-user",
+      "Action": "login",
+      "Target": "acme-corp/tenant",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "203.0.113.44",
+        "location": "Unknown",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T03:49:00Z",
+      "IngestedAt": "2026-03-10T03:50:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "admin-user",
+      "Action": "add_role_assignment",
+      "Target": "sub-169efd95/resourceGroups/atom-rg",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.44",
+        "principal_id": "aa11bb22-0001-0002-0003-000000000011",
+        "role": "Contributor",
+        "scope": "resourceGroup",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

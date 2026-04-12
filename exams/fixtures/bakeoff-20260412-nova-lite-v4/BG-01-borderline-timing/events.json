@@ -1,0 +1,39 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T23:58:00Z",
+      "IngestedAt": "2026-03-10T23:59:00Z",
+      "Source": "azure",
+      "EventType": "login",
+      "Actor": "admin-user",
+      "Action": "login",
+      "Target": "acme-corp/tenant",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "203.0.113.22",
+        "location": "Portland, OR",
+        "user_agent": "AZCLI/2.55.0",
+        "usual_ip": "203.0.113.10"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T23:59:30Z",
+      "IngestedAt": "2026-03-11T00:00:00Z",
+      "Source": "azure",
+      "EventType": "read_resource",
+      "Actor": "admin-user",
+      "Action": "read_resource",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "203.0.113.22",
+        "operation": "GET",
+        "user_agent": "AZCLI/2.55.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

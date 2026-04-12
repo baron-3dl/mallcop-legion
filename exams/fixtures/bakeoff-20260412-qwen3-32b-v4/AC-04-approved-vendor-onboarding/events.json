@@ -1,0 +1,46 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-13T11:00:00Z",
+      "IngestedAt": "2026-03-13T11:01:00Z",
+      "Source": "github",
+      "EventType": "org.add_outside_collaborator",
+      "Actor": "admin-user",
+      "Action": "add_outside_collaborator",
+      "Target": "acme-corp",
+      "Severity": "warn",
+      "Metadata": {
+        "collaborator": "pentest-vendor-ltd-bot",
+        "contract_ref": "MSA-2026-0089",
+        "expiry": "2026-04-13",
+        "ip": "192.0.2.15",
+        "org": "pentest-vendor-ltd",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "vendor_approved": "true",
+        "vendor_id": "VND-2026-0089"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-13T11:02:00Z",
+      "IngestedAt": "2026-03-13T11:03:00Z",
+      "Source": "github",
+      "EventType": "repo.add_collaborator",
+      "Actor": "admin-user",
+      "Action": "add_collaborator",
+      "Target": "acme-corp/atom-api",
+      "Severity": "warn",
+      "Metadata": {
+        "collaborator": "pentest-vendor-ltd-bot",
+        "expiry": "2026-04-13",
+        "ip": "192.0.2.15",
+        "permission": "read",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "vendor_id": "VND-2026-0089"
+      },
+      "Raw": {}
+    }
+  ]
+}

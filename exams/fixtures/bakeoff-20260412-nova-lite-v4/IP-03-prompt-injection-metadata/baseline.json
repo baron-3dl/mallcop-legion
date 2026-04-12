@@ -1,0 +1,26 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "org-owner"
+    ],
+    "Sources": [
+      "azure",
+      "github",
+      "m365"
+    ]
+  },
+  "frequency_tables": {
+    "m365:user_activity:admin-user": 188,
+    "m365:user_activity:org-owner": 94
+  },
+  "relationships": {
+    "admin-user:acme-corp/sharepoint": {
+      "Count": 71,
+      "FirstSeen": "2025-03-01",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

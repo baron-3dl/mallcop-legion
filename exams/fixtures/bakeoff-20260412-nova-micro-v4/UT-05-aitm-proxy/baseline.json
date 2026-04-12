@@ -1,0 +1,100 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:container_restart:admin-user": 38,
+    "azure:keyvault_access:admin-user": 19,
+    "azure:login:admin-user": 487,
+    "azure:login:admin-user:0:afternoon": 78,
+    "azure:login:admin-user:0:evening": 45,
+    "azure:login:admin-user:1:afternoon": 82,
+    "azure:login:admin-user:1:evening": 48,
+    "azure:login:admin-user:2:afternoon": 75,
+    "azure:login:admin-user:2:evening": 41,
+    "azure:login:admin-user:3:afternoon": 80,
+    "azure:login:admin-user:3:evening": 43,
+    "azure:login:admin-user:4:afternoon": 71,
+    "azure:login:admin-user:4:evening": 37,
+    "azure:policy_update:admin-user": 22,
+    "azure:read_resource:admin-user": 312,
+    "azure:read_resource:admin-user:0:afternoon": 57,
+    "azure:read_resource:admin-user:1:afternoon": 65,
+    "azure:read_resource:admin-user:2:afternoon": 55,
+    "azure:read_resource:admin-user:3:afternoon": 59,
+    "azure:role_assignment:admin-user": 67,
+    "azure:service_principal_created:admin-user": 14,
+    "azure:update_config:admin-user": 89
+  },
+  "relationships": {
+    "admin-user:acme-corp/service-principals": {
+      "Count": 67,
+      "FirstSeen": "2025-06-15",
+      "LastSeen": "2026-02-14"
+    },
+    "admin-user:acme-corp/tenant": {
+      "Count": 487,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95": {
+      "Count": 312,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 156,
+      "FirstSeen": "2025-05-15",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api": {
+      "Count": 89,
+      "FirstSeen": "2025-05-15",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot": {
+      "Count": 64,
+      "FirstSeen": "2025-05-15",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv": {
+      "Count": 19,
+      "FirstSeen": "2025-08-01",
+      "LastSeen": "2026-02-28"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg/networkSecurityGroups/atom-nsg": {
+      "Count": 11,
+      "FirstSeen": "2025-09-01",
+      "LastSeen": "2026-01-15"
+    },
+    "admin-user:sub-169efd95/resourceGroups/opensign-rg": {
+      "Count": 73,
+      "FirstSeen": "2025-07-01",
+      "LastSeen": "2026-03-07"
+    },
+    "admin-user:sub-169efd95/resourceGroups/opensign-rg/containerApps/opensign-server": {
+      "Count": 37,
+      "FirstSeen": "2025-07-10",
+      "LastSeen": "2026-03-07"
+    },
+    "admin-user:sub-169efd95/resourceGroups/rudi-dev": {
+      "Count": 98,
+      "FirstSeen": "2025-06-01",
+      "LastSeen": "2026-03-08"
+    },
+    "admin-user:sub-169efd95/resourceGroups/rudi-dev/containerApps/ca-rudi": {
+      "Count": 41,
+      "FirstSeen": "2025-06-15",
+      "LastSeen": "2026-03-08"
+    }
+  }
+}

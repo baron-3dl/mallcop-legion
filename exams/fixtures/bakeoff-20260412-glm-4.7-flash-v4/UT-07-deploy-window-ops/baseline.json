@@ -1,0 +1,30 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "ops-engineer",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:login:ops-engineer": 389,
+    "azure:resource_deleted:ops-engineer": 23,
+    "azure:role_assignment:ops-engineer": 41,
+    "time:03:ops-engineer": 0,
+    "time:09:ops-engineer": 78,
+    "time:10:ops-engineer": 94
+  },
+  "relationships": {
+    "ops-engineer:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 467,
+      "FirstSeen": "2024-02-01",
+      "LastSeen": "2026-03-12"
+    }
+  }
+}

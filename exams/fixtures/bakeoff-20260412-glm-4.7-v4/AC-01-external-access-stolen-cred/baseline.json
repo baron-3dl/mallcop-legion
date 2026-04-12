@@ -1,0 +1,101 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:config_change:admin-user": 54,
+    "azure:diagnostic_setting:admin-user": 5,
+    "azure:login:admin-user": 412,
+    "azure:login:ci-bot": 1823,
+    "azure:login:deploy-svc": 312,
+    "azure:policy_assignment:admin-user": 12,
+    "azure:read:admin-user": 289,
+    "azure:resource_created:admin-user": 37,
+    "azure:resource_deleted:admin-user": 6,
+    "azure:resource_list:ci-bot": 4401,
+    "azure:role_assignment:admin-user": 28,
+    "azure:write:deploy-svc": 178,
+    "github:branch_protection:admin-user": 9,
+    "github:issue:admin-user": 67,
+    "github:org.settings:admin-user": 18,
+    "github:pull_request:admin-user": 89,
+    "github:push:admin-user": 312,
+    "github:push:ci-bot": 891,
+    "github:repo.add_collaborator:admin-user": 0,
+    "github:repo.settings:admin-user": 14,
+    "github:review:admin-user": 134,
+    "github:workflow_run:admin-user": 45,
+    "github:workflow_run:ci-bot": 1247
+  },
+  "relationships": {
+    "admin-user:acme-corp": {
+      "Count": 856,
+      "FirstSeen": "2024-01-01",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:acme-corp/api": {
+      "Count": 178,
+      "FirstSeen": "2024-02-01",
+      "LastSeen": "2026-03-07"
+    },
+    "admin-user:acme-corp/atom-api": {
+      "Count": 401,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:acme-corp/infra": {
+      "Count": 213,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-08"
+    },
+    "admin-user:sub-169efd95": {
+      "Count": 512,
+      "FirstSeen": "2024-01-01",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 156,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    },
+    "admin-user:sub-169efd95/resourceGroups/opensign-rg": {
+      "Count": 89,
+      "FirstSeen": "2025-05-20",
+      "LastSeen": "2026-03-08"
+    },
+    "admin-user:sub-169efd95/resourceGroups/rudi-dev": {
+      "Count": 67,
+      "FirstSeen": "2025-06-01",
+      "LastSeen": "2026-03-07"
+    },
+    "ci-bot:acme-corp/api": {
+      "Count": 876,
+      "FirstSeen": "2024-02-01",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:acme-corp/atom-api": {
+      "Count": 1204,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 4401,
+      "FirstSeen": "2024-03-01",
+      "LastSeen": "2026-03-09"
+    },
+    "deploy-svc:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 289,
+      "FirstSeen": "2024-04-01",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T14:22:00Z",
+      "IngestedAt": "2026-03-10T14:23:00Z",
+      "Source": "azure",
+      "EventType": "service_principal_created",
+      "Actor": "admin-user",
+      "Action": "create_service_principal",
+      "Target": "acme-corp/service-principals/deploy-svc-new",
+      "Severity": "info",
+      "Metadata": {
+        "app_id": "a1b2c3d4-0001-0002-0003-000000000001",
+        "display_name": "deploy-svc-new",
+        "ip": "192.0.2.15",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T14:25:00Z",
+      "IngestedAt": "2026-03-10T14:26:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "admin-user",
+      "Action": "add_role_assignment",
+      "Target": "sub-169efd95/resourceGroups/atom-rg",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.15",
+        "principal_id": "a1b2c3d4-0001-0002-0003-000000000001",
+        "role": "Reader",
+        "user_agent": "Azure-Portal/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

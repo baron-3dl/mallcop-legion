@@ -1,0 +1,82 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "org-owner"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:container_app_revision:ci-bot": 234,
+    "azure:container_registry_push:ci-bot": 678,
+    "azure:login:admin-user": 340,
+    "azure:login:ci-bot": 1823,
+    "azure:login:deploy-svc": 312,
+    "azure:login:org-owner": 521,
+    "azure:read:admin-user": 223,
+    "azure:read:ci-bot": 3812,
+    "azure:resource_list:ci-bot": 4401,
+    "azure:role_assignment:admin-user": 31,
+    "azure:role_assignment:ci-bot": 0,
+    "azure:write:ci-bot": 0,
+    "azure:write:deploy-svc": 178,
+    "github:check_run:ci-bot": 2104,
+    "github:pull_request:ci-bot": 445,
+    "github:push:ci-bot": 891,
+    "github:status:ci-bot": 1891,
+    "github:workflow_dispatch:ci-bot": 312,
+    "github:workflow_run:ci-bot": 1247
+  },
+  "relationships": {
+    "admin-user:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 156,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:acme-corp/api": {
+      "Count": 876,
+      "FirstSeen": "2024-02-01",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:acme-corp/atom-api": {
+      "Count": 1204,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:acme-corp/infra": {
+      "Count": 567,
+      "FirstSeen": "2024-03-15",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 4401,
+      "FirstSeen": "2024-03-01",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/opensign-rg": {
+      "Count": 789,
+      "FirstSeen": "2025-05-20",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/rudi-dev": {
+      "Count": 412,
+      "FirstSeen": "2025-06-01",
+      "LastSeen": "2026-03-09"
+    },
+    "deploy-svc:sub-169efd95/resourceGroups/atom-rg": {
+      "Count": 289,
+      "FirstSeen": "2024-04-01",
+      "LastSeen": "2026-03-09"
+    },
+    "org-owner:sub-169efd95": {
+      "Count": 89,
+      "FirstSeen": "2024-01-15",
+      "LastSeen": "2026-03-09"
+    }
+  }
+}

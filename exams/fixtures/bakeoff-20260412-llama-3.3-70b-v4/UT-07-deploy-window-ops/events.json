@@ -1,0 +1,65 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-13T03:05:00Z",
+      "IngestedAt": "2026-03-13T03:06:00Z",
+      "Source": "azure",
+      "EventType": "resource_deleted",
+      "Actor": "ops-engineer",
+      "Action": "delete_resource",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api-v1-deprecated",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "192.0.2.22",
+        "maintenance_window": "true",
+        "reason": "deprecated_resource",
+        "ticket": "OPS-2026-0312",
+        "user_agent": "Azure-CLI/2.55.0",
+        "window_id": "mw-Q1-2026-infrastructure-cleanup"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-13T03:18:00Z",
+      "IngestedAt": "2026-03-13T03:19:00Z",
+      "Source": "azure",
+      "EventType": "resource_deleted",
+      "Actor": "ops-engineer",
+      "Action": "delete_resource",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot-v0-deprecated",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "192.0.2.22",
+        "maintenance_window": "true",
+        "reason": "deprecated_resource",
+        "ticket": "OPS-2026-0312",
+        "user_agent": "Azure-CLI/2.55.0",
+        "window_id": "mw-Q1-2026-infrastructure-cleanup"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-13T03:42:00Z",
+      "IngestedAt": "2026-03-13T03:43:00Z",
+      "Source": "azure",
+      "EventType": "role_assignment",
+      "Actor": "ops-engineer",
+      "Action": "remove_role_assignment",
+      "Target": "sub-169efd95/resourceGroups/atom-rg",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "192.0.2.22",
+        "maintenance_window": "true",
+        "principal_id": "svc-atom-legacy",
+        "reason": "service_decommissioned",
+        "role": "Contributor",
+        "user_agent": "Azure-CLI/2.55.0",
+        "window_id": "mw-Q1-2026-infrastructure-cleanup"
+      },
+      "Raw": {}
+    }
+  ]
+}

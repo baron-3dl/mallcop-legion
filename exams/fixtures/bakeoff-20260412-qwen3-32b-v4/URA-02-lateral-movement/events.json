@@ -1,0 +1,84 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T09:14:00Z",
+      "IngestedAt": "2026-03-10T09:15:00Z",
+      "Source": "azure",
+      "EventType": "secret_access",
+      "Actor": "ci-bot",
+      "Action": "list_secrets",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/keyVaults/atom-kv",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "192.0.2.100",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T09:15:30Z",
+      "IngestedAt": "2026-03-10T09:16:00Z",
+      "Source": "azure",
+      "EventType": "storage_access",
+      "Actor": "ci-bot",
+      "Action": "list_blobs",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/storageAccounts/atomstorage01",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "192.0.2.100",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T09:16:45Z",
+      "IngestedAt": "2026-03-10T09:17:00Z",
+      "Source": "azure",
+      "EventType": "database_access",
+      "Actor": "ci-bot",
+      "Action": "list_databases",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/flexibleServers/atom-db-prod",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "192.0.2.100",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-10T09:17:30Z",
+      "IngestedAt": "2026-03-10T09:18:00Z",
+      "Source": "azure",
+      "EventType": "vm_access",
+      "Actor": "ci-bot",
+      "Action": "get_vm",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/virtualMachines/build-vm-01",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "192.0.2.100",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_005",
+      "Timestamp": "2026-03-10T09:18:15Z",
+      "IngestedAt": "2026-03-10T09:19:00Z",
+      "Source": "azure",
+      "EventType": "registry_access",
+      "Actor": "ci-bot",
+      "Action": "list_repositories",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/containerRegistries/atomregistry",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "192.0.2.100",
+        "user_agent": "Azure-CLI/2.55.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

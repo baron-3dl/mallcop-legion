@@ -1,0 +1,48 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T10:15:00Z",
+      "IngestedAt": "2026-03-10T10:16:00Z",
+      "Source": "azure",
+      "EventType": "container_image_update",
+      "Actor": "ci-bot",
+      "Action": "update_container_image",
+      "Target": "opensign-rg/opensign-client",
+      "Severity": "info",
+      "Metadata": {
+        "changelog_note": "log format: renamed msg→message, ts→timestamp",
+        "deployment_id": "deploy-xyz789",
+        "ip": "192.0.2.77",
+        "new_image": "acme-corp/opensign-client:2.2.0",
+        "previous_image": "acme-corp/opensign-client:2.1.0",
+        "user_agent": "GitHub-Actions-Runner/2.312.0"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T10:20:44Z",
+      "IngestedAt": "2026-03-10T10:21:00Z",
+      "Source": "azure",
+      "EventType": "log_format_drift",
+      "Actor": "opensign-client",
+      "Action": "emit_logs",
+      "Target": "opensign-rg/opensign-client/logs",
+      "Severity": "warn",
+      "Metadata": {
+        "drift_started_at": "2026-03-10T10:18:02Z",
+        "image_version": "2.2.0",
+        "ip": "192.0.2.11",
+        "parser_template": "opensign-client-v1",
+        "sample_expected": "{\"msg\":\"startup complete\",\"ts\":\"2026-03-10T10:18:03Z\",\"level\":\"INFO\"}",
+        "sample_unmatched": "{\"message\":\"startup complete\",\"timestamp\":\"2026-03-10T10:18:03Z\",\"level\":\"INFO\"}",
+        "total_lines_sampled": 800,
+        "unmatched_lines": 200,
+        "unmatched_percent": 25,
+        "user_agent": "log-agent/1.0"
+      },
+      "Raw": {}
+    }
+  ]
+}

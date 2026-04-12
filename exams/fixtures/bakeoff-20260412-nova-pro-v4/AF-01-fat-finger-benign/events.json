@@ -1,0 +1,72 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T09:02:11Z",
+      "IngestedAt": "2026-03-10T09:03:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "admin-user",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.10",
+        "reason": "InvalidPassword",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T09:02:38Z",
+      "IngestedAt": "2026-03-10T09:03:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "admin-user",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.10",
+        "reason": "InvalidPassword",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T09:03:05Z",
+      "IngestedAt": "2026-03-10T09:04:00Z",
+      "Source": "azure",
+      "EventType": "login_failure",
+      "Actor": "admin-user",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "warn",
+      "Metadata": {
+        "ip": "203.0.113.10",
+        "reason": "InvalidPassword",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_004",
+      "Timestamp": "2026-03-10T09:03:52Z",
+      "IngestedAt": "2026-03-10T09:04:00Z",
+      "Source": "azure",
+      "EventType": "login_success",
+      "Actor": "admin-user",
+      "Action": "login_attempt",
+      "Target": "acme-corp/auth",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "203.0.113.10",
+        "session_id": "sess-a1b2c3d4",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      },
+      "Raw": {}
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "known_entities": {
+    "Actors": [
+      "admin-user",
+      "ci-bot",
+      "deploy-svc",
+      "tf-automation"
+    ],
+    "Sources": [
+      "azure",
+      "github"
+    ]
+  },
+  "frequency_tables": {
+    "azure:container_build:ci-bot": 163,
+    "azure:container_deploy:ci-bot": 380,
+    "azure:container_deploy:ci-bot:1:afternoon": 89,
+    "azure:container_deploy:ci-bot:3:afternoon": 82,
+    "azure:container_restart:ci-bot": 210,
+    "azure:image_push:ci-bot": 448,
+    "azure:image_push:ci-bot:1:afternoon": 112,
+    "azure:image_push:ci-bot:3:afternoon": 104,
+    "azure:login:ci-bot": 1200,
+    "azure:login:ci-bot:0:afternoon": 198,
+    "azure:login:ci-bot:0:morning": 42,
+    "azure:login:ci-bot:1:afternoon": 245,
+    "azure:login:ci-bot:1:morning": 51,
+    "azure:login:ci-bot:2:afternoon": 221,
+    "azure:login:ci-bot:2:morning": 47,
+    "azure:login:ci-bot:3:afternoon": 234,
+    "azure:login:ci-bot:4:afternoon": 187,
+    "azure:storage_access:ci-bot": 10,
+    "github:pr_merge:ci-bot": 89,
+    "github:push:ci-bot": 450,
+    "github:workflow_run:ci-bot": 520
+  },
+  "relationships": {
+    "ci-bot:acme-corp/repositories": {
+      "Count": 520,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-api": {
+      "Count": 380,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/atom-rg/containerApps/atom-bot": {
+      "Count": 280,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/atom-rg/containerRegistries/atomregistry": {
+      "Count": 450,
+      "FirstSeen": "2025-05-01",
+      "LastSeen": "2026-03-09"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/opensign-rg/containerApps/opensign-server": {
+      "Count": 87,
+      "FirstSeen": "2025-07-20",
+      "LastSeen": "2026-03-07"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/opensign-rg/containerRegistries/opensignregistry": {
+      "Count": 97,
+      "FirstSeen": "2025-07-20",
+      "LastSeen": "2026-03-07"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/rudi-dev/containerApps/ca-rudi": {
+      "Count": 148,
+      "FirstSeen": "2025-06-10",
+      "LastSeen": "2026-03-08"
+    },
+    "ci-bot:sub-169efd95/resourceGroups/rudi-dev/containerRegistries/rudiregistry": {
+      "Count": 163,
+      "FirstSeen": "2025-06-10",
+      "LastSeen": "2026-03-08"
+    }
+  }
+}

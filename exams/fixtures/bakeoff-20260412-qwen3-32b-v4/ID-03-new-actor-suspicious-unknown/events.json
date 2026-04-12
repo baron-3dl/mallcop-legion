@@ -1,0 +1,64 @@
+{
+  "events": [
+    {
+      "ID": "evt_001",
+      "Timestamp": "2026-03-10T11:04:17Z",
+      "IngestedAt": "2026-03-10T11:05:00Z",
+      "Source": "azure",
+      "EventType": "resource_list",
+      "Actor": "ext-user-7f3a",
+      "Action": "list_resources",
+      "Target": "sub-169efd95",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "203.0.113.88",
+        "resource_types_queried": [
+          "Microsoft.KeyVault/vaults",
+          "Microsoft.Storage/storageAccounts",
+          "Microsoft.ContainerRegistry/registries"
+        ],
+        "user_agent": "python-requests/2.28.2"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_002",
+      "Timestamp": "2026-03-10T11:04:52Z",
+      "IngestedAt": "2026-03-10T11:05:00Z",
+      "Source": "azure",
+      "EventType": "resource_list",
+      "Actor": "ext-user-7f3a",
+      "Action": "list_resources",
+      "Target": "sub-169efd95/resourceGroups/atom-rg",
+      "Severity": "info",
+      "Metadata": {
+        "ip": "203.0.113.88",
+        "resource_count": 14,
+        "user_agent": "python-requests/2.28.2"
+      },
+      "Raw": {}
+    },
+    {
+      "ID": "evt_003",
+      "Timestamp": "2026-03-10T11:05:38Z",
+      "IngestedAt": "2026-03-10T11:06:00Z",
+      "Source": "azure",
+      "EventType": "secrets_access",
+      "Actor": "ext-user-7f3a",
+      "Action": "get_secret",
+      "Target": "sub-169efd95/resourceGroups/atom-rg/providers/Microsoft.KeyVault/vaults/atom-kv/secrets",
+      "Severity": "critical",
+      "Metadata": {
+        "ip": "203.0.113.88",
+        "secret_names_attempted": [
+          "db-password",
+          "api-key",
+          "jwt-secret"
+        ],
+        "user_agent": "python-requests/2.28.2",
+        "vault": "atom-kv"
+      },
+      "Raw": {}
+    }
+  ]
+}
