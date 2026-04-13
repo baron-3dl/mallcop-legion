@@ -1,0 +1,12 @@
+{
+  "run_id": "bakeoff-20260413-glm-4.7",
+  "scenarios": [],
+  "summary": {
+    "total": 0,
+    "pass_n": 0,
+    "warn_n": 0,
+    "fail_n": 0,
+    "by_fix_target": {},
+    "pass_rate": 0
+  }
+}
