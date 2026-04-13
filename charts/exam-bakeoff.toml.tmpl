@@ -1,5 +1,7 @@
-# Bakeoff chart template. Usage:
-# sed 's/{{MODEL}}/glm-4.7-flash/g; s/{{RUN_ID}}/20260412/g' exam-bakeoff.toml.tmpl > exam-glm.toml
+# Bakeoff chart template (legion v0.2.0 — API spawn path with tool_use).
+# Usage:
+#   sed 's/{{MODEL}}/glm-4.7-flash/g; s/{{RUN_ID}}/20260412/g; s|{{FORGE_API_URL}}|https://forge.3dl.dev|g; s|{{FORGE_API_KEY}}|mallcop-sk-...|g; s|{{TOOL_BIN_DIR}}|/path/to/bin|g' \
+#     exam-bakeoff.toml.tmpl > exam-glm.toml
 
 [identity]
 name     = "mallcop-bakeoff-{{RUN_ID}}-{{MODEL}}"
@@ -19,55 +21,80 @@ max_tokens_per_task    = 15000
 max_tasks_per_session  = 1           # one scenario per session; budget resets between (A-04)
 
 [capabilities]
-gate_policy    = "gated"
-authority      = "baron@3dl.dev"
-tool_allowlist = ["bash", "read", "grep", "glob"]
+gate_policy    = "ungated"
+tool_allowlist = ["check-baseline", "search-events", "search-findings"]
 
 [[capabilities.seed]]
 name = "triage"
 match = ["exam:scenario", "task:triage"]
-tools = ["bash", "read", "check-baseline", "search-events"]
+tools = ["check-baseline", "search-events"]
 model = "{{MODEL}}"
+
+  [[capabilities.seed.tool_defs]]
+  name = "check-baseline"
+  description = "Check baseline frequency and history for an actor/entity. Returns JSON with known_user, action_count, last_seen, and baseline stats."
+  input_schema = '{"type":"object","properties":{"entity":{"type":"string","description":"actor email or username"},"source":{"type":"string","description":"connector source (e.g. github)"}},"required":["entity"]}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "check-baseline", "--mode", "exam", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-events"
+  description = "Search recent events by actor, type, or time range. Returns JSON array of matching events."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string","description":"actor filter"},"source":{"type":"string","description":"connector source"},"type":{"type":"string","description":"event_type filter"},"since":{"type":"string","description":"RFC3339 start time"},"until":{"type":"string","description":"RFC3339 end time"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-events", "--mode", "exam", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
 
 [[capabilities.seed]]
 name = "investigate"
 match = ["task:investigate"]
-tools = ["bash", "read", "check-baseline", "search-events", "search-findings", "load-skill"]
+tools = ["check-baseline", "search-events", "search-findings"]
 model = "{{MODEL}}"
-# check-baseline, search-events, search-findings are served by mallcop-investigate-tools
-# (cmd/mallcop-investigate-tools) via --tool flag. legion resolves logical tool names to
-# the backing binary declared below.
 
-[[capabilities.tool_binaries]]
-binary = "mallcop-investigate-tools"
-tools  = ["check-baseline", "search-events", "search-findings"]
+  [[capabilities.seed.tool_defs]]
+  name = "check-baseline"
+  description = "Check baseline frequency and history for an actor/entity."
+  input_schema = '{"type":"object","properties":{"entity":{"type":"string"},"source":{"type":"string"}},"required":["entity"]}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "check-baseline", "--mode", "exam", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-events"
+  description = "Search recent events by actor, type, or time range."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"type":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-events", "--mode", "exam", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-findings"
+  description = "Search existing findings by actor, severity, or time range."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-findings", "--mode", "exam", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
 
 [[capabilities.seed]]
 name = "heal"
 match = ["task:heal"]
-tools = ["bash", "read", "exam-transcript-dump"]   # NO real write tools in exam
+tools = []                            # NO tools in exam — heal describes actions only
 model = "{{MODEL}}"
 
 [[capabilities.seed]]
 name = "judge"
 match = ["exam:judge"]
-tools = ["read"]                      # jail sees transcripts/ only (see [sandbox])
+tools = []                            # judge reads transcripts via prompt context, no tools
 model = "{{MODEL}}"
 
 [[capabilities.seed]]
 name = "report"
 match = ["exam:report"]
-tools = ["read", "bash"]
+tools = []
 model = "haiku"
 
 # Phase 1 note: mallcop-checklist-verify and mallcop-credential-theft-verify
 # are no-ops until Phase 2 ships the verify binaries in mallcop-legion/cmd/.
-# The hooks are declared here so the chart is structurally complete and legion
-# can validate them at boot; the commands exit 0 until Phase 2.
 [[hooks]]
 point   = "pre_bead_close"
 type    = "veracity_gate"
-command = "mallcop-checklist-verify"      # Go CLI in mallcop-legion/cmd/
+command = "mallcop-checklist-verify"
 
 [[hooks]]
 point   = "pre_bead_close"
@@ -80,7 +107,8 @@ time_limit    = "90m"
 poll_interval = "2s"
 
 [inference]
-forge_api_url = "{{FORGE_API_URL}}"       # NEW legion field — Gap 1
+forge_api_url = "{{FORGE_API_URL}}"
+api_key       = "{{FORGE_API_KEY}}"
 [inference.local_model_mapping]
 local = "qwen3-coder-30b"
 
@@ -92,7 +120,7 @@ transport_dir = ".run/exam-{{RUN_ID}}/campfires"
 
 [sandbox]
 extra_ro = [
-  "exams/fixtures/{{RUN_ID}}/",      # chain steps read fixtures here
-  "exams/transcripts/{{RUN_ID}}/",   # judge reads transcripts here
+  "exams/fixtures/{{RUN_ID}}/",
+  "exams/transcripts/{{RUN_ID}}/",
   "agents/",
 ]
