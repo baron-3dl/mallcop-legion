@@ -34,24 +34,24 @@ func newIsolatedCampfire(t *testing.T, cfBin string) (string, string) {
 		t.Fatalf("cf init: %v\n%s", err, out)
 	}
 
-	// Create campfire; output last line is the hex campfire ID
-	createCmd := exec.Command(cfBin, "create", "--description", "test-exam-"+t.Name())
+	// Create campfire; use --json to get structured output with campfire_id
+	createCmd := exec.Command(cfBin, "create", "--description", "test-exam-"+t.Name(), "--json")
 	createCmd.Env = append(os.Environ(), "CF_HOME="+cfHome)
 	out, err := createCmd.Output()
 	if err != nil {
 		t.Fatalf("cf create: %v\n%s", err, out)
 	}
 
-	// Parse campfire ID from stdout — it's the first line that is exactly 64 hex chars
-	campfireID := ""
-	for _, line := range splitLines(string(out)) {
-		if len(line) == 64 && isHex(line) {
-			campfireID = line
-			break
-		}
+	// Parse campfire_id from JSON output
+	var createResult struct {
+		CampfireID string `json:"campfire_id"`
 	}
+	if err := json.Unmarshal(out, &createResult); err != nil {
+		t.Fatalf("could not parse cf create JSON output: %v\n%s", err, out)
+	}
+	campfireID := createResult.CampfireID
 	if campfireID == "" {
-		t.Fatalf("could not parse campfire ID from cf create output:\n%s", out)
+		t.Fatalf("cf create returned empty campfire_id:\n%s", out)
 	}
 
 	return cfHome, campfireID
