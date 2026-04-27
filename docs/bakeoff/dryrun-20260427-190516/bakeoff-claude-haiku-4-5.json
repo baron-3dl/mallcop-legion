@@ -1,0 +1,11 @@
+{
+  "models": {
+    "claude-haiku-4-5": {
+      "pass_rate": null,
+      "sovereignty": "us_only",
+      "scenarios_run": 0,
+      "scenarios_passed": 0,
+      "blended_per_mtok": 2.4
+    }
+  }
+}

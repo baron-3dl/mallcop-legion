@@ -1,0 +1,11 @@
+{
+  "models": {
+    "mistral-large-2": {
+      "pass_rate": null,
+      "sovereignty": "allied",
+      "scenarios_run": 0,
+      "scenarios_passed": 0,
+      "blended_per_mtok": 4.0
+    }
+  }
+}
