@@ -754,6 +754,20 @@ func harvestModel(a harvestArgs, s *runState) error {
 	s.failN = rep.Summary.FailN
 	s.reportPath = reportPath
 
+	// Dead-run guard (mallcoppro-009): a present-but-empty report.json is the
+	// exact failure mode that produced the 20260414b silent dead-run — every
+	// model committed scenarios=0 with no error surfaced, then lanes.yaml was
+	// populated from null routing recommendations. Mark zero-scenario harvests
+	// as a per-model failure so writeSummary/printSummary surface them as
+	// `exit=err: dead run` instead of the misleading `exit=ok scenarios=0`.
+	// The per-model bakeoff JSON still gets written so the operator can
+	// inspect it. We override exitErr only if cmd.Wait() returned nil; an
+	// existing process error stays the more authoritative diagnosis.
+	deadRunErr := fmt.Errorf("dead run: report.json has zero scenarios — judge produced no verdicts (check we.log for Infer errors, model output format, or campfire seed failures)")
+	if rep.Summary.Total == 0 && s.exitErr == nil {
+		s.exitErr = deadRunErr
+	}
+
 	// Build the bakeoff-aggregate per-model record
 	pmr := PerModelResult{
 		Sovereignty:     s.model.Sovereignty,
@@ -781,6 +795,12 @@ func harvestModel(a harvestArgs, s *runState) error {
 		return err
 	}
 	s.bakeoffPath = bakeoffPath
+
+	// Surface dead-run as a harvest error too — caller logs WARN to stderr
+	// so the operator notices alongside any other harvest issues.
+	if rep.Summary.Total == 0 {
+		return deadRunErr
+	}
 	return nil
 }
 
