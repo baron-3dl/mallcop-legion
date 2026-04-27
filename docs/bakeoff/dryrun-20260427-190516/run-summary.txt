@@ -1,0 +1,38 @@
+Bakeoff run: dryrun-20260427-190516
+Slate: exams/slates/bakeoff-13.yaml (13 models)
+Scenarios dir: exams/scenarios/auth
+Scenario filter: AF-01-fat-finger-benign
+Max concurrent: 4
+Budget cap: $100.00 (pre-flight enforced)
+
+Per-model results (re-harvested with aggregator empty-verdict + AND-tag fix):
+  glm-4.7-flash            scenarios=1 pass=0 pass_rate=0
+  glm-4.7                  scenarios=1 pass=0 pass_rate=0
+  glm-5                    scenarios=1 pass=0 pass_rate=0
+  glm-5.1                  scenarios=0 pass=0 pass_rate=None
+  qwen3-32b                scenarios=1 pass=0 pass_rate=0
+  deepseek-r1              scenarios=0 pass=0 pass_rate=None
+  llama-3.3-70b            scenarios=0 pass=0 pass_rate=None
+  mistral-large-2          scenarios=0 pass=0 pass_rate=None
+  nova-lite                scenarios=0 pass=0 pass_rate=None
+  nova-micro               scenarios=0 pass=0 pass_rate=None
+  nova-pro                 scenarios=0 pass=0 pass_rate=None
+  claude-haiku-4-5         scenarios=0 pass=0 pass_rate=None
+  claude-sonnet-4-6        scenarios=0 pass=0 pass_rate=None
+
+Survivors (pipeline produced verdict): 4/13
+  + glm-4.7-flash
+  + glm-4.7
+  + glm-5
+  + qwen3-32b
+
+Eliminated:
+  - glm-5.1
+  - deepseek-r1
+  - llama-3.3-70b
+  - mistral-large-2
+  - nova-lite
+  - nova-micro
+  - nova-pro
+  - claude-haiku-4-5
+  - claude-sonnet-4-6
