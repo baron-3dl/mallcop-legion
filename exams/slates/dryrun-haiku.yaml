@@ -1,0 +1,7 @@
+# Single-model probe slate for orchestrator verification using a model that
+# reliably emits raw JSON (claude-haiku-4-5). glm-4.7-flash flakes by wrapping
+# its judge JSON in a ```json``` markdown fence, which suppresses legion's
+# content-aware judge:verdict auto-tag — see prior bakeoff-aggregate notes.
+models:
+  - id: claude-haiku-4-5
+    sovereignty: us_only
