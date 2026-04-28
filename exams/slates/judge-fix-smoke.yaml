@@ -1,0 +1,5 @@
+# Smoke slate: verify mallcoppro-67e fix lets judge call get_session_transcript.
+# Single fast cheap model, single scenario — pure plumbing test.
+models:
+  - id: glm-4.7-flash
+    sovereignty: open
