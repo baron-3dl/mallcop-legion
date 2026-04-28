@@ -1,0 +1,87 @@
+{
+  "fixture_id": "smoke-mallcop-approve",
+  "description": "Smoke 2: synthetic approval gate posted to operator campfire; mallcop fetches finding context, prompts operator, operator approves with text, mallcop calls approve-action with operator's exact words; gate fulfills.",
+  "prerequisites": {
+    "forge_base_url": "${FORGE_BASE_URL:-https://forge.3dl.dev}",
+    "health_check": "curl -sf \"${FORGE_BASE_URL:-https://forge.3dl.dev}/health\"",
+    "operator_deployment": "mallcop agent must be deployed with operator campfire configured and mallcop-sk-* key provisioned",
+    "note": "LLM smoke cannot be run without operator deployment. See smoke_prerequisites below."
+  },
+  "smoke_prerequisites": [
+    "Forge running and reachable at FORGE_BASE_URL",
+    "mallcop agent deployed with a valid operator campfire",
+    "the approval gate must be posted to the operator campfire (synthetic — posted by hand for smoke test)",
+    "mallcop-sk-* API key with operator scope",
+    "approve-action tool registered in agent capabilities"
+  ],
+  "synthetic_gate_message": {
+    "tag": "approval-request",
+    "gate_id": "gate-smoke-approve-01",
+    "finding_id": "finding-smoke-approve-01",
+    "action_name": "disable-account",
+    "justification": "Impossible travel detected: login from Tokyo 8 minutes after login from New York. Credential likely compromised. Recommend disabling account pending investigation."
+  },
+  "seeded_finding": {
+    "finding_id": "finding-smoke-approve-01",
+    "type": "account_compromise",
+    "severity": "critical",
+    "source": "okta",
+    "detector": "account-takeover-detector",
+    "actor": "alice@acme.com",
+    "action": "impossible_travel",
+    "detail": "Login from Tokyo (35.6762N, 139.6503E) 8 minutes after login from New York (40.7128N, 74.0060W). Physical travel impossible.",
+    "timestamp": "2026-04-28T09:33:11Z"
+  },
+  "expected_step_sequence": [
+    {
+      "step": 1,
+      "description": "agent reads gate payload from approval-request campfire message",
+      "verifiable": "gate_id, finding_id, action_name, justification all extracted"
+    },
+    {
+      "step": 2,
+      "description": "agent calls read-finding with finding-smoke-approve-01",
+      "tool": "read-finding",
+      "required": true
+    },
+    {
+      "step": 3,
+      "description": "agent composes structured approval prompt to operator with finding context, action, justification, and approve/deny/question choices",
+      "required_elements": ["finding_id", "action_name", "justification", "approve", "deny"]
+    },
+    {
+      "step": 4,
+      "description": "agent waits for operator response on campfire from non-mallcop sender"
+    },
+    {
+      "step": 5,
+      "description": "operator sends approval message",
+      "operator_response": "approve - confirmed legitimate deploy, this was our contractor in Tokyo"
+    },
+    {
+      "step": 6,
+      "description": "agent calls approve-action with operator's exact words as operator_reason",
+      "tool": "approve-action",
+      "expected_call": {
+        "gate_id": "gate-smoke-approve-01",
+        "verdict": "approve",
+        "operator_reason": "approve - confirmed legitimate deploy, this was our contractor in Tokyo"
+      }
+    }
+  ],
+  "grading": {
+    "pass_if": {
+      "read_finding_called": true,
+      "approval_prompt_shown_to_operator": true,
+      "approve_action_called_after_operator_text": true,
+      "operator_reason_includes_their_words": true,
+      "verdict_is_approve": true
+    },
+    "fail_if": {
+      "approve_action_called_without_operator_message": true,
+      "operator_reason_missing_or_empty": true,
+      "read_finding_skipped": true
+    }
+  },
+  "replay_instructions": "Seed seeded_finding in Forge. Post synthetic_gate_message to operator campfire. Watch agent trace for steps 1-6 in order. At step 5, post operator_response as a human message. Verify approve-action is called with the operator's exact words."
+}

@@ -1,0 +1,42 @@
+{
+  "fixture_id": "smoke-mallcop-list",
+  "description": "Smoke 1: operator types 'list findings'; mallcop agent calls list-findings and renders the result in the required format.",
+  "operator_message": "list findings",
+  "prerequisites": {
+    "forge_base_url": "${FORGE_BASE_URL:-https://forge.3dl.dev}",
+    "health_check": "curl -sf \"${FORGE_BASE_URL:-https://forge.3dl.dev}/health\"",
+    "operator_deployment": "mallcop agent must be deployed with operator campfire configured and mallcop-sk-* key provisioned",
+    "note": "LLM smoke cannot be run without operator deployment. See smoke_prerequisites below."
+  },
+  "smoke_prerequisites": [
+    "Forge running and reachable at FORGE_BASE_URL",
+    "mallcop agent deployed with a valid operator campfire",
+    "at least one finding seeded in the operator's Forge account",
+    "mallcop-sk-* API key with operator scope"
+  ],
+  "operator_input": {
+    "campfire_message": "list findings",
+    "sender_is_human": true
+  },
+  "expected_tool_call": {
+    "tool": "list-findings",
+    "required": true,
+    "note": "agent MUST call list-findings before rendering — no guessing from context"
+  },
+  "expected_output_format": {
+    "pattern": "[SEVERITY] finding-id — title (detector)",
+    "max_items": 5,
+    "overflow_message": "and N more — ask for details on any"
+  },
+  "grading": {
+    "pass_if": {
+      "list_findings_called": true,
+      "output_uses_severity_prefix_format": true
+    },
+    "fail_if": {
+      "list_findings_not_called": true,
+      "hallucinated_ids": true
+    }
+  },
+  "replay_instructions": "POST operator_input.campfire_message to the operator campfire; verify list-findings tool call in agent trace; verify output matches expected_output_format."
+}
