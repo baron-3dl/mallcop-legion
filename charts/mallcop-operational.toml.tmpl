@@ -57,8 +57,12 @@ tool_allowlist = [
 [[capabilities.seed]]
 name  = "triage"
 match = ["task:triage"]
-tools = ["check-baseline", "search-events", "escalate-to-investigator"]
-model = "{{MODEL}}"
+tools = [
+  "check-baseline", "search-events", "search-findings",
+  "resolve-finding", "escalate-to-investigator", "annotate-finding",
+]
+model     = "{{MODEL}}"
+max_iters = 3
 
   [[capabilities.seed.tool_defs]]
   name = "check-baseline"
@@ -74,6 +78,28 @@ model = "{{MODEL}}"
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "search-events", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
 
+  [[capabilities.seed.tool_defs]]
+  name = "search-findings"
+  description = "Search existing findings by actor, severity, or time range. Returns JSON array of related findings within the last 30 days."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-findings", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  # F1G-a: Finding-state tools for triage
+  [[capabilities.seed.tool_defs]]
+  name = "resolve-finding"
+  description = "Close a finding with a resolution action (resolved|escalated). Triage uses this only for high-confidence benign resolutions. Call last after step-4 decision."
+  input_schema = '{"type":"object","required":["finding_id","action","reason"],"properties":{"finding_id":{"type":"string"},"action":{"type":"string","enum":["resolved","escalated"]},"reason":{"type":"string"},"confidence":{"type":"number","minimum":1,"maximum":5}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "resolve-finding"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "annotate-finding"
+  description = "Add a structured annotation to a finding. Posts finding:annotation to engagement campfire."
+  input_schema = '{"type":"object","required":["finding_id","note"],"properties":{"finding_id":{"type":"string"},"note":{"type":"string","maxLength":4096},"tags":{"type":"array","items":{"type":"string"}}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "annotate-finding"]
+
   # F1G-b: triage → investigator handoff
   [[capabilities.seed.tool_defs]]
   name = "escalate-to-investigator"
@@ -86,12 +112,16 @@ model = "{{MODEL}}"
 name  = "investigate"
 match = ["task:investigate"]
 tools = [
-  "check-baseline", "search-events", "search-findings",
-  "resolve-finding", "annotate-finding",
-  "escalate-to-stage-c", "escalate-to-deep",
-  "create-investigate-merge", "write-partial-transcript",
+  "check-baseline", "baseline-stats",
+  "search-events", "search-findings",
+  "read-config",
+  "annotate-finding", "resolve-finding",
+  "load-skill",
+  "escalate-to-stage-c", "write-partial-transcript",
+  "escalate-to-deep", "create-investigate-merge",
 ]
-model = "{{MODEL}}"
+model     = "{{MODEL}}"
+max_iters = 10
 
   [[capabilities.seed.tool_defs]]
   name = "check-baseline"
@@ -99,6 +129,13 @@ model = "{{MODEL}}"
   input_schema = '{"type":"object","properties":{"entity":{"type":"string"},"source":{"type":"string"}},"required":["entity"]}'
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "check-baseline", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "baseline-stats"
+  description = "Return aggregate baseline statistics for an actor or source: total event volume, time-of-day distribution, weekly cadence. Useful for spotting anomalous volume or timing without examining individual events."
+  input_schema = '{"type":"object","properties":{"entity":{"type":"string","description":"actor email or username (optional)"},"source":{"type":"string","description":"connector source (e.g. github, aws)"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "baseline-stats", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
 
   [[capabilities.seed.tool_defs]]
   name = "search-events"
@@ -113,6 +150,20 @@ model = "{{MODEL}}"
   input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"}}}'
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "search-findings", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "read-config"
+  description = "Read connector or detector configuration (read-only). Returns JSON with detector thresholds, connector scope, and enabled sources."
+  input_schema = '{"type":"object","properties":{"detector":{"type":"string","description":"detector name (optional)"},"connector":{"type":"string","description":"connector name (optional)"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "read-config", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "load-skill"
+  description = "Load a domain-specific skill module to gain specialized tools and context (e.g. AWS IAM analysis, cloud attack patterns). Returns {skill_id, new_tools, context}. Only load when baseline tools are insufficient."
+  input_schema = '{"type":"object","required":["skill_name"],"properties":{"skill_name":{"type":"string","description":"skill name from the skill catalog"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "load-skill"]
 
   # F1G-a: Finding-state tools
   [[capabilities.seed.tool_defs]]
@@ -264,15 +315,16 @@ max_iters = 5
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "escalate-to-stage-c"]
 
-# task:escalate capability seed — F1G-c operator/escalation tools
+# task:escalate capability seed — F1F: 4-branch policy + F1G-c operator/escalation tools
 [[capabilities.seed]]
 name  = "escalate"
 match = ["task:escalate"]
 tools = [
   "list-actions", "remediate-action", "request-approval",
-  "message-operator", "resolve-finding", "annotate-finding",
+  "message-operator", "annotate-finding", "resolve-finding",
 ]
-model = "{{MODEL}}"
+model     = "{{MODEL}}"
+max_iters = 5
 
   # F1G-c: Operator/escalation tools
   [[capabilities.seed.tool_defs]]

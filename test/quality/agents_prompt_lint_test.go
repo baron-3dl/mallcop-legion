@@ -366,3 +366,389 @@ func TestSplitFixtureConfidencePenalty(t *testing.T) {
 			c1, c2, expectedFinal, actualFinal)
 	}
 }
+
+// TestTriagePromptExists verifies that agents/triage/POST.md exists and contains
+// the key directives required by F1B: 4-step process, all four hard rules,
+// confidence 1-5 scale, security section, and escalate-to-investigator reference.
+func TestTriagePromptExists(t *testing.T) {
+	root := repoRoot(t)
+	promptPath := filepath.Join(root, "agents", "triage", "POST.md")
+
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v — create agents/triage/POST.md (F1B)", promptPath, err)
+	}
+	content := string(data)
+	lower := strings.ToLower(content)
+
+	// Required 4-step process markers
+	steps := []struct {
+		label string
+		token string
+	}{
+		{"Step 1: check-baseline", "check-baseline"},
+		{"Step 2: search-events", "search-events"},
+		{"Step 3: Analyze (A/B/C/D)", "routine for this actor"},
+		{"Step 4: Decide", "decide"},
+	}
+	for _, s := range steps {
+		if !strings.Contains(lower, strings.ToLower(s.token)) {
+			t.Errorf("agents/triage/POST.md: missing step %q — expected token %q", s.label, s.token)
+		}
+	}
+
+	// Required hard rules (non-negotiable)
+	hardRules := []struct {
+		label string
+		token string
+	}{
+		{"privilege escalate rule", "privilege changes"},
+		{"log format drift escalate rule", "log format drift"},
+		{"confidence floor escalate rule (conf<3 escalate)", "confidence"},
+		{"positive evidence requirement", "positive evidence"},
+	}
+	for _, r := range hardRules {
+		if !strings.Contains(lower, strings.ToLower(r.token)) {
+			t.Errorf("agents/triage/POST.md: missing hard rule %q — expected token %q", r.label, r.token)
+		}
+	}
+
+	// Confidence scale 1-5
+	if !strings.Contains(content, "1-5") && !strings.Contains(content, "1–5") {
+		t.Errorf("agents/triage/POST.md: missing confidence 1-5 scale")
+	}
+
+	// Security injection defense section
+	if !strings.Contains(content, "USER_DATA_BEGIN") {
+		t.Errorf("agents/triage/POST.md: missing security section with USER_DATA_BEGIN marker")
+	}
+	if !strings.Contains(content, "USER_DATA_END") {
+		t.Errorf("agents/triage/POST.md: missing security section with USER_DATA_END marker")
+	}
+
+	// Required tool: escalate-to-investigator
+	if !strings.Contains(lower, "escalate-to-investigator") {
+		t.Errorf("agents/triage/POST.md: missing 'escalate-to-investigator' — triage must reference the handoff tool")
+	}
+
+	// Negative assertions: triage must NOT reference investigate-level or escalate-level tools
+	forbiddenTools := []string{
+		"escalate-to-stage-c",
+		"escalate-to-deep",
+		"create-investigate-merge",
+		"write-partial-transcript",
+		"remediate-action",
+		"request-approval",
+		"message-operator",
+		"list-actions",
+		"load-skill",
+		"approve-action",
+	}
+	for _, ft := range forbiddenTools {
+		if strings.Contains(lower, ft) {
+			t.Errorf("agents/triage/POST.md: forbidden tool %q present — triage is stage-A only; deeper tools belong to investigate/escalate", ft)
+		}
+	}
+}
+
+// TestInvestigatePromptExists verifies that agents/investigate/POST.md exists and
+// contains the key directives required by F1C: 5-check pre-resolution checklist,
+// hard constraints, credential theft test, chase-provenance, weigh-signals,
+// load-skill reference, and — critically — the §Fan-out on Uncertainty section
+// with the verbatim 'task:deep-investigate' string (R1 grep check).
+func TestInvestigatePromptExists(t *testing.T) {
+	root := repoRoot(t)
+	promptPath := filepath.Join(root, "agents", "investigate", "POST.md")
+
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v — create agents/investigate/POST.md (F1C)", promptPath, err)
+	}
+	content := string(data)
+	lower := strings.ToLower(content)
+
+	// Pre-resolution checklist (5 checks — must all be present by keyword)
+	checklistItems := []struct {
+		label string
+		token string
+	}{
+		{"EVIDENCE check", "evidence"},
+		{"ADVERSARY check", "adversary"},
+		{"DISCONFIRM check", "disconfirm"},
+		{"BOUNDARY check", "boundary"},
+		{"BLAST RADIUS check", "blast radius"},
+	}
+	for _, c := range checklistItems {
+		if !strings.Contains(lower, strings.ToLower(c.token)) {
+			t.Errorf("agents/investigate/POST.md: missing pre-resolution checklist item %q — expected token %q", c.label, c.token)
+		}
+	}
+
+	// Hard constraints keywords
+	hardConstraints := []struct {
+		label string
+		token string
+	}{
+		{"privilege changes hard constraint", "privilege changes always"},
+		{"structural drift hard constraint", "structural drift"},
+		{"prior resolutions constraint", "prior resolutions"},
+		{"in-band confirmation constraint", "in-band confirmation"},
+	}
+	for _, hc := range hardConstraints {
+		if !strings.Contains(lower, strings.ToLower(hc.token)) {
+			t.Errorf("agents/investigate/POST.md: missing hard constraint %q — expected token %q", hc.label, hc.token)
+		}
+	}
+
+	// Credential theft test section
+	if !strings.Contains(lower, "credential theft test") {
+		t.Errorf("agents/investigate/POST.md: missing 'Credential Theft Test' section")
+	}
+
+	// Chase provenance section
+	if !strings.Contains(lower, "chase provenance") {
+		t.Errorf("agents/investigate/POST.md: missing 'Chase provenance' section")
+	}
+
+	// Weigh signals section
+	if !strings.Contains(lower, "weigh signals") {
+		t.Errorf("agents/investigate/POST.md: missing 'Weigh signals' section")
+	}
+
+	// load-skill reference
+	if !strings.Contains(lower, "load-skill") {
+		t.Errorf("agents/investigate/POST.md: missing 'load-skill' reference — investigate must document the skill-loading mechanism")
+	}
+
+	// Security injection defense
+	if !strings.Contains(content, "USER_DATA_BEGIN") {
+		t.Errorf("agents/investigate/POST.md: missing security section with USER_DATA_BEGIN marker")
+	}
+
+	// Fan-out section — R1 grep check: 'task:deep-investigate' MUST appear verbatim
+	if !strings.Contains(content, "task:deep-investigate") {
+		t.Errorf("agents/investigate/POST.md: missing verbatim 'task:deep-investigate' string — §Fan-out on Uncertainty section must be present (F1C requirement, F2 enforcement hook is separate)")
+	}
+
+	// Fan-out section required tokens
+	fanoutTokens := []struct {
+		label string
+		token string
+	}{
+		{"fan-out section header", "fan-out on uncertainty"},
+		{"confidence threshold 0.55", "0.55"},
+		{"deep-investigate benign hypothesis", "hypothesis:benign"},
+		{"deep-investigate malicious hypothesis", "hypothesis:malicious"},
+		{"deep-investigate incomplete hypothesis", "hypothesis:incomplete"},
+		{"investigate-merge item creation", "task:investigate-merge"},
+		{"partial transcript step", "partial transcript"},
+	}
+	for _, ft := range fanoutTokens {
+		if !strings.Contains(lower, strings.ToLower(ft.token)) {
+			t.Errorf("agents/investigate/POST.md: missing fan-out token %q — expected %q", ft.label, ft.token)
+		}
+	}
+
+	// Negative assertions: investigate must NOT have escalate-to-investigator (that's triage's tool)
+	// and must NOT have stage-C consumer tools (those belong to escalate)
+	forbiddenTools := []string{
+		"escalate-to-investigator",
+		"remediate-action",
+		"request-approval",
+		"message-operator",
+		"list-actions",
+		"approve-action",
+	}
+	for _, ft := range forbiddenTools {
+		if strings.Contains(lower, ft) {
+			t.Errorf("agents/investigate/POST.md: forbidden tool %q present — investigate is stage-B; this tool belongs to triage or escalate", ft)
+		}
+	}
+}
+
+// TestEscalatePromptExists verifies that agents/escalate/POST.md exists and
+// contains all four branch labels, correct branch selection logic, tool references,
+// and — critically — does NOT contain escalation-chain tools (escalate is terminal).
+func TestEscalatePromptExists(t *testing.T) {
+	root := repoRoot(t)
+	promptPath := filepath.Join(root, "agents", "escalate", "POST.md")
+
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v — create agents/escalate/POST.md (F1F)", promptPath, err)
+	}
+	content := string(data)
+	lower := strings.ToLower(content)
+
+	// Required 4 branch labels (case-insensitive)
+	branches := []struct {
+		label string
+		token string
+	}{
+		{"AUTO-REMEDIATE branch", "auto-remediate"},
+		{"REQUEST-APPROVAL branch", "request-approval"},
+		{"INSTRUCT-OPERATOR branch", "instruct-operator"},
+		{"NO-ACTION-AVAILABLE branch", "no-action-available"},
+	}
+	for _, b := range branches {
+		if !strings.Contains(lower, strings.ToLower(b.token)) {
+			t.Errorf("agents/escalate/POST.md: missing branch %q — expected label %q", b.label, b.token)
+		}
+	}
+
+	// Branch selection logic: list-actions must be the selector
+	if !strings.Contains(lower, "list-actions") {
+		t.Errorf("agents/escalate/POST.md: missing 'list-actions' — branch selection must start with list-actions call")
+	}
+
+	// action_class enum values must be present
+	actionClasses := []string{"auto-safe", "needs-approval", "informational", "ambiguous"}
+	for _, ac := range actionClasses {
+		if !strings.Contains(lower, ac) {
+			t.Errorf("agents/escalate/POST.md: missing action_class value %q — branch selection must reference all action classes", ac)
+		}
+	}
+
+	// Required tools for each branch
+	branchTools := []string{
+		"remediate-action",
+		"message-operator",
+		"resolve-finding",
+		"annotate-finding",
+	}
+	for _, bt := range branchTools {
+		if !strings.Contains(lower, bt) {
+			t.Errorf("agents/escalate/POST.md: missing tool %q — required for branch execution", bt)
+		}
+	}
+
+	// Gate semantics for branch 2
+	if !strings.Contains(lower, "gate") {
+		t.Errorf("agents/escalate/POST.md: missing 'gate' semantics — branch 2 (REQUEST-APPROVAL) must use cf gate await mechanism")
+	}
+
+	// Security injection defense
+	if !strings.Contains(content, "USER_DATA_BEGIN") {
+		t.Errorf("agents/escalate/POST.md: missing security section with USER_DATA_BEGIN marker")
+	}
+	if !strings.Contains(content, "USER_DATA_END") {
+		t.Errorf("agents/escalate/POST.md: missing security section with USER_DATA_END marker")
+	}
+
+	// Negative assertions: escalate is TERMINAL — must NOT have escalation chain tools
+	// These tools would create a cycle or pass work further downstream.
+	forbiddenTools := []string{
+		"escalate-to-investigator",
+		"escalate-to-stage-c",
+		"escalate-to-deep",
+		"create-investigate-merge",
+		"write-partial-transcript",
+		"load-skill",
+		"approve-action",
+	}
+	for _, ft := range forbiddenTools {
+		if strings.Contains(lower, ft) {
+			t.Errorf("agents/escalate/POST.md: forbidden tool %q present — escalate is the terminal stage; no escalation-chain tools allowed", ft)
+		}
+	}
+}
+
+// TestEscalateSmokeFixturesWellFormed verifies that all 4 escalate branch smoke
+// fixtures exist and have the required shape: finding_id, branch, list_actions_response,
+// expected_operator_artifact, and expected_verdict.
+func TestEscalateSmokeFixturesWellFormed(t *testing.T) {
+	root := repoRoot(t)
+
+	fixtures := []struct {
+		name   string
+		path   string
+		branch string
+	}{
+		{
+			name:   "smoke-escalate-auto-safe",
+			path:   filepath.Join(root, "docs", "academy", "smoke-escalate-auto-safe.json"),
+			branch: "AUTO-REMEDIATE",
+		},
+		{
+			name:   "smoke-escalate-approval",
+			path:   filepath.Join(root, "docs", "academy", "smoke-escalate-approval.json"),
+			branch: "REQUEST-APPROVAL",
+		},
+		{
+			name:   "smoke-escalate-instruct",
+			path:   filepath.Join(root, "docs", "academy", "smoke-escalate-instruct.json"),
+			branch: "INSTRUCT-OPERATOR",
+		},
+		{
+			name:   "smoke-escalate-no-action",
+			path:   filepath.Join(root, "docs", "academy", "smoke-escalate-no-action.json"),
+			branch: "NO-ACTION-AVAILABLE",
+		},
+	}
+
+	for _, fix := range fixtures {
+		t.Run(fix.name, func(t *testing.T) {
+			data, err := os.ReadFile(fix.path)
+			if err != nil {
+				t.Fatalf("fixture file missing: %s: %v", fix.path, err)
+			}
+
+			var doc map[string]interface{}
+			if err := json.Unmarshal(data, &doc); err != nil {
+				t.Fatalf("fixture %s is not valid JSON: %v", fix.name, err)
+			}
+
+			// Must have finding_id nested in finding object
+			findingObj, ok := doc["finding"].(map[string]interface{})
+			if !ok {
+				t.Errorf("fixture %s: missing 'finding' object", fix.name)
+			} else {
+				if _, ok := findingObj["finding_id"]; !ok {
+					t.Errorf("fixture %s: missing finding.finding_id", fix.name)
+				}
+			}
+
+			// Must have branch matching expected
+			branch, _ := doc["branch"].(string)
+			if branch != fix.branch {
+				t.Errorf("fixture %s: branch=%q, want %q", fix.name, branch, fix.branch)
+			}
+
+			// Must have list_actions_response (may be empty array for branch 3/4)
+			if _, ok := doc["list_actions_response"]; !ok {
+				t.Errorf("fixture %s: missing 'list_actions_response'", fix.name)
+			}
+
+			// Must have expected_operator_artifact
+			artifact, ok := doc["expected_operator_artifact"].(map[string]interface{})
+			if !ok {
+				t.Errorf("fixture %s: missing 'expected_operator_artifact' object", fix.name)
+			} else {
+				// Must specify tool and type
+				for _, field := range []string{"type", "tool"} {
+					if _, ok := artifact[field]; !ok {
+						t.Errorf("fixture %s: expected_operator_artifact missing field %q", fix.name, field)
+					}
+				}
+			}
+
+			// Must have expected_verdict
+			verdict, ok := doc["expected_verdict"].(map[string]interface{})
+			if !ok {
+				t.Errorf("fixture %s: missing 'expected_verdict' object", fix.name)
+			} else {
+				// Must have resolve_action or action
+				hasAction := false
+				if _, ok := verdict["action"]; ok {
+					hasAction = true
+				}
+				if _, ok := verdict["resolve_action"]; ok {
+					hasAction = true
+				}
+				if !hasAction {
+					t.Errorf("fixture %s: expected_verdict missing 'action' or 'resolve_action'", fix.name)
+				}
+			}
+		})
+	}
+}

@@ -1,0 +1,196 @@
+# Operator automaton chart template (legion v0.6.1 — long-running operator-facing agent).
+# Defines a single mallcop:operator skill agent that watches the operator campfire and
+# handles approval gates, findings review, and operator Q&A.
+#
+# This chart is for the mallcop operator session (persistent identity, long TTL).
+# It is NOT the operational task pipeline — for triage/investigate/heal use
+# charts/mallcop-operational.toml.tmpl.
+#
+# Usage:
+#   sed 's/{{OPERATOR_CAMPFIRE_ID}}/abc123.../g; s/{{MODEL_STRONG}}/claude-opus-4-5/g; s/{{INSTANCE}}/prod/g; s|{{TOOL_BIN_DIR}}|/path/to/bin|g' \
+#     charts/mallcop-automaton.toml.tmpl > mallcop-automaton.toml
+
+[identity]
+name     = "mallcop-{{INSTANCE}}"
+type     = "automaton"
+key_file = "identity.json"
+
+[[worksources]]
+# type "ready" reads from a campfire-backed rd work queue (the only type supported in
+# legion v0.6.1 for campfire-connected automata). The campfire field is the operator
+# campfire ID — the automaton polls for mallcop:operator items emitted by the pipeline.
+# Note: type "campfire" (message-stream listener) is a future capability (F5A territory);
+# for now we use the ready-queue pattern consistent with mallcop-operational.toml.tmpl.
+type     = "ready"
+campfire = "{{OPERATOR_CAMPFIRE_ID}}"
+skills   = ["mallcop:operator"]
+
+[budget]
+# Generous per-task budget for operator interactions (reviews, Q&A, approvals).
+# No per-session cap — the automaton runs indefinitely.
+max_tokens_per_task = 30000
+
+[autonomy]
+max_tasks_per_session = 1000
+
+[curator]
+disabled = true                      # non-Claude operational run
+
+[tools]
+# Expose legion.tools v1 ops to the operator agent.
+enabled = ["fetch_work_output", "list_work_items", "recall", "get_session_transcript"]
+
+  [tools.party_grants]
+  # mallcop:operator can read outputs produced by all task:* skills.
+  "mallcop:operator" = ["task:triage", "task:investigate", "task:deep-investigate", "task:investigate-merge", "task:escalate", "task:heal"]
+
+[capabilities]
+gate_policy = "ungated"
+tool_allowlist = [
+  # Operator read tools (new — F3A)
+  "list-findings", "read-finding", "search-findings",
+  "read-events", "search-events",
+  "read-recent-chat", "search-chat-history",
+  "check-baseline", "baseline-stats",
+  "read-config",
+  # Operator action tools (F1G-d + F1G-a)
+  "annotate-finding",
+  "escalate-to-investigator",
+  "approve-action",
+]
+
+[[capabilities.seed]]
+name      = "operator"
+match     = ["mallcop:operator"]
+tools     = [
+  "list-findings",
+  "read-finding",
+  "search-findings",
+  "read-events",
+  "search-events",
+  "check-baseline",
+  "baseline-stats",
+  "read-config",
+  "read-recent-chat",
+  "search-chat-history",
+  "annotate-finding",
+  "escalate-to-investigator",
+  "approve-action",
+]
+model     = "{{MODEL_STRONG}}"
+max_iters = 20
+
+  # ---- Operator read tools (new — F3A) ----------------------------------------
+
+  [[capabilities.seed.tool_defs]]
+  name = "list-findings"
+  description = "List findings from the findings store. Supports optional filter object and limit. Returns array of {finding_id, title, severity, status, actor, source, timestamp}. Use when you need an overview of current/recent findings without reading each one."
+  input_schema = '{"type":"object","properties":{"filter":{"type":"object","description":"optional filter: {severity, status, actor, source}"},"limit":{"type":"integer","description":"max results (default 50)"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "list-findings", "--fixture-dir", "{{FIXTURE_DIR}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "read-finding"
+  description = "Read the full finding record by finding_id. Returns the finding JSON or {error:not_found} if not present."
+  input_schema = '{"type":"object","required":["finding_id"],"properties":{"finding_id":{"type":"string","description":"finding ID to look up"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "read-finding", "--fixture-dir", "{{FIXTURE_DIR}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-findings"
+  description = "Search existing findings by actor, severity, or time range. Returns JSON array of matching findings."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"since":{"type":"string","description":"RFC3339 start time"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-findings", "--fixture-dir", "{{FIXTURE_DIR}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "read-events"
+  description = "Read recent events with optional actor/since/limit filtering. Returns paginated array of events from events.jsonl. Use for browsing recent activity without a specific search query."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string","description":"optional actor filter"},"since":{"type":"string","description":"optional RFC3339 start time"},"limit":{"type":"integer","description":"max events to return (default 50)"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "read-events", "--fixture-dir", "{{FIXTURE_DIR}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-events"
+  description = "Search recent events by actor, type, or time range. Returns JSON array of matching events."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"type":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-events", "--fixture-dir", "{{FIXTURE_DIR}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "check-baseline"
+  description = "Check baseline frequency and history for an actor/entity."
+  input_schema = '{"type":"object","required":["entity"],"properties":{"entity":{"type":"string"},"source":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "check-baseline", "--fixture-dir", "{{FIXTURE_DIR}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "baseline-stats"
+  description = "Return aggregate baseline statistics for an actor or source."
+  input_schema = '{"type":"object","properties":{"entity":{"type":"string"},"source":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "baseline-stats", "--fixture-dir", "{{FIXTURE_DIR}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "read-config"
+  description = "Read connector or detector configuration (read-only)."
+  input_schema = '{"type":"object","properties":{"detector":{"type":"string"},"connector":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "read-config", "--fixture-dir", "{{FIXTURE_DIR}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "read-recent-chat"
+  description = "Read recent messages from the operator campfire. Returns the last N messages (default 20). Use to catch up on conversation context before responding."
+  input_schema = '{"type":"object","required":["campfire_id"],"properties":{"campfire_id":{"type":"string","description":"campfire ID to read"},"limit":{"type":"integer","description":"max messages to return (default 20)"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "read-recent-chat"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-chat-history"
+  description = "Search operator campfire history for messages matching a query. Returns matching messages with their timestamps and content."
+  input_schema = '{"type":"object","required":["campfire_id","query"],"properties":{"campfire_id":{"type":"string","description":"campfire ID to search"},"query":{"type":"string","description":"search query — matches against message content"},"limit":{"type":"integer","description":"max results (default 20)"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-chat-history"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "annotate-finding"
+  description = "Add a structured annotation to a finding. OPERATOR-TIER: captures operator notes and review decisions. Posts finding:annotation to the engagement campfire."
+  input_schema = '{"type":"object","required":["finding_id","note"],"properties":{"finding_id":{"type":"string"},"note":{"type":"string","maxLength":4096},"tags":{"type":"array","items":{"type":"string"}}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "annotate-finding"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "escalate-to-investigator"
+  description = "Escalate a finding to a dedicated investigator worker. Emits a task:investigate item on the work campfire. Returns the new item_id."
+  input_schema = '{"type":"object","required":["finding_id","reason"],"properties":{"finding_id":{"type":"string"},"reason":{"type":"string"},"confidence":{"type":"number"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "escalate-to-investigator"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "approve-action"
+  description = "Fulfill an approval gate posted by request-approval. OPERATOR-TIER ONLY. Must only be called after explicit human operator approval. operator_reason is REQUIRED."
+  input_schema = '{"type":"object","required":["gate_id","verdict","operator_reason"],"properties":{"gate_id":{"type":"string"},"verdict":{"type":"string","enum":["approved","denied"]},"operator_reason":{"type":"string","description":"REQUIRED: human operator reasoning for audit trail"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "approve-action"]
+
+[lifecycle]
+max_workers   = 1                    # single operator agent — serialized for human interaction
+time_limit    = "24h"
+poll_interval = "10s"
+
+[inference]
+forge_api_url = "{{FORGE_API_URL}}"
+api_key       = "{{FORGE_API_KEY}}"
+[inference.local_model_mapping]
+local = "qwen3-coder-30b"
+
+[agents]
+dir = "agents"
+
+[campfire]
+transport_dir = ".run/operator/campfires"
+
+[sandbox]
+extra_ro = [
+  "agents/",
+]

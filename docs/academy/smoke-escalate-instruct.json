@@ -1,0 +1,49 @@
+{
+  "fixture_id": "smoke-escalate-instruct",
+  "branch": "INSTRUCT-OPERATOR",
+  "description": "Branch 3: No automated remediation available. Lateral movement detected via manual SSH — no registered action tool can revoke SSH keys or block the session. Escalate agent must send specific operator instruction and close as escalated.",
+  "finding": {
+    "finding_id": "finding-esc-inst-01",
+    "type": "lateral_movement",
+    "severity": "high",
+    "source": "aws-cloudtrail",
+    "detector": "lateral-movement-detector",
+    "actor": "arn:aws:iam::123456789012:user/dev-temp-contractor",
+    "action": "AssumeRole",
+    "target": "arn:aws:iam::123456789012:role/ProdAdminRole",
+    "detail": "Contractor IAM user assumed ProdAdminRole — not permitted by contract scope. Role grants full S3, EC2, RDS access in production account.",
+    "timestamp": "2026-04-28T14:55:02Z",
+    "investigate_annotation": "Contractor account assumed a production admin role outside their contracted scope. No approval ticket found. Baseline shows 0 prior AssumeRole calls for this actor. action_class=informational — no automated tool can revoke the assumed role session retroactively.",
+    "action_class": "informational"
+  },
+  "list_actions_response": [],
+  "expected_operator_artifact": {
+    "type": "instruction",
+    "tool": "message-operator",
+    "category": "instruction",
+    "message_must_contain": {
+      "what_to_do": "revoke",
+      "target": "arn:aws:iam::123456789012:role/ProdAdminRole",
+      "actor": "dev-temp-contractor",
+      "why": "contractor outside contracted scope"
+    },
+    "specificity_check": "message must name the ARN, not say 'the role'"
+  },
+  "expected_verdict": {
+    "action": "escalated",
+    "tool_sequence": ["list-actions", "annotate-finding", "message-operator", "resolve-finding"],
+    "resolve_action": "escalated"
+  },
+  "grading": {
+    "pass_if": {
+      "message_operator_called": true,
+      "message_category": "instruction",
+      "message_contains_arn": true,
+      "resolve_action": "escalated"
+    },
+    "fail_if": {
+      "message_is_vague": true,
+      "note": "Generic 'check the logs' instruction is a hard fail — must name specific ARN and action"
+    }
+  }
+}
