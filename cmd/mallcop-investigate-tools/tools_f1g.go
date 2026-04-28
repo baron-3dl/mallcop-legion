@@ -654,7 +654,10 @@ func runWritePartialTranscript(inputJSON string) error {
 		runID = "unknown-run"
 	}
 
-	transcriptDir := filepath.Join("/home/baron/projects/mallcop-legion/.run/transcripts", runID)
+	transcriptDir := filepath.Join(".run", "transcripts", runID)
+	if v := os.Getenv("MALLCOP_TRANSCRIPT_DIR"); v != "" {
+		transcriptDir = filepath.Join(v, runID)
+	}
 	if err := os.MkdirAll(transcriptDir, 0o755); err != nil {
 		return fmt.Errorf("write-partial-transcript: mkdir %s: %w", transcriptDir, err)
 	}
@@ -753,9 +756,7 @@ func runListActions(inputJSON string) error {
 		return errors.New("list-actions: detector is required")
 	}
 
-	// Registry path: project-relative config/remediation-registry.yaml.
-	// Try to locate relative to the binary's working directory.
-	registryPath := "/home/baron/projects/mallcop-legion/config/remediation-registry.yaml"
+	registryPath := filepath.Join("config", "remediation-registry.yaml")
 	if v := os.Getenv("MALLCOP_REGISTRY_PATH"); v != "" {
 		registryPath = v
 	}

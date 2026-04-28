@@ -485,19 +485,10 @@ func TestWritePartialTranscript_InputValidation(t *testing.T) {
 }
 
 func TestWritePartialTranscript_WritesFile(t *testing.T) {
-	// Override run dir to a temp location.
 	runDir := t.TempDir()
-	transcriptBase := filepath.Join(runDir, ".run", "transcripts", "test-run")
-	if err := os.MkdirAll(transcriptBase, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
 	t.Setenv("MALLCOP_RUN_ID", "test-run")
+	t.Setenv("MALLCOP_TRANSCRIPT_DIR", filepath.Join(runDir, ".run", "transcripts"))
 
-	// We need to override the hardcoded path in the implementation.
-	// The implementation uses /home/baron/projects/mallcop-legion/.run/transcripts/<run-id>.
-	// For testing, use the actual path since MALLCOP_RUN_ID is set.
-	// The test just verifies the file is created at the expected path.
 	const content = "# Partial transcript\n\nThis is a test partial transcript for finding fnd-wpt-001."
 	inputJSON, _ := json.Marshal(map[string]interface{}{
 		"finding_id": "fnd-wpt-001",
