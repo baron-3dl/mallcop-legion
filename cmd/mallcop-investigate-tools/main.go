@@ -56,7 +56,7 @@ func main() {
 func run(args []string) error {
 	fs := flag.NewFlagSet("mallcop-investigate-tools", flag.ContinueOnError)
 
-	tool := fs.String("tool", "", "one of: check-baseline, search-events, search-findings (required)")
+	tool := fs.String("tool", "", "one of: check-baseline, search-events, search-findings, read-finding (required)")
 	mode := fs.String("mode", "exam", "exam (reads from --fixture-dir) or production (stubbed)")
 	fixtureDir := fs.String("fixture-dir", "", "path to fixture directory (required in exam mode)")
 
@@ -70,6 +70,9 @@ func run(args []string) error {
 	evtType := fs.String("type", "", "event_type filter (search-events, optional)")
 	since := fs.String("since", "", "RFC3339 start time inclusive (search-events, search-findings)")
 	until := fs.String("until", "", "RFC3339 end time inclusive (search-events)")
+
+	// read-finding flags
+	findingID := fs.String("finding-id", "", "finding ID to read (read-finding)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -105,12 +108,15 @@ func run(args []string) error {
 				if v, ok := input["hours"].(float64); ok && *hours == 168 {
 					*hours = int(v)
 				}
+				if v, ok := input["finding_id"].(string); ok && *findingID == "" {
+					*findingID = v
+				}
 			}
 		}
 	}
 
 	if *tool == "" {
-		return errors.New("--tool is required (check-baseline, search-events, search-findings, or an F1G action tool)")
+		return errors.New("--tool is required (check-baseline, search-events, search-findings, read-finding, or an F1G action tool)")
 	}
 
 	// F1G action tools: dispatch before mode/fixture-dir checks.
@@ -158,8 +164,10 @@ func run(args []string) error {
 		return searchEvents(absFixtureDir, *actor, *source, *evtType, *since, *until)
 	case "search-findings":
 		return searchFindings(absFixtureDir, *actor, *source, *since)
+	case "read-finding":
+		return readFinding(absFixtureDir, *findingID)
 	default:
-		return fmt.Errorf("unknown --tool %q; use check-baseline, search-events, search-findings, or an F1G action tool", *tool)
+		return fmt.Errorf("unknown --tool %q; use check-baseline, search-events, search-findings, read-finding, or an F1G action tool", *tool)
 	}
 }
 
@@ -496,6 +504,51 @@ func searchFindings(fixtureDir, actor, source, since string) error {
 		}
 	}
 	return nil
+}
+
+// ---- read-finding ----------------------------------------------------------
+
+// readFinding returns the full finding record for the given finding_id from
+// findings.jsonl. Returns {"error":"not_found","finding_id":"..."} if the
+// finding does not exist in the fixture. Returns an error if findings.jsonl
+// cannot be opened or parsed.
+func readFinding(fixtureDir, findingID string) error {
+	if findingID == "" {
+		return errors.New("--finding-id is required for read-finding")
+	}
+
+	f, err := safeOpen(fixtureDir, "findings.jsonl")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return emitJSON(map[string]interface{}{
+				"error":      "not_found",
+				"finding_id": findingID,
+			})
+		}
+		return fmt.Errorf("open findings.jsonl: %w", err)
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	for dec.More() {
+		var finding map[string]interface{}
+		if err := dec.Decode(&finding); err != nil {
+			return fmt.Errorf("decode findings.jsonl: %w", err)
+		}
+		id, _ := finding["finding_id"].(string)
+		if id == "" {
+			// Also check "id" key variant.
+			id, _ = finding["id"].(string)
+		}
+		if strings.EqualFold(id, findingID) {
+			return emitJSON(finding)
+		}
+	}
+
+	return emitJSON(map[string]interface{}{
+		"error":      "not_found",
+		"finding_id": findingID,
+	})
 }
 
 // ---- helpers ---------------------------------------------------------------
