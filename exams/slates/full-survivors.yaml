@@ -1,0 +1,12 @@
+# Wave C full bakeoff slate: 4 survivors from dryrun-20260427-190516.
+# Source: docs/bakeoff/dryrun-20260427-190516/survivors.txt
+# Sovereignty values from Forge catalog.
+models:
+  - id: glm-4.7-flash
+    sovereignty: open
+  - id: glm-4.7
+    sovereignty: open
+  - id: glm-5
+    sovereignty: open
+  - id: qwen3-32b
+    sovereignty: open
