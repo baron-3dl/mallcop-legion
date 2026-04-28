@@ -1,5 +1,5 @@
 {
-  "_comment": "Smoke fixture: All 3 disagree — one resolved, one escalated, one has a different action dimension. Expected aggregation: Rule 3 fires. escalate-to-stage-c called with action_class=ambiguous, flags=[system-genuinely-uncertain]. All 3 evidence chains compiled in reason.",
+  "_comment": "Smoke fixture: Rule 3b — irreconcilable evidence override. Action-vote is 2:1 (escalated, escalated, resolved) which would normally be Rule 2. But the incomplete worker identifies a concrete observable (partner bucket ACL ownership) that is dispositive AND not retrievable with available tools — meeting all three criteria for the irreconcilable-evidence override per investigate-merge POST.md §Rule 3. Expected: Rule 3 fires. escalate-to-stage-c called with action_class=ambiguous, flags=[system-genuinely-uncertain]. All 3 evidence chains compiled in reason. (Action-divergence path 3a is impossible by construction — deep workers only emit resolved|escalated, so 3-way action divergence cannot occur with only 2 actions; Rule 3 in practice is always the 3b override.)",
   "finding_id": "finding-smoke-disagree-003",
   "finding": {
     "type": "data-exfiltration-attempt",

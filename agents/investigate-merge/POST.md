@@ -82,10 +82,31 @@ Format: "Majority: [evidence from 2 agreeing workers]. Dissent ([hypothesis]):
 [what the dissenting worker found]. Dissent does not change verdict because
 [specific reason — e.g., the evidence the dissenter found is explained by X]."
 
-### Rule 3: All 3 disagree
+### Rule 3: All 3 disagree, or evidence is irreconcilable
 
-If all three workers reached different `action` verdicts, or if the spread of
-evidence is irreconcilable:
+This rule fires when EITHER (3a) all three workers reached three different
+`action` verdicts, OR (3b) the evidence chains are irreconcilable.
+
+**Definition of "irreconcilable evidence"** (3b override of Rule 2):
+
+Even when two workers agree on `action`, Rule 3 supersedes Rule 2 if ALL of
+the following are true:
+1. The dissenting worker's evidence chain identifies a concrete observable
+   that the majority did NOT check (e.g., bucket ACL ownership, export
+   schema, key rotation timestamps).
+2. That observable is dispositive — knowing it would flip the dissenting
+   worker's verdict to match the majority, OR confirm the dissent.
+3. The observable cannot be retrieved with the tools available to deep
+   workers (i.e., it is a real coverage gap, not a missed query).
+
+When (1)+(2)+(3) all hold, the apparent action-agreement is built on
+incomplete information. Treat as Rule 3 — escalate.
+
+If only (1) and (2) hold but (3) does not — i.e., the dissent could have
+checked but did not — apply Rule 2 (the dissent is operator error, not
+irreconcilable evidence).
+
+**When Rule 3 fires (either path):**
 - Do NOT emit a verdict
 - Call `escalate-to-stage-c` with:
   - `action_class = "ambiguous"`
