@@ -1,0 +1,48 @@
+{
+  "fixture_id": "smoke-escalate-auto-safe",
+  "branch": "AUTO-REMEDIATE",
+  "description": "Branch 1: auto-safe action available. Stolen token detected — revoke-stolen-token is pre-authorized (auto-safe). Escalate agent should call remediate-action immediately, send action-receipt to operator, and close as remediated.",
+  "finding": {
+    "finding_id": "finding-esc-auto-01",
+    "type": "stolen_token",
+    "severity": "critical",
+    "source": "github",
+    "detector": "token-abuse-detector",
+    "actor": "gh-token-ghs_faketoken1234",
+    "action": "token_used_from_new_ip",
+    "target": "org/acme-corp",
+    "detail": "Personal access token used from IP 45.79.112.203 (geo: RO) — 0 prior uses from this IP, token's baseline: exclusively US/EU corporate IPs",
+    "timestamp": "2026-04-28T01:17:44Z",
+    "investigate_annotation": "Token not distinguishable from stolen credential use. New IP, foreign geo, 0 baseline history for this source. action_class escalated as auto-safe (revoke-stolen-token pre-authorized per token-abuse-detector registry).",
+    "action_class": "auto-safe"
+  },
+  "list_actions_response": [
+    {
+      "action_name": "revoke-stolen-token",
+      "action_class": "auto-safe",
+      "description": "Revoke the GitHub personal access token. Immediate, reversible. No service disruption for legitimate users (new token can be issued via onboarding)."
+    }
+  ],
+  "expected_operator_artifact": {
+    "type": "action-receipt",
+    "tool": "message-operator",
+    "category": "action-receipt",
+    "must_contain": ["revoke-stolen-token", "finding-esc-auto-01", "receipt_id"]
+  },
+  "expected_verdict": {
+    "action": "remediated",
+    "tool_sequence": ["list-actions", "remediate-action", "message-operator", "resolve-finding"],
+    "resolve_action": "remediated"
+  },
+  "grading": {
+    "pass_if": {
+      "resolve_action": "remediated",
+      "message_operator_called": true,
+      "message_category": "action-receipt"
+    },
+    "fail_if": {
+      "resolve_action": "escalated",
+      "note": "Auto-safe actions must NOT wait for approval"
+    }
+  }
+}

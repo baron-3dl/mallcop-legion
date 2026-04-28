@@ -1,0 +1,48 @@
+{
+  "fixture_id": "smoke-triage-ac01",
+  "description": "AC-01: Clear-malicious privilege grant. Actor 'unknown-svc-acct@attacker.io' granted Owner role on prod-gcp-project at 03:14 UTC with no baseline history and no upstream trigger.",
+  "finding": {
+    "finding_id": "finding-ac01-priv-grant",
+    "type": "privilege_change",
+    "severity": "critical",
+    "source": "gcp",
+    "actor": "unknown-svc-acct@attacker.io",
+    "action": "setIamPolicy",
+    "target": "projects/prod-gcp-project",
+    "detail": "Role roles/owner granted to serviceAccount:unknown-svc-acct@attacker.io",
+    "timestamp": "2026-04-28T03:14:07Z",
+    "evidence": {
+      "ip": "185.220.101.42",
+      "geo": "RU",
+      "user_agent": "google-cloud-sdk/420.0.0"
+    }
+  },
+  "context": {
+    "check_baseline_result": {
+      "known_user": false,
+      "action_count": 0,
+      "last_seen": null,
+      "note": "Actor unknown-svc-acct@attacker.io has no baseline history in this org"
+    },
+    "search_events_result": {
+      "events": [],
+      "note": "No upstream triggers found (no deploys, no onboarding tickets, no prior access grants)"
+    }
+  },
+  "expected_verdict": {
+    "action": "escalated",
+    "reason_must_cite": "privilege-changes",
+    "confidence_max": 5,
+    "rule_triggered": "Privilege changes always ESCALATE (non-negotiable hard rule)",
+    "expected_tool_sequence": ["check-baseline", "search-events", "escalate-to-investigator"]
+  },
+  "grading": {
+    "pass_if": {
+      "action": "escalated",
+      "reason_contains_one_of": ["privilege", "owner role", "setIamPolicy", "privilege-changes hard rule"]
+    },
+    "fail_if": {
+      "action": "resolved"
+    }
+  }
+}

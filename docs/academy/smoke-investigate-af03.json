@@ -1,0 +1,67 @@
+{
+  "fixture_id": "smoke-investigate-af03",
+  "description": "AF-03: Credential-stuffing attack. Triage escalated after detecting 47 login attempts in 3 minutes from a single IP across multiple user accounts — actor not in baseline, high-velocity cross-account pattern.",
+  "finding": {
+    "finding_id": "finding-af03-cred-stuffing",
+    "type": "credential_stuffing",
+    "severity": "high",
+    "source": "github",
+    "actor": "185.220.101.88",
+    "action": "login_attempt",
+    "target": "org/acme-corp",
+    "detail": "47 login attempts in 3 minutes across 23 distinct user accounts from IP 185.220.101.88",
+    "timestamp": "2026-04-27T22:41:33Z",
+    "evidence": {
+      "ip": "185.220.101.88",
+      "geo": "NL",
+      "user_agent": "python-requests/2.28.2",
+      "attempt_count": 47,
+      "distinct_accounts": 23,
+      "window_seconds": 180
+    },
+    "triage_annotation": "Actor 185.220.101.88 not in baseline (0 prior sessions). 47 login attempts in 3 minutes: temporal clustering matches credential stuffing. No upstream trigger. Escalating: credential theft test inconclusive — automated enumeration pattern."
+  },
+  "context": {
+    "check_baseline_result": {
+      "known_user": false,
+      "action_count": 0,
+      "last_seen": null,
+      "note": "IP 185.220.101.88 has no baseline history — known Tor exit node per threat intel"
+    },
+    "baseline_stats_result": {
+      "source": "github",
+      "normal_login_rate": "2-5 per hour",
+      "peak_rate": "12 per hour",
+      "note": "47 in 3 minutes is 940x normal rate"
+    },
+    "search_events_result": {
+      "events": [
+        {"timestamp": "2026-04-27T22:41:33Z", "actor": "185.220.101.88", "type": "login_attempt", "target": "alice@acme.com", "result": "failure"},
+        {"timestamp": "2026-04-27T22:41:35Z", "actor": "185.220.101.88", "type": "login_attempt", "target": "bob@acme.com", "result": "failure"},
+        {"timestamp": "2026-04-27T22:42:01Z", "actor": "185.220.101.88", "type": "login_attempt", "target": "carol@acme.com", "result": "failure"}
+      ],
+      "total_matched": 47,
+      "note": "All failures, all distinct accounts, no upstream trigger"
+    },
+    "search_findings_result": {
+      "related": [
+        {"finding_id": "finding-af01-cred-stuffing", "timestamp": "2026-04-25T18:22:00Z", "actor": "185.220.101.88", "action": "login_attempt", "note": "Same IP 2 days ago — prior credential stuffing attempt, escalated to investigate"}
+      ]
+    }
+  },
+  "expected_verdict": {
+    "action_one_of": ["escalated", "remediated"],
+    "reason_must_cite_one_of": ["credential stuffing", "47 login", "Tor", "185.220.101.88", "temporal clustering", "not distinguishable"],
+    "expected_tool_sequence": ["check-baseline", "baseline-stats", "search-events", "search-findings", "annotate-finding", "resolve-finding"],
+    "note": "High-confidence credential stuffing. Agent should escalate (or remediate if it identifies block-ip action). Credential theft test: not distinguishable — automated tooling cannot be separated from stolen credentials driving automated tool."
+  },
+  "grading": {
+    "pass_if": {
+      "action_one_of": ["escalated", "remediated"],
+      "reason_contains_one_of": ["credential", "stuffing", "temporal", "clustering", "not distinguishable", "185.220.101.88"]
+    },
+    "fail_if": {
+      "action": "resolved"
+    }
+  }
+}

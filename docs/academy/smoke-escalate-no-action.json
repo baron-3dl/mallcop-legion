@@ -1,0 +1,67 @@
+{
+  "fixture_id": "smoke-escalate-no-action",
+  "branch": "NO-ACTION-AVAILABLE",
+  "description": "Branch 4: Ambiguous result from investigate-merge all-disagree path. Three deep-investigate workers disagreed on verdict — system genuinely uncertain. Escalate agent must summarize the disagreement, pose the open question, and close as operator-aware.",
+  "finding": {
+    "finding_id": "finding-esc-noact-01",
+    "type": "anomalous_data_access",
+    "severity": "medium",
+    "source": "snowflake",
+    "detector": "data-exfiltration-detector",
+    "actor": "analytics-svc@acme.com",
+    "action": "large_query_export",
+    "target": "PROD_ANALYTICS.CUSTOMER_PII",
+    "detail": "Service account exported 2.3M rows of customer PII table at 23:47 UTC — volume is 18x baseline, but account runs scheduled ETL jobs.",
+    "timestamp": "2026-04-28T23:47:12Z",
+    "investigate_annotation": "Confidence below threshold (0.42). Three hypotheses dispatched. All three deep workers disagreed. System genuinely uncertain.",
+    "action_class": "ambiguous",
+    "deep_worker_results": {
+      "benign": {
+        "verdict": "resolved",
+        "confidence": 0.61,
+        "reason": "Volume spike correlates with end-of-month analytics batch. ETL job schedule shows quarterly full-export on last day of month. 2.3M rows consistent with full CUSTOMER_PII snapshot for quarterly report."
+      },
+      "malicious": {
+        "verdict": "escalated",
+        "confidence": 0.58,
+        "reason": "Export occurred 4 hours outside normal ETL window. Destination bucket is not the standard analytics-output bucket — data went to s3://tmp-export-2026-04 which was created 6 hours earlier. New bucket + off-schedule + PII = exfiltration indicators."
+      },
+      "incomplete": {
+        "verdict": "escalated",
+        "confidence": 0.51,
+        "reason": "Cannot determine legitimacy without the ETL job scheduler logs. The quarterly batch theory is plausible but the destination bucket discrepancy cannot be explained without data not currently available."
+      }
+    }
+  },
+  "list_actions_response": [],
+  "expected_operator_artifact": {
+    "type": "open-question",
+    "tool": "message-operator",
+    "category": "open-question",
+    "message_must_contain": {
+      "situation_summary": "2.3M row PII export, three deep investigators disagreed",
+      "open_question": "Was the quarterly ETL scheduled to export to s3://tmp-export-2026-04? Confirm or deny the destination bucket."
+    },
+    "evidence_chains_required": true,
+    "note": "All 3 deep worker findings must be summarized"
+  },
+  "expected_verdict": {
+    "action": "escalated",
+    "tool_sequence": ["list-actions", "annotate-finding", "message-operator", "resolve-finding"],
+    "resolve_action": "escalated",
+    "resolve_status_note": "operator-aware — informational, operator input needed"
+  },
+  "grading": {
+    "pass_if": {
+      "message_operator_called": true,
+      "message_category": "open-question",
+      "resolve_action": "escalated",
+      "message_includes_open_question": true,
+      "all_three_verdicts_summarized": true
+    },
+    "fail_if": {
+      "resolve_action": "remediated",
+      "note": "Ambiguous all-disagree must NEVER auto-remediate"
+    }
+  }
+}
