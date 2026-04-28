@@ -1,0 +1,9 @@
+Bakeoff run: judgefix-v061-20260428-031222
+Slate: exams/slates/judge-fix-smoke.yaml (1 models)
+Scenarios dir: exams/scenarios
+Scenario filter: AF-01-fat-finger-benign
+Max concurrent: 1
+Budget cap: $5.00 (pre-flight enforced)
+
+Per-model results:
+  glm-4.7-flash            wall=31s scenarios=1 pass=1 fail=0 pass_rate=1.00 exit=ok
