@@ -1,0 +1,79 @@
+{
+  "_comment": "Smoke fixture: 2 agree (escalated), 1 dissents (resolved benign). Expected aggregation: Rule 2 fires. Majority=escalated. confidence=(mean(0.73,0.68))-0.1=(0.705)-0.1=0.605. Dissent evidence (benign worker found deploy trigger) must appear in reason.",
+  "finding_id": "finding-smoke-split-002",
+  "finding": {
+    "type": "unusual-login",
+    "severity": "medium",
+    "source": "aws",
+    "actor": "deploy-bot@acme.internal",
+    "evidence": "Login from IP 34.125.200.11 (US-West, AWS region), actor present in baseline but action type 'assume-role:AdminAccess' is new behavior. Off-hours timestamp (03:17 UTC)."
+  },
+  "partial_transcript_summary": "Parent investigate: called check-baseline (actor known, 47 sessions, but AdminAccess assume-role count=0), search-events (single isolated event, no temporal cluster), search-findings (no related findings). Confidence 0.51 — fell below 0.55 threshold. Fan-out triggered.",
+  "deep_worker_verdicts": [
+    {
+      "hypothesis": "benign",
+      "item_id": "deep-smoke-split-benign",
+      "verdict": {
+        "finding_id": "finding-smoke-split-002",
+        "action": "resolved",
+        "reason": "Found positive confirming evidence. read-config reveals deploy pipeline runs AdminAccess role assumption for cross-region deployment jobs scheduled at 03:00 UTC on Wednesdays. This event (03:17 UTC, Wednesday) falls within the expected window. IP 34.125.200.11 matches AWS us-west-2 NAT gateway range used by CI infrastructure.",
+        "confidence": 0.78
+      },
+      "evidence_chain": [
+        "check-baseline: actor known (47 sessions), AdminAccess assume-role count=0 BUT this is new connector coverage",
+        "read-config: deploy-pipeline config shows AdminAccess role assumption scheduled 03:00 UTC Wednesdays for cross-region deploy jobs",
+        "search-events: event timestamp 03:17 UTC — within 17min of scheduled window",
+        "IP 34.125.200.11: confirmed AWS us-west-2 NAT gateway range (checked connector IP registry)",
+        "Provenance chain: deploy schedule → role assumption → expected. Benign confirmed."
+      ]
+    },
+    {
+      "hypothesis": "malicious",
+      "item_id": "deep-smoke-split-malicious",
+      "verdict": {
+        "finding_id": "finding-smoke-split-002",
+        "action": "escalated",
+        "reason": "AdminAccess role assumption is new behavior for this actor. New behavior in privilege expansion is always suspicious regardless of timing coincidence. No direct confirmation that this specific session was triggered by the deploy pipeline — correlation with schedule is circumstantial. Cannot rule out credential misuse of a known service account.",
+        "confidence": 0.73
+      },
+      "evidence_chain": [
+        "check-baseline: AdminAccess assume-role count=0 — this is FIRST instance of this action by this actor",
+        "Privilege expansion check: AdminAccess is broadest possible role — flagged per hard constraint",
+        "search-events: single event, no companion events expected from a normal deploy (e.g., no subsequent resource-describe events within 5 min)",
+        "Timing correlation with schedule is not the same as confirmed pipeline trigger — no job-ID in event metadata",
+        "Credential theft test: if deploy-bot credentials stolen, attacker would time access to off-hours to blend with expected schedule"
+      ]
+    },
+    {
+      "hypothesis": "incomplete",
+      "item_id": "deep-smoke-split-incomplete",
+      "verdict": {
+        "finding_id": "finding-smoke-split-002",
+        "action": "escalated",
+        "reason": "Key disambiguating data is available but not checked: deploy job execution logs would show whether a job ran at 03:00-03:20 UTC with this session token. Missing: job-ID in the CloudTrail event. Data gap is bridgeable — analyst should pull deploy pipeline logs for the 03:00 UTC window.",
+        "confidence": 0.68
+      },
+      "evidence_chain": [
+        "read-config: deploy pipeline uses AWS session tokens — CloudTrail should include user-agent with job-ID if triggered by pipeline",
+        "search-events: event user-agent field is empty — this is anomalous for pipeline-triggered calls which normally include CI runner version",
+        "Observable that flips verdict: if pipeline logs show job execution in 03:00-03:20 UTC window → benign. If no job ran → malicious.",
+        "Data retrieval path: AWS CloudWatch Logs → deploy-pipeline log group → filter by timestamp",
+        "Conclusion: escalate pending pipeline log review"
+      ]
+    }
+  ],
+  "expected_aggregation": {
+    "rule": "2-agree-1-dissent",
+    "majority_action": "escalated",
+    "majority_workers": ["malicious", "incomplete"],
+    "dissent_worker": "benign",
+    "majority_confidences": [0.73, 0.68],
+    "majority_mean": 0.705,
+    "confidence_penalty": 0.1,
+    "final_confidence": 0.605,
+    "confidence_formula": "mean(0.73, 0.68) - 0.1 = 0.705 - 0.1 = 0.605",
+    "final_action": "escalated",
+    "reason_must_include_dissent": true,
+    "dissent_evidence_to_surface": "deploy-pipeline scheduled AdminAccess at 03:00 UTC, IP matches AWS NAT gateway range"
+  }
+}

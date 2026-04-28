@@ -1,0 +1,72 @@
+{
+  "_comment": "Smoke fixture: All 3 deep workers agree — escalated (suspicious activity confirmed by all hypotheses). Expected aggregation: Rule 1 fires. action=escalated, confidence=max(0.82,0.79,0.71)=0.82.",
+  "finding_id": "finding-smoke-agree-001",
+  "finding": {
+    "type": "unusual-login",
+    "severity": "high",
+    "source": "github",
+    "actor": "unknown-actor@external.example",
+    "evidence": "Login from IP 203.0.113.99 (TOR exit node, CN), actor not in baseline, 11 attempts in 4 minutes."
+  },
+  "partial_transcript_summary": "Parent investigate: called check-baseline (actor absent), search-events (11 events in 4 min burst), search-findings (2 related findings in 7 days). Confidence 0.48 — fell below 0.55 threshold. Fan-out triggered.",
+  "deep_worker_verdicts": [
+    {
+      "hypothesis": "benign",
+      "item_id": "deep-smoke-agree-benign",
+      "verdict": {
+        "finding_id": "finding-smoke-agree-001",
+        "action": "escalated",
+        "reason": "Cannot confirm benign. Actor absent from baseline — no documented workflow, no upstream trigger, no consistent source IP. Provenance chain cold. Credential theft indistinguishable from legitimate use with available evidence.",
+        "confidence": 0.82
+      },
+      "evidence_chain": [
+        "check-baseline: actor not found (known_user=false, action_count=0)",
+        "baseline-stats: no time-of-day pattern for this actor in any source",
+        "search-events: 11 login-attempt events in 4-minute window from 203.0.113.99",
+        "read-config: github connector logs last 90 days — no gap that would explain missing baseline",
+        "Positive confirming evidence of legitimacy: NONE FOUND"
+      ]
+    },
+    {
+      "hypothesis": "malicious",
+      "item_id": "deep-smoke-agree-malicious",
+      "verdict": {
+        "finding_id": "finding-smoke-agree-001",
+        "action": "escalated",
+        "reason": "Malicious hypothesis confirmed. Attack vector: credential stuffing from TOR exit node. 11 attempts in 4 minutes consistent with automated tooling. Actor absent from baseline eliminates insider-legitimacy explanation. 2 related findings in 7 days — coordinated campaign pattern.",
+        "confidence": 0.79
+      },
+      "evidence_chain": [
+        "check-baseline: actor not found — eliminates known-user benign path",
+        "search-events: burst pattern (11 attempts / 4 min) consistent with automated credential stuffing",
+        "search-findings: 2 related findings involving 203.0.113.99 in prior 7 days — campaign indicator",
+        "IP 203.0.113.99 maps to TOR exit node (CN geolocation) — anonymization consistent with attack",
+        "No privilege change detected — attack appears to be access-gain phase only"
+      ]
+    },
+    {
+      "hypothesis": "incomplete",
+      "item_id": "deep-smoke-agree-incomplete",
+      "verdict": {
+        "finding_id": "finding-smoke-agree-001",
+        "action": "escalated",
+        "reason": "Investigation confirms data is sufficient for escalation. IP reputation data (TOR exit classification) and burst pattern are unambiguous. Missing: whether any login succeeded. Even without success confirmation, the attack pattern warrants escalation.",
+        "confidence": 0.71
+      },
+      "evidence_chain": [
+        "read-config: github connector captures login-attempt events including success/failure field",
+        "search-events: all 11 events show status=failed — no successful authentication",
+        "Observable that would flip verdict: if any event showed status=success, would escalate with higher urgency",
+        "Data gap: no MFA log to confirm whether MFA was challenged — this gap does not change escalation recommendation",
+        "Conclusion: data is sufficient for escalation decision; gap is non-determinative"
+      ]
+    }
+  ],
+  "expected_aggregation": {
+    "rule": "all-agree",
+    "final_action": "escalated",
+    "final_confidence": 0.82,
+    "confidence_formula": "max(0.82, 0.79, 0.71)",
+    "reason_contains": ["credential stuffing", "TOR", "actor absent from baseline", "campaign"]
+  }
+}

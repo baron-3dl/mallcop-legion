@@ -35,6 +35,7 @@ enabled = ["fetch_work_output", "list_work_items", "get_session_transcript"]
   # produced by skills listed here. Without a grant, fetch_work_output /
   # get_session_transcript return {"error":"unauthorized"} as JSON.
   # F1B-H will fill in task:* → task:* grants as seeds are defined.
+  "task:investigate-merge" = ["task:deep-investigate"]
 
 [capabilities]
 gate_policy    = "ungated"
@@ -155,70 +156,108 @@ model = "{{MODEL}}"
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "write-partial-transcript"]
 
-# task:deep-investigate capability seed — F1G-b tools available
+# task:deep-investigate capability seed — F1D: hypothesis-directed investigation
 [[capabilities.seed]]
 name  = "deep-investigate"
 match = ["task:deep-investigate"]
 tools = [
-  "resolve-finding", "annotate-finding",
-  "escalate-to-stage-c",
-  "write-partial-transcript",
+  "check-baseline", "baseline-stats",
+  "search-events", "search-findings",
+  "read-config",
+  "annotate-finding", "resolve-finding",
+  "load-skill",
 ]
 model = "{{MODEL}}"
+max_iters = 10
+# NOTE: NO escalate tools — deep workers emit verdicts only; they never hand off
+# to stage-C or create new work items. Escalation decisions belong to
+# investigate-merge after aggregation.
 
-  # F1G-a: Finding-state
+  [[capabilities.seed.tool_defs]]
+  name = "check-baseline"
+  description = "Check baseline frequency and history for an actor/entity. Returns JSON with known_user, action_count, last_seen, and baseline stats."
+  input_schema = '{"type":"object","properties":{"entity":{"type":"string","description":"actor email or username"},"source":{"type":"string","description":"connector source (e.g. github)"}},"required":["entity"]}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "check-baseline", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "baseline-stats"
+  description = "Return aggregate baseline statistics for an actor or source: total event volume, time-of-day distribution, weekly cadence. Useful for spotting anomalous volume or timing without examining individual events."
+  input_schema = '{"type":"object","properties":{"entity":{"type":"string","description":"actor email or username (optional — omit for source-level stats)"},"source":{"type":"string","description":"connector source (e.g. github, aws)"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "baseline-stats", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-events"
+  description = "Search recent events by actor, type, or time range. Returns JSON array of matching events."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string","description":"actor filter"},"source":{"type":"string","description":"connector source"},"type":{"type":"string","description":"event_type filter"},"since":{"type":"string","description":"RFC3339 start time"},"until":{"type":"string","description":"RFC3339 end time"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-events", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-findings"
+  description = "Search existing findings by actor, severity, or time range. Returns JSON array of related findings within the last 30 days."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-findings", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "read-config"
+  description = "Read connector or detector configuration (read-only). Returns JSON with detector thresholds, connector scope, and enabled sources. Useful for understanding what data is available and what the detector was configured to flag."
+  input_schema = '{"type":"object","properties":{"detector":{"type":"string","description":"detector name (optional)"},"connector":{"type":"string","description":"connector name (optional)"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "read-config", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  # F1G-a: Finding-state (output tools — deep workers close their own work item)
   [[capabilities.seed.tool_defs]]
   name = "resolve-finding"
-  description = "Close a finding with a resolution action. Emits work:output to engagement campfire."
-  input_schema = '{"type":"object","required":["finding_id","action","reason"],"properties":{"finding_id":{"type":"string"},"action":{"type":"string","enum":["resolved","escalated","remediated"]},"reason":{"type":"string"},"confidence":{"type":"number","minimum":1,"maximum":5}}}'
+  description = "Close a finding with a resolution action. Deep workers emit 'resolved' (benign confirmed) or 'escalated' (suspicious or uncertain). Emits work:output to engagement campfire for investigate-merge to read."
+  input_schema = '{"type":"object","required":["finding_id","action","reason"],"properties":{"finding_id":{"type":"string"},"action":{"type":"string","enum":["resolved","escalated"]},"reason":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}}}'
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "resolve-finding"]
 
   [[capabilities.seed.tool_defs]]
   name = "annotate-finding"
-  description = "Add finding:annotation tagged note to engagement campfire. Consumed by F4B academy grading."
+  description = "Add a structured annotation to a finding. Posts finding:annotation to engagement campfire. Tag consumed by F4B academy structural grading."
   input_schema = '{"type":"object","required":["finding_id","note"],"properties":{"finding_id":{"type":"string"},"note":{"type":"string","maxLength":4096},"tags":{"type":"array","items":{"type":"string"}}}}'
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "annotate-finding"]
 
-  [[capabilities.seed.tool_defs]]
-  name = "escalate-to-stage-c"
-  description = "Escalate to stage-C worker with action_class. Returns new item_id."
-  input_schema = '{"type":"object","required":["finding_id","reason","action_class"],"properties":{"finding_id":{"type":"string"},"reason":{"type":"string"},"action_class":{"type":"string","enum":["auto-safe","needs-approval","informational","ambiguous"]},"flags":{"type":"array","items":{"type":"string"}}}}'
-  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
-  binary_args = ["--tool", "escalate-to-stage-c"]
-
-  [[capabilities.seed.tool_defs]]
-  name = "write-partial-transcript"
-  description = "Write partial transcript file. Returns absolute path for use in escalate-to-deep."
-  input_schema = '{"type":"object","required":["finding_id","content"],"properties":{"finding_id":{"type":"string"},"content":{"type":"string"}}}'
-  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
-  binary_args = ["--tool", "write-partial-transcript"]
-
-# task:investigate-merge capability seed — F1G tools for merge workers
+# task:investigate-merge capability seed — F1E: evidence-aggregation across 3 deep workers
 [[capabilities.seed]]
 name  = "investigate-merge"
 match = ["task:investigate-merge"]
-tools = ["resolve-finding", "annotate-finding", "escalate-to-stage-c"]
+tools = [
+  "fetch_work_output",         # legion-tools: read deep worker's final JSON verdict
+  "get_session_transcript",    # legion-tools: read deep worker's full reasoning chain
+  "annotate-finding", "resolve-finding",
+  "escalate-to-stage-c",
+]
 model = "{{MODEL}}"
+max_iters = 5
+# Party grant (tools.party_grants above) allows get_session_transcript to access
+# task:deep-investigate sessions. Without it, the call returns {"error":"unauthorized"}.
 
-  [[capabilities.seed.tool_defs]]
-  name = "resolve-finding"
-  description = "Close a finding with a resolution action. Emits work:output to engagement campfire."
-  input_schema = '{"type":"object","required":["finding_id","action","reason"],"properties":{"finding_id":{"type":"string"},"action":{"type":"string","enum":["resolved","escalated","remediated"]},"reason":{"type":"string"},"confidence":{"type":"number","minimum":1,"maximum":5}}}'
-  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
-  binary_args = ["--tool", "resolve-finding"]
+  # legion-tools (fetch_work_output, get_session_transcript) are injected natively
+  # via [tools].enabled — no tool_defs needed for them.
 
   [[capabilities.seed.tool_defs]]
   name = "annotate-finding"
-  description = "Add finding:annotation tagged note to engagement campfire."
+  description = "Add a structured annotation recording aggregation reasoning. Posts finding:annotation to engagement campfire. Consumed by F4B academy structural grading."
   input_schema = '{"type":"object","required":["finding_id","note"],"properties":{"finding_id":{"type":"string"},"note":{"type":"string","maxLength":4096},"tags":{"type":"array","items":{"type":"string"}}}}'
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "annotate-finding"]
 
   [[capabilities.seed.tool_defs]]
+  name = "resolve-finding"
+  description = "Close a finding with the aggregated verdict. Emits work:output to engagement campfire. Call after annotate-finding."
+  input_schema = '{"type":"object","required":["finding_id","action","reason"],"properties":{"finding_id":{"type":"string"},"action":{"type":"string","enum":["resolved","escalated","remediated"]},"reason":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "resolve-finding"]
+
+  [[capabilities.seed.tool_defs]]
   name = "escalate-to-stage-c"
-  description = "Escalate merged finding to stage-C with consolidated action_class."
+  description = "Escalate to stage-C when all 3 deep workers disagree (system genuinely uncertain). Use action_class=ambiguous and flags=[system-genuinely-uncertain]. Include all 3 evidence chains in reason. Call before resolve-finding in the all-disagree path."
   input_schema = '{"type":"object","required":["finding_id","reason","action_class"],"properties":{"finding_id":{"type":"string"},"reason":{"type":"string"},"action_class":{"type":"string","enum":["auto-safe","needs-approval","informational","ambiguous"]},"flags":{"type":"array","items":{"type":"string"}}}}'
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "escalate-to-stage-c"]
