@@ -1,0 +1,52 @@
+# Remediation Registry v1
+# Format: JSON-compatible YAML (no YAML-only constructs)
+# Each entry: action_name, action_class, description, detector
+#
+# action_class values:
+#   auto-safe       — can be executed without human approval
+#   needs-approval  — requires operator gate (F1G-c request-approval + F1G-d approve-action)
+#   informational   — no action taken; used for audit trail
+#   ambiguous       — cannot be classified; escalate to operator
+#
+# Consumed by: list-actions tool (F1G-c), F1F branch selection logic.
+{
+  "version": 1,
+  "actions": [
+    {
+      "action_name": "revoke-collaborator",
+      "action_class": "auto-safe",
+      "description": "Revoke an external collaborator's access to the repository.",
+      "detector": "new-external-access"
+    },
+    {
+      "action_name": "disable-account",
+      "action_class": "needs-approval",
+      "description": "Disable a user account pending investigation.",
+      "detector": "privilege-escalation"
+    },
+    {
+      "action_name": "rotate-credentials",
+      "action_class": "needs-approval",
+      "description": "Force rotation of credentials for the affected account.",
+      "detector": "detector-secrets-exposure"
+    },
+    {
+      "action_name": "quarantine-repository",
+      "action_class": "needs-approval",
+      "description": "Place repository in read-only quarantine for forensic review.",
+      "detector": "detector-malicious-skill"
+    },
+    {
+      "action_name": "notify-security-team",
+      "action_class": "informational",
+      "description": "Send notification to the security team channel.",
+      "detector": "detector-unusual-login"
+    },
+    {
+      "action_name": "flag-for-review",
+      "action_class": "auto-safe",
+      "description": "Flag the event for manual security review without taking blocking action.",
+      "detector": "detector-rate-anomaly"
+    }
+  ]
+}
