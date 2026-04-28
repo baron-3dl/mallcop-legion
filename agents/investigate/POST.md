@@ -139,8 +139,17 @@ data alone. Skills are for cases where domain expertise changes the investigatio
 where knowing the semantics of an IAM policy or the blast radius of a KMS key
 deletion meaningfully affects your conclusion.
 
-When you load a skill, new tools from that skill become available on your next
-turn. Check the `new_tools` field in the load-skill result.
+### Discovering Connector Skills
+
+**`load-skill` is discovery-only.** It returns the catalog of registered connector
+skills and the tools each provides. The tools it lists are already in your allowlist
+— just call them by name. `load-skill` does not register new tools at runtime;
+the catalog is statically wired into the operational chart at boot time.
+
+When you load a skill, the `skills` list in the response tells you what tools
+are available. Check the tool names from the `tools` field in each skill entry —
+those are already callable. You do not need to take any additional steps to
+"activate" them.
 
 ## Security
 

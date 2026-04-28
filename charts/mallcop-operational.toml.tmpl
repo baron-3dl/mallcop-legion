@@ -261,6 +261,13 @@ max_iters = 10
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "read-config", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
 
+  [[capabilities.seed.tool_defs]]
+  name = "load-skill"
+  description = "Load a domain-specific skill module to gain specialized tools and context (e.g. AWS IAM analysis, cloud attack patterns). Returns {skill_id, new_tools, context}. Only load when baseline tools are insufficient."
+  input_schema = '{"type":"object","properties":{"skill_name":{"type":"string","description":"skill name from the skill catalog"},"source_hint":{"type":"string","description":"optional source hint (e.g. aws, github) to filter catalog entries"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "load-skill"]
+
   # F1G-a: Finding-state (output tools — deep workers close their own work item)
   [[capabilities.seed.tool_defs]]
   name = "resolve-finding"
