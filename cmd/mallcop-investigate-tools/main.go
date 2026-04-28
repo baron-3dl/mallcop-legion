@@ -110,7 +110,22 @@ func run(args []string) error {
 	}
 
 	if *tool == "" {
-		return errors.New("--tool is required (check-baseline, search-events, search-findings)")
+		return errors.New("--tool is required (check-baseline, search-events, search-findings, or an F1G action tool)")
+	}
+
+	// F1G action tools: dispatch before mode/fixture-dir checks.
+	// They read input from the trailing positional JSON argument (set by the
+	// API tool executor) and emit side-effects via cf + rd.
+	if actionTools[*tool] {
+		// Collect the positional JSON input (last arg, if present and JSON-shaped).
+		var inputJSON string
+		if rest := fs.Args(); len(rest) > 0 {
+			last := rest[len(rest)-1]
+			if len(last) > 0 && last[0] == '{' {
+				inputJSON = last
+			}
+		}
+		return dispatchActionTool(*tool, inputJSON)
 	}
 
 	if *mode == "production" {
@@ -144,8 +159,30 @@ func run(args []string) error {
 	case "search-findings":
 		return searchFindings(absFixtureDir, *actor, *source, *since)
 	default:
-		return fmt.Errorf("unknown --tool %q; use check-baseline, search-events, or search-findings", *tool)
+		return fmt.Errorf("unknown --tool %q; use check-baseline, search-events, search-findings, or an F1G action tool", *tool)
 	}
+}
+
+// actionTools is the set of tool names that are action/side-effect tools (F1G).
+// These read JSON input from the trailing positional argument (API path convention)
+// and do NOT require --fixture-dir or --mode.
+var actionTools = map[string]bool{
+	// F1G-a: Finding-state tools
+	"resolve-finding":  true,
+	"annotate-finding": true,
+	// F1G-b: Chain-handoff tools
+	"escalate-to-investigator":  true,
+	"escalate-to-stage-c":       true,
+	"escalate-to-deep":          true,
+	"create-investigate-merge":  true,
+	"write-partial-transcript":  true,
+	// F1G-c: Operator/escalation tools
+	"list-actions":      true,
+	"remediate-action":  true,
+	"request-approval":  true,
+	"message-operator":  true,
+	// F1G-d: Approve-action tool
+	"approve-action": true,
 }
 
 // safeOpen resolves path relative to baseDir, rejects symlink escapes, and

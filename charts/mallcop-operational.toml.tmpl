@@ -38,12 +38,23 @@ enabled = ["fetch_work_output", "list_work_items", "get_session_transcript"]
 
 [capabilities]
 gate_policy    = "ungated"
-tool_allowlist = ["check-baseline", "search-events", "search-findings"]
+tool_allowlist = [
+  "check-baseline", "search-events", "search-findings",
+  # F1G-a: finding-state
+  "resolve-finding", "annotate-finding",
+  # F1G-b: chain-handoff
+  "escalate-to-investigator", "escalate-to-stage-c", "escalate-to-deep",
+  "create-investigate-merge", "write-partial-transcript",
+  # F1G-c: operator/escalation
+  "list-actions", "remediate-action", "request-approval", "message-operator",
+  # F1G-d: approve-action
+  "approve-action",
+]
 
 [[capabilities.seed]]
 name  = "triage"
 match = ["task:triage"]
-tools = ["check-baseline", "search-events"]
+tools = ["check-baseline", "search-events", "escalate-to-investigator"]
 model = "{{MODEL}}"
 
   [[capabilities.seed.tool_defs]]
@@ -60,10 +71,23 @@ model = "{{MODEL}}"
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "search-events", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
 
+  # F1G-b: triage → investigator handoff
+  [[capabilities.seed.tool_defs]]
+  name = "escalate-to-investigator"
+  description = "Escalate a finding to a dedicated investigator worker. Emits a work:create task:investigate item on the work campfire. Returns the new item_id for chain provenance. Call when triage determines a finding needs deeper investigation."
+  input_schema = '{"type":"object","required":["finding_id","reason"],"properties":{"finding_id":{"type":"string","description":"finding ID being escalated"},"reason":{"type":"string","description":"why this finding needs investigation"},"confidence":{"type":"number","description":"triage confidence score 1-5 (optional)"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "escalate-to-investigator"]
+
 [[capabilities.seed]]
 name  = "investigate"
 match = ["task:investigate"]
-tools = ["check-baseline", "search-events", "search-findings"]
+tools = [
+  "check-baseline", "search-events", "search-findings",
+  "resolve-finding", "annotate-finding",
+  "escalate-to-stage-c", "escalate-to-deep",
+  "create-investigate-merge", "write-partial-transcript",
+]
 model = "{{MODEL}}"
 
   [[capabilities.seed.tool_defs]]
@@ -87,26 +111,181 @@ model = "{{MODEL}}"
   binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
   binary_args = ["--tool", "search-findings", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
 
-# Stub: task:deep-investigate capability seed — filled in by F1C
+  # F1G-a: Finding-state tools
+  [[capabilities.seed.tool_defs]]
+  name = "resolve-finding"
+  description = "Close a finding with a resolution action (resolved|escalated|remediated). Emits work:output to the engagement campfire with the action tag so downstream can filter. This is the agent's final action on a finding — call last."
+  input_schema = '{"type":"object","required":["finding_id","action","reason"],"properties":{"finding_id":{"type":"string"},"action":{"type":"string","enum":["resolved","escalated","remediated"]},"reason":{"type":"string"},"confidence":{"type":"number","minimum":1,"maximum":5}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "resolve-finding"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "annotate-finding"
+  description = "Add a structured annotation to a finding. Posts a finding:annotation tagged message to the engagement campfire. Tag is consumed by F4B academy structural grading (must_mention checks). Use to record intermediate reasoning, evidence, or notes."
+  input_schema = '{"type":"object","required":["finding_id","note"],"properties":{"finding_id":{"type":"string"},"note":{"type":"string","maxLength":4096},"tags":{"type":"array","items":{"type":"string"}}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "annotate-finding"]
+
+  # F1G-b: Chain-handoff tools
+  [[capabilities.seed.tool_defs]]
+  name = "escalate-to-stage-c"
+  description = "Escalate a finding to stage-C (task:escalate worker). action_class drives F1F branch selection: auto-safe→immediate remediation, needs-approval→operator gate, informational→notify only, ambiguous→operator review. Returns new item_id."
+  input_schema = '{"type":"object","required":["finding_id","reason","action_class"],"properties":{"finding_id":{"type":"string"},"reason":{"type":"string"},"action_class":{"type":"string","enum":["auto-safe","needs-approval","informational","ambiguous"]},"flags":{"type":"array","items":{"type":"string"}}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "escalate-to-stage-c"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "escalate-to-deep"
+  description = "Escalate to a deep-investigate worker with a specific hypothesis (benign|malicious|incomplete). Typically called 3 times (once per hypothesis) before create-investigate-merge. Returns item_id so caller can pass to create-investigate-merge."
+  input_schema = '{"type":"object","required":["finding_id","hypothesis","partial_transcript_path"],"properties":{"finding_id":{"type":"string"},"hypothesis":{"type":"string","enum":["benign","malicious","incomplete"]},"partial_transcript_path":{"type":"string","description":"absolute path to partial transcript written by write-partial-transcript"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "escalate-to-deep"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "create-investigate-merge"
+  description = "Create an investigate-merge task that waits for 3 deep-investigate workers (deep_item_ids). Wires rd dep edges so the merge item blocks until all 3 complete. Returns the merge item_id. Call after 3x escalate-to-deep."
+  input_schema = '{"type":"object","required":["finding_id","deep_item_ids"],"properties":{"finding_id":{"type":"string"},"deep_item_ids":{"type":"array","items":{"type":"string"},"minItems":3,"maxItems":3},"parent_investigate_item_id":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "create-investigate-merge"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "write-partial-transcript"
+  description = "Write a partial transcript file for this finding under .run/transcripts/<run-id>/<finding_id>-partial.md. Returns the absolute path so it can be passed to escalate-to-deep as partial_transcript_path. Call before escalate-to-deep fan-out."
+  input_schema = '{"type":"object","required":["finding_id","content"],"properties":{"finding_id":{"type":"string"},"content":{"type":"string","description":"partial transcript markdown content"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "write-partial-transcript"]
+
+# task:deep-investigate capability seed — F1G-b tools available
 [[capabilities.seed]]
 name  = "deep-investigate"
 match = ["task:deep-investigate"]
-tools = []
+tools = [
+  "resolve-finding", "annotate-finding",
+  "escalate-to-stage-c",
+  "write-partial-transcript",
+]
 model = "{{MODEL}}"
 
-# Stub: task:investigate-merge capability seed — filled in by F1D
+  # F1G-a: Finding-state
+  [[capabilities.seed.tool_defs]]
+  name = "resolve-finding"
+  description = "Close a finding with a resolution action. Emits work:output to engagement campfire."
+  input_schema = '{"type":"object","required":["finding_id","action","reason"],"properties":{"finding_id":{"type":"string"},"action":{"type":"string","enum":["resolved","escalated","remediated"]},"reason":{"type":"string"},"confidence":{"type":"number","minimum":1,"maximum":5}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "resolve-finding"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "annotate-finding"
+  description = "Add finding:annotation tagged note to engagement campfire. Consumed by F4B academy grading."
+  input_schema = '{"type":"object","required":["finding_id","note"],"properties":{"finding_id":{"type":"string"},"note":{"type":"string","maxLength":4096},"tags":{"type":"array","items":{"type":"string"}}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "annotate-finding"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "escalate-to-stage-c"
+  description = "Escalate to stage-C worker with action_class. Returns new item_id."
+  input_schema = '{"type":"object","required":["finding_id","reason","action_class"],"properties":{"finding_id":{"type":"string"},"reason":{"type":"string"},"action_class":{"type":"string","enum":["auto-safe","needs-approval","informational","ambiguous"]},"flags":{"type":"array","items":{"type":"string"}}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "escalate-to-stage-c"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "write-partial-transcript"
+  description = "Write partial transcript file. Returns absolute path for use in escalate-to-deep."
+  input_schema = '{"type":"object","required":["finding_id","content"],"properties":{"finding_id":{"type":"string"},"content":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "write-partial-transcript"]
+
+# task:investigate-merge capability seed — F1G tools for merge workers
 [[capabilities.seed]]
 name  = "investigate-merge"
 match = ["task:investigate-merge"]
-tools = []
+tools = ["resolve-finding", "annotate-finding", "escalate-to-stage-c"]
 model = "{{MODEL}}"
 
-# Stub: task:escalate capability seed — filled in by F1E
+  [[capabilities.seed.tool_defs]]
+  name = "resolve-finding"
+  description = "Close a finding with a resolution action. Emits work:output to engagement campfire."
+  input_schema = '{"type":"object","required":["finding_id","action","reason"],"properties":{"finding_id":{"type":"string"},"action":{"type":"string","enum":["resolved","escalated","remediated"]},"reason":{"type":"string"},"confidence":{"type":"number","minimum":1,"maximum":5}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "resolve-finding"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "annotate-finding"
+  description = "Add finding:annotation tagged note to engagement campfire."
+  input_schema = '{"type":"object","required":["finding_id","note"],"properties":{"finding_id":{"type":"string"},"note":{"type":"string","maxLength":4096},"tags":{"type":"array","items":{"type":"string"}}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "annotate-finding"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "escalate-to-stage-c"
+  description = "Escalate merged finding to stage-C with consolidated action_class."
+  input_schema = '{"type":"object","required":["finding_id","reason","action_class"],"properties":{"finding_id":{"type":"string"},"reason":{"type":"string"},"action_class":{"type":"string","enum":["auto-safe","needs-approval","informational","ambiguous"]},"flags":{"type":"array","items":{"type":"string"}}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "escalate-to-stage-c"]
+
+# task:escalate capability seed — F1G-c operator/escalation tools
 [[capabilities.seed]]
 name  = "escalate"
 match = ["task:escalate"]
-tools = []
+tools = [
+  "list-actions", "remediate-action", "request-approval",
+  "message-operator", "resolve-finding", "annotate-finding",
+]
 model = "{{MODEL}}"
+
+  # F1G-c: Operator/escalation tools
+  [[capabilities.seed.tool_defs]]
+  name = "list-actions"
+  description = "List available remediation actions for a detector from the registry. Returns array of {action_name, action_class, description}. action_class: auto-safe (no approval needed), needs-approval (requires request-approval gate), informational, ambiguous."
+  input_schema = '{"type":"object","required":["detector"],"properties":{"detector":{"type":"string","description":"detector name to filter actions"},"action_class_filter":{"type":"string","description":"optional filter: auto-safe|needs-approval|informational|ambiguous"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "list-actions"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "remediate-action"
+  description = "Record a remediation action for a finding (v1 stub — records intent, does not execute). Posts remediation:action-record to operator campfire with action_name+finding_id+timestamp. Returns receipt_id. Use for auto-safe actions only; use request-approval for needs-approval actions."
+  input_schema = '{"type":"object","required":["finding_id","action_name"],"properties":{"finding_id":{"type":"string"},"action_name":{"type":"string","description":"action name from list-actions"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "remediate-action"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "request-approval"
+  description = "Post an approval-request gate (future message) to the operator campfire. Returns gate_id. The gate is fulfilled by the mallcop operator via approve-action. Use for needs-approval actions. The worker should await gate fulfillment before proceeding."
+  input_schema = '{"type":"object","required":["finding_id","action_name","justification"],"properties":{"finding_id":{"type":"string"},"action_name":{"type":"string"},"justification":{"type":"string","description":"why this action is necessary"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "request-approval"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "message-operator"
+  description = "Send a message to the operator campfire. category: informational (findings update), instruction (operator directed action), action-receipt (confirming action taken), open-question (awaiting operator input). Returns message_id."
+  input_schema = '{"type":"object","required":["finding_id","message"],"properties":{"finding_id":{"type":"string"},"message":{"type":"string","maxLength":8192},"category":{"type":"string","enum":["informational","instruction","action-receipt","open-question"]}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "message-operator"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "resolve-finding"
+  description = "Close a finding with a resolution action. Emits work:output to engagement campfire."
+  input_schema = '{"type":"object","required":["finding_id","action","reason"],"properties":{"finding_id":{"type":"string"},"action":{"type":"string","enum":["resolved","escalated","remediated"]},"reason":{"type":"string"},"confidence":{"type":"number","minimum":1,"maximum":5}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "resolve-finding"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "annotate-finding"
+  description = "Add finding:annotation tagged note to engagement campfire."
+  input_schema = '{"type":"object","required":["finding_id","note"],"properties":{"finding_id":{"type":"string"},"note":{"type":"string","maxLength":4096},"tags":{"type":"array","items":{"type":"string"}}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "annotate-finding"]
+
+  # F1G-d: approve-action (mallcop-side, fulfills request-approval gates)
+  # NOTE: this tool is included in the escalate seed so the mallcop automaton
+  # can fulfill gates. The mallcop POST.md (F3B) is responsible for ensuring
+  # this is only called after explicit human operator approval.
+  [[capabilities.seed.tool_defs]]
+  name = "approve-action"
+  description = "Fulfill an approval gate posted by request-approval. OPERATOR-TIER ONLY. Must only be called after explicit human operator approval — mallcop POST.md (F3B) enforces this. operator_reason is REQUIRED (captures human voice in audit trail). No auto-approve mode exists."
+  input_schema = '{"type":"object","required":["gate_id","verdict","operator_reason"],"properties":{"gate_id":{"type":"string","description":"gate ID from request-approval response"},"verdict":{"type":"string","enum":["approved","denied"],"description":"explicit verdict — no default, no auto-approve"},"operator_reason":{"type":"string","description":"REQUIRED: free-text capturing the human operator reasoning for the audit trail"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "approve-action"]
 
 [[capabilities.seed]]
 name  = "heal"
