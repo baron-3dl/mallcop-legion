@@ -653,6 +653,212 @@ func TestEscalatePromptExists(t *testing.T) {
 	}
 }
 
+// TestMallcopPromptExists verifies that agents/mallcop/POST.md exists and contains
+// the key directives required by F3B: ported interactive agent capabilities,
+// §Approval Gate Handling (with HARD INVARIANT against auto-approval), and
+// §Routing Operator-Initiated Investigations.
+func TestMallcopPromptExists(t *testing.T) {
+	root := repoRoot(t)
+	promptPath := filepath.Join(root, "agents", "mallcop", "POST.md")
+
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v — create agents/mallcop/POST.md (F3B)", promptPath, err)
+	}
+	content := string(data)
+	lower := strings.ToLower(content)
+
+	// ---- Positive: ported interactive agent capabilities ----
+
+	// Core tool references from the interactive Python source
+	coreTools := []struct {
+		label string
+		token string
+	}{
+		{"list-findings tool", "list-findings"},
+		{"read-finding tool", "read-finding"},
+		{"search-events tool", "search-events"},
+		{"annotate-finding tool", "annotate-finding"},
+		{"escalate-to-investigator tool", "escalate-to-investigator"},
+	}
+	for _, ct := range coreTools {
+		if !strings.Contains(lower, strings.ToLower(ct.token)) {
+			t.Errorf("agents/mallcop/POST.md: missing %s (%q) — must be ported from interactive source", ct.label, ct.token)
+		}
+	}
+
+	// Security injection defense section (must be present from the port)
+	if !strings.Contains(content, "USER_DATA_BEGIN") {
+		t.Errorf("agents/mallcop/POST.md: missing security section with USER_DATA_BEGIN marker")
+	}
+	if !strings.Contains(content, "USER_DATA_END") {
+		t.Errorf("agents/mallcop/POST.md: missing security section with USER_DATA_END marker")
+	}
+
+	// ---- Positive: §Approval Gate Handling section ----
+
+	if !strings.Contains(content, "§Approval Gate Handling") && !strings.Contains(lower, "approval gate handling") {
+		t.Errorf("agents/mallcop/POST.md: missing §Approval Gate Handling section")
+	}
+
+	// Approval gate steps: read-finding must be called to fetch finding context
+	if !strings.Contains(lower, "read-finding") {
+		t.Errorf("agents/mallcop/POST.md: missing read-finding in approval gate — agent must fetch finding context before prompting operator")
+	}
+
+	// approve-action must be referenced (it's the tool called after explicit approval)
+	if !strings.Contains(lower, "approve-action") {
+		t.Errorf("agents/mallcop/POST.md: missing approve-action reference — approval gate handling must document the approve-action call")
+	}
+
+	// Approval gate must specify gate_id, verdict, and operator_reason fields
+	gateCalls := []struct {
+		label string
+		token string
+	}{
+		{"gate_id parameter", "gate_id"},
+		{"verdict parameter", "verdict"},
+		{"operator_reason parameter", "operator_reason"},
+	}
+	for _, gc := range gateCalls {
+		if !strings.Contains(lower, strings.ToLower(gc.token)) {
+			t.Errorf("agents/mallcop/POST.md: missing approve-action parameter %q in §Approval Gate Handling", gc.label)
+		}
+	}
+
+	// Must state that operator's exact words are passed as operator_reason
+	if !strings.Contains(lower, "exact words") && !strings.Contains(lower, "their words") && !strings.Contains(lower, "their exact") {
+		t.Errorf("agents/mallcop/POST.md: §Approval Gate Handling must state that operator's exact words are passed as operator_reason")
+	}
+
+	// Must require operator waits (explicit human response before approve-action)
+	waitTokens := []string{"wait", "explicit"}
+	hasWait := false
+	for _, w := range waitTokens {
+		if strings.Contains(lower, w) {
+			hasWait = true
+			break
+		}
+	}
+	if !hasWait {
+		t.Errorf("agents/mallcop/POST.md: §Approval Gate Handling must use explicit wait-for-operator language")
+	}
+
+	// HARD INVARIANT: must contain explicit prohibition language about auto-approval
+	// Check for the "MUST NEVER" or equivalent prohibition language
+	prohibitionPhrases := []string{
+		"must never call approve-action",
+		"must never call `approve-action`",
+		"never auto-approve",
+		"never call approve-action without",
+		"must not call approve-action",
+	}
+	hasProhibition := false
+	for _, p := range prohibitionPhrases {
+		if strings.Contains(lower, strings.ToLower(p)) {
+			hasProhibition = true
+			break
+		}
+	}
+	if !hasProhibition {
+		t.Errorf("agents/mallcop/POST.md: §Approval Gate Handling must contain explicit MUST NEVER prohibition for approve-action without human approval")
+	}
+
+	// Must explicitly address injection attacks (adversarial content in finding metadata)
+	injectionTokens := []string{"injection", "adversarial", "untrusted"}
+	hasInjectionDefense := false
+	for _, tok := range injectionTokens {
+		if strings.Contains(lower, tok) {
+			hasInjectionDefense = true
+			break
+		}
+	}
+	if !hasInjectionDefense {
+		t.Errorf("agents/mallcop/POST.md: §Approval Gate Handling must address prompt-injection attacks from finding metadata")
+	}
+
+	// ---- Positive: §Routing Operator-Initiated Investigations section ----
+
+	if !strings.Contains(content, "§Routing Operator-Initiated Investigations") &&
+		!strings.Contains(lower, "routing operator-initiated investigations") {
+		t.Errorf("agents/mallcop/POST.md: missing §Routing Operator-Initiated Investigations section")
+	}
+
+	// investigate <finding-id> pattern must be mentioned
+	if !strings.Contains(lower, "investigate") {
+		t.Errorf("agents/mallcop/POST.md: §Routing must mention 'investigate <finding-id>' trigger pattern")
+	}
+
+	// escalate-to-investigator must be called with operator-initiated reason
+	if !strings.Contains(lower, "operator-initiated") {
+		t.Errorf("agents/mallcop/POST.md: §Routing must specify reason='operator-initiated' when calling escalate-to-investigator")
+	}
+
+	// ---- Negative: approve-action MUST NOT be called automatically ----
+	// Search for forbidden phrasing in the approval-gate section.
+	// "auto-approve" without a negation nearby is a hard fail.
+	// We check for the raw token "auto-approve" — if present, context must negate it.
+	autoApproveIdx := strings.Index(lower, "auto-approve")
+	if autoApproveIdx >= 0 {
+		// Extract surrounding context (150 chars each side) to check for negation
+		start := autoApproveIdx - 150
+		if start < 0 {
+			start = 0
+		}
+		end := autoApproveIdx + len("auto-approve") + 150
+		if end > len(lower) {
+			end = len(lower)
+		}
+		ctx := lower[start:end]
+
+		// If the context contains negation keywords, it's fine (the spec is saying NOT to do it)
+		negationKeywords := []string{"never", "not", "must not", "no auto", "do not", "prohibit", "forbidden"}
+		hasNegation := false
+		for _, neg := range negationKeywords {
+			if strings.Contains(ctx, neg) {
+				hasNegation = true
+				break
+			}
+		}
+		if !hasNegation {
+			t.Errorf("agents/mallcop/POST.md: found 'auto-approve' without negation in surrounding context — approval section must NEVER authorize automatic approval; if 'auto-approve' appears, it must be explicitly negated")
+		}
+	}
+
+	// ---- Negative: smoke fixture files must exist ----
+	smokeFixtures := []struct {
+		name string
+		path string
+	}{
+		{"smoke-mallcop-list", filepath.Join(root, "docs", "academy", "smoke-mallcop-list.json")},
+		{"smoke-mallcop-approve", filepath.Join(root, "docs", "academy", "smoke-mallcop-approve.json")},
+		{"smoke-mallcop-injection", filepath.Join(root, "docs", "academy", "smoke-mallcop-injection.json")},
+	}
+	for _, fix := range smokeFixtures {
+		if _, err := os.Stat(fix.path); err != nil {
+			t.Errorf("missing smoke fixture %s at %s — F3B requires all 3 smoke fixtures documented", fix.name, fix.path)
+		} else {
+			// Must be valid JSON
+			fixData, readErr := os.ReadFile(fix.path)
+			if readErr != nil {
+				t.Errorf("cannot read smoke fixture %s: %v", fix.name, readErr)
+			} else {
+				var doc map[string]interface{}
+				if jsonErr := json.Unmarshal(fixData, &doc); jsonErr != nil {
+					t.Errorf("smoke fixture %s is not valid JSON: %v", fix.name, jsonErr)
+				} else {
+					// Must have fixture_id and description
+					for _, field := range []string{"fixture_id", "description", "prerequisites"} {
+						if _, ok := doc[field]; !ok {
+							t.Errorf("smoke fixture %s: missing required field %q", fix.name, field)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 // TestEscalateSmokeFixturesWellFormed verifies that all 4 escalate branch smoke
 // fixtures exist and have the required shape: finding_id, branch, list_actions_response,
 // expected_operator_artifact, and expected_verdict.
