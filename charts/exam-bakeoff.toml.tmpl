@@ -1,4 +1,4 @@
-# Bakeoff chart template (legion v0.2.0 — API spawn path with tool_use).
+# Bakeoff chart template (legion v0.4.0 — API spawn path + legion.tools).
 # Usage:
 #   sed 's/{{MODEL}}/glm-4.7-flash/g; s/{{RUN_ID}}/20260412/g; s|{{FORGE_API_URL}}|https://forge.3dl.dev|g; s|{{FORGE_API_KEY}}|mallcop-sk-...|g; s|{{TOOL_BIN_DIR}}|/path/to/bin|g' \
 #     exam-bakeoff.toml.tmpl > exam-glm.toml
@@ -14,11 +14,26 @@ campfire = "exam-{{RUN_ID}}"
 skills   = ["exam:scenario", "task:investigate", "task:heal", "exam:judge", "exam:report"]
 
 [budget]
-max_tokens_per_session = 50000       # per scenario ceiling (A-04)
+max_tokens_per_session = 5000000     # ~60 scenarios × 3 items × 15k budget + slack
 max_tokens_per_task    = 15000
 
 [autonomy]
-max_tasks_per_session  = 1           # one scenario per session; budget resets between (A-04)
+max_tasks_per_session  = 200         # covers up to ~60 scenarios × (triage+judge) + 1 report per session
+
+[curator]
+disabled = true                      # non-Claude bakeoff — the Sonnet-tier curator 401s against Anthropic
+
+[tools]
+# Expose legion.tools v1 ops to API-path workers. Injected as native ToolDefs
+# into the tool_loop at spawnAPI time (legion v0.4.0 legion-cbc).
+enabled = ["fetch_work_output", "list_work_items", "get_session_transcript"]
+
+  [tools.party_grants]
+  # Cross-skill read grants (legion-96a). A caller with skill X can read outputs
+  # produced by skills listed here. Without a grant, fetch_work_output /
+  # get_session_transcript return {"error":"unauthorized"} as JSON.
+  "exam:judge"  = ["exam:scenario", "task:triage", "task:investigate"]
+  "exam:report" = ["exam:scenario", "task:triage", "task:investigate", "exam:judge"]
 
 [capabilities]
 gate_policy    = "ungated"
@@ -80,31 +95,37 @@ model = "{{MODEL}}"
 [[capabilities.seed]]
 name = "judge"
 match = ["exam:judge"]
-tools = []                            # judge reads transcripts via prompt context, no tools
+tools = ["search-findings"]
 model = "{{MODEL}}"
+
+  # search-findings is declared here so composedCap.ToolDefinitions is non-empty
+  # and the item takes the API spawn path (cmd/we/main.go:931). legion.tools ops
+  # are auto-injected by spawnAPI when [tools].enabled is set — they don't appear
+  # as capability tool_defs and don't trigger API routing on their own.
+  [[capabilities.seed.tool_defs]]
+  name = "search-findings"
+  description = "Search existing findings by actor/severity/time range (historical context for grading)."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-findings", "--mode", "exam", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
 
 [[capabilities.seed]]
 name = "report"
 match = ["exam:report"]
-tools = []
-model = "haiku"
+tools = ["search-findings"]
+model = "{{MODEL}}"
 
-# Phase 1 note: mallcop-checklist-verify and mallcop-credential-theft-verify
-# are no-ops until Phase 2 ships the verify binaries in mallcop-legion/cmd/.
-[[hooks]]
-point   = "pre_bead_close"
-type    = "veracity_gate"
-command = "mallcop-checklist-verify"
-
-[[hooks]]
-point   = "pre_bead_close"
-type    = "veracity_gate"
-command = "mallcop-credential-theft-verify"
+  [[capabilities.seed.tool_defs]]
+  name = "search-findings"
+  description = "Search findings history for the report aggregation."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-findings", "--mode", "exam", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
 
 [lifecycle]
-max_workers   = 3
+max_workers   = 1                    # sequential dispatch: triage before judge before report
 time_limit    = "90m"
-poll_interval = "2s"
+poll_interval = "10s"                # give projection cursor time to index triage output before judge spawns
 
 [inference]
 forge_api_url = "{{FORGE_API_URL}}"
@@ -114,6 +135,11 @@ local = "qwen3-coder-30b"
 
 [agents]
 dir = "agents"
+# Skills derive to the "b" half of "a:b" by default (exam:judge → judge,
+# task:investigate → investigate, etc.). Only override when the spec name
+# differs from that derivation — exam:scenario's spec is named "triage".
+[agents.spec_map]
+"exam:scenario" = "triage"
 
 [campfire]
 transport_dir = ".run/exam-{{RUN_ID}}/campfires"
