@@ -1,0 +1,11 @@
+Bakeoff run: full-iter1-20260428-031425
+Slate: exams/slates/full-survivors.yaml (4 models)
+Scenarios dir: exams/scenarios
+Max concurrent: 4
+Budget cap: $150.00 (pre-flight enforced)
+
+Per-model results:
+  glm-4.7-flash            wall=5m0s scenarios=53 pass=38 fail=13 pass_rate=0.72 exit=ok
+  glm-4.7                  wall=6m58s scenarios=55 pass=22 fail=30 pass_rate=0.40 exit=ok
+  glm-5                    wall=1h0m28s scenarios=42 pass=34 fail=6 pass_rate=0.81 exit=ok
+  qwen3-32b                wall=3m22s scenarios=56 pass=8 fail=44 pass_rate=0.14 exit=ok
