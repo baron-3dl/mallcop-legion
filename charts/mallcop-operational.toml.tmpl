@@ -1,0 +1,139 @@
+# Operational chart template (legion v0.4.0 — API spawn path + legion.tools).
+# Task-pipeline only: triage → investigate → deep-investigate → investigate-merge → escalate → heal.
+# No bakeoff/exam skills — use charts/exam-bakeoff.toml.tmpl for bakeoff runs.
+# Usage:
+#   sed 's/{{MODEL}}/claude-sonnet-4-5/g; s/{{RUN_ID}}/20260414/g; s|{{FORGE_API_URL}}|https://forge.3dl.dev|g; s|{{FORGE_API_KEY}}|mallcop-sk-...|g; s|{{TOOL_BIN_DIR}}|/path/to/bin|g' \
+#     charts/mallcop-operational.toml.tmpl > mallcop-operational.toml
+
+[identity]
+name     = "mallcop-operational-{{RUN_ID}}"
+type     = "worker"
+key_file = ".run/operational-{{RUN_ID}}/identity.json"    # fresh per run
+
+[[worksources]]
+type     = "ready"
+campfire = "operational-{{RUN_ID}}"
+skills   = ["task:triage", "task:investigate", "task:deep-investigate", "task:investigate-merge", "task:escalate", "task:heal"]
+
+[budget]
+max_tokens_per_session = 5000000
+max_tokens_per_task    = 15000
+
+[autonomy]
+max_tasks_per_session  = 200
+
+[curator]
+disabled = true                      # non-Claude operational run — the Sonnet-tier curator 401s against Anthropic
+
+[tools]
+# Expose legion.tools v1 ops to API-path workers. Injected as native ToolDefs
+# into the tool_loop at spawnAPI time (legion v0.4.0 legion-cbc).
+enabled = ["fetch_work_output", "list_work_items", "get_session_transcript"]
+
+  [tools.party_grants]
+  # Cross-skill read grants (legion-96a). A caller with skill X can read outputs
+  # produced by skills listed here. Without a grant, fetch_work_output /
+  # get_session_transcript return {"error":"unauthorized"} as JSON.
+  # F1B-H will fill in task:* → task:* grants as seeds are defined.
+
+[capabilities]
+gate_policy    = "ungated"
+tool_allowlist = ["check-baseline", "search-events", "search-findings"]
+
+[[capabilities.seed]]
+name  = "triage"
+match = ["task:triage"]
+tools = ["check-baseline", "search-events"]
+model = "{{MODEL}}"
+
+  [[capabilities.seed.tool_defs]]
+  name = "check-baseline"
+  description = "Check baseline frequency and history for an actor/entity. Returns JSON with known_user, action_count, last_seen, and baseline stats."
+  input_schema = '{"type":"object","properties":{"entity":{"type":"string","description":"actor email or username"},"source":{"type":"string","description":"connector source (e.g. github)"}},"required":["entity"]}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "check-baseline", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-events"
+  description = "Search recent events by actor, type, or time range. Returns JSON array of matching events."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string","description":"actor filter"},"source":{"type":"string","description":"connector source"},"type":{"type":"string","description":"event_type filter"},"since":{"type":"string","description":"RFC3339 start time"},"until":{"type":"string","description":"RFC3339 end time"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-events", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+[[capabilities.seed]]
+name  = "investigate"
+match = ["task:investigate"]
+tools = ["check-baseline", "search-events", "search-findings"]
+model = "{{MODEL}}"
+
+  [[capabilities.seed.tool_defs]]
+  name = "check-baseline"
+  description = "Check baseline frequency and history for an actor/entity."
+  input_schema = '{"type":"object","properties":{"entity":{"type":"string"},"source":{"type":"string"}},"required":["entity"]}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "check-baseline", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-events"
+  description = "Search recent events by actor, type, or time range."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"type":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-events", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+  [[capabilities.seed.tool_defs]]
+  name = "search-findings"
+  description = "Search existing findings by actor, severity, or time range."
+  input_schema = '{"type":"object","properties":{"actor":{"type":"string"},"source":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"}}}'
+  binary = "{{TOOL_BIN_DIR}}/mallcop-investigate-tools"
+  binary_args = ["--tool", "search-findings", "--mode", "operational", "--fixture-dir", "exams/fixtures/{{RUN_ID}}"]
+
+# Stub: task:deep-investigate capability seed — filled in by F1C
+[[capabilities.seed]]
+name  = "deep-investigate"
+match = ["task:deep-investigate"]
+tools = []
+model = "{{MODEL}}"
+
+# Stub: task:investigate-merge capability seed — filled in by F1D
+[[capabilities.seed]]
+name  = "investigate-merge"
+match = ["task:investigate-merge"]
+tools = []
+model = "{{MODEL}}"
+
+# Stub: task:escalate capability seed — filled in by F1E
+[[capabilities.seed]]
+name  = "escalate"
+match = ["task:escalate"]
+tools = []
+model = "{{MODEL}}"
+
+[[capabilities.seed]]
+name  = "heal"
+match = ["task:heal"]
+tools = []                            # NO tools in operational heal — heal describes actions only
+model = "{{MODEL}}"
+
+[lifecycle]
+max_workers   = 4                    # operational pipeline: parallel triage + investigate workers
+time_limit    = "90m"
+poll_interval = "10s"
+
+[inference]
+forge_api_url = "{{FORGE_API_URL}}"
+api_key       = "{{FORGE_API_KEY}}"
+[inference.local_model_mapping]
+local = "qwen3-coder-30b"
+
+[agents]
+dir = "agents"
+# Skills derive to the "b" half of "a:b" by default (task:investigate → investigate,
+# task:heal → heal, etc.). Only override when the spec name differs from that derivation.
+
+[campfire]
+transport_dir = ".run/operational-{{RUN_ID}}/campfires"
+
+[sandbox]
+extra_ro = [
+  "agents/",
+]
