@@ -57,7 +57,10 @@ func newIsolatedCampfire(t *testing.T, cfBin string) (string, string) {
 	return cfHome, campfireID
 }
 
-// sendVerdict posts a single judge:verdict message to the campfire.
+// sendVerdict posts a single judge verdict message to the campfire.
+// Tags: exam:judge AND work:output — both required by readVerdicts (post-23260ab
+// AND-intersection contract). The old judge:verdict tag is no longer the
+// server-side filter; exam:judge is. work:output is intersected in-process.
 func sendVerdict(t *testing.T, cfBin, cfHome, campfireID string, v JudgeVerdict) {
 	t.Helper()
 
@@ -66,7 +69,7 @@ func sendVerdict(t *testing.T, cfBin, cfHome, campfireID string, v JudgeVerdict)
 		t.Fatalf("marshal verdict: %v", err)
 	}
 
-	cmd := exec.Command(cfBin, "send", campfireID, string(payload), "--tag", "judge:verdict")
+	cmd := exec.Command(cfBin, "send", campfireID, string(payload), "--tag", "exam:judge", "--tag", "work:output")
 	cmd.Env = append(os.Environ(), "CF_HOME="+cfHome)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("cf send: %v\n%s", err, out)
