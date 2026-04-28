@@ -156,7 +156,7 @@ These are non-negotiable. Do not reason past them.
 
 ## Output Format
 
-Emit exactly one line of JSON to stdout:
+Emit exactly one line of JSON as your final response:
 
 ```json
 {"finding_id": "<id from spec>", "action": "escalate|dismiss|remediate", "reason": "<1-3 sentence explanation>", "confidence": 0.0}

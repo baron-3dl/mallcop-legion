@@ -75,6 +75,40 @@ func run(args []string) error {
 		return err
 	}
 
+	// Accept trailing positional JSON argument (API tool executor convention).
+	// When the last positional arg looks like JSON, parse it and apply any
+	// recognized keys as flag overrides. This allows the binary to be called
+	// both via named flags (CLI) and via JSON (API spawn path tool executor).
+	if rest := fs.Args(); len(rest) > 0 {
+		lastArg := rest[len(rest)-1]
+		if len(lastArg) > 0 && lastArg[0] == '{' {
+			var input map[string]interface{}
+			if err := json.Unmarshal([]byte(lastArg), &input); err == nil {
+				if v, ok := input["entity"].(string); ok && *entity == "" {
+					*entity = v
+				}
+				if v, ok := input["source"].(string); ok && *source == "" {
+					*source = v
+				}
+				if v, ok := input["actor"].(string); ok && *actor == "" {
+					*actor = v
+				}
+				if v, ok := input["type"].(string); ok && *evtType == "" {
+					*evtType = v
+				}
+				if v, ok := input["since"].(string); ok && *since == "" {
+					*since = v
+				}
+				if v, ok := input["until"].(string); ok && *until == "" {
+					*until = v
+				}
+				if v, ok := input["hours"].(float64); ok && *hours == 168 {
+					*hours = int(v)
+				}
+			}
+		}
+	}
+
 	if *tool == "" {
 		return errors.New("--tool is required (check-baseline, search-events, search-findings)")
 	}
