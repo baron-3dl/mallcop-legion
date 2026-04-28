@@ -1,0 +1,86 @@
+{
+  "_comment": "Smoke fixture: All 3 disagree — one resolved, one escalated, one has a different action dimension. Expected aggregation: Rule 3 fires. escalate-to-stage-c called with action_class=ambiguous, flags=[system-genuinely-uncertain]. All 3 evidence chains compiled in reason.",
+  "finding_id": "finding-smoke-disagree-003",
+  "finding": {
+    "type": "data-exfiltration-attempt",
+    "severity": "high",
+    "source": "gcp",
+    "actor": "analytics-svc@project.iam.gserviceaccount.com",
+    "evidence": "Large BigQuery export (8.2GB) to external GCS bucket gs://partner-analytics-export-acme. Service account is in baseline. Export volume is 4x the 90-day mean."
+  },
+  "partial_transcript_summary": "Parent investigate: called check-baseline (SA known, 312 export events, mean export 2.1GB), search-events (single export event, no companion events), search-findings (1 related finding 21 days ago, resolved benign — same SA, similar volume). Confidence 0.49 — fell below 0.55 threshold. Fan-out triggered.",
+  "deep_worker_verdicts": [
+    {
+      "hypothesis": "benign",
+      "item_id": "deep-smoke-disagree-benign",
+      "verdict": {
+        "finding_id": "finding-smoke-disagree-003",
+        "action": "resolved",
+        "reason": "Found positive confirming evidence of legitimacy. read-config shows partner-analytics-export-acme is a registered partner bucket in the data-sharing configuration with scheduled quarterly exports. This event date matches Q1 quarterly export window. Volume spike (8.2GB vs 2.1GB mean) is consistent with quarterly aggregation.",
+        "confidence": 0.76
+      },
+      "evidence_chain": [
+        "read-config: data-sharing config lists gs://partner-analytics-export-acme as approved partner bucket with scheduled Q1/Q2/Q3/Q4 exports",
+        "Event date: 2026-01-15 — Q1 quarterly export window (Jan 10-20)",
+        "baseline-stats: service account shows quarterly volume spikes in historical data — consistent with pattern",
+        "No privilege change: SA had existing export permissions, no new grants",
+        "Benign confirmed: documented workflow, expected partner destination, consistent timing"
+      ]
+    },
+    {
+      "hypothesis": "malicious",
+      "item_id": "deep-smoke-disagree-malicious",
+      "verdict": {
+        "finding_id": "finding-smoke-disagree-003",
+        "action": "escalated",
+        "reason": "Volume anomaly (4x mean) to external bucket triggers exfiltration pattern. Prior benign resolution 21 days ago does not clear this incident. External bucket ownership requires independent verification — partner bucket could have been hijacked or misconfigured to accept external writes. Service account compromise could mimic scheduled export timing.",
+        "confidence": 0.65
+      },
+      "evidence_chain": [
+        "Volume: 8.2GB is 4x the 90-day mean (2.1GB) — anomalous even accounting for quarterly spikes",
+        "search-findings: prior finding 21 days ago resolved benign — but prior resolutions do not clear new incidents",
+        "Credential theft test: compromised SA would time exfiltration to match expected schedule — not distinguishable",
+        "External bucket gs://partner-analytics-export-acme: read-config shows approved, but bucket could have been redirected (GCS bucket name squatting or partner account compromise)",
+        "Missing: verification that partner bucket ownership unchanged since last export"
+      ]
+    },
+    {
+      "hypothesis": "incomplete",
+      "item_id": "deep-smoke-disagree-incomplete",
+      "verdict": {
+        "finding_id": "finding-smoke-disagree-003",
+        "action": "escalated",
+        "reason": "Two critical data points are missing and irresolvable from available tools: (1) GCS bucket ACL to verify current ownership of partner bucket — bucket squatting risk is real. (2) Whether the export contents match the data-sharing agreement scope. Without these, the quarterly-export benign hypothesis and the exfiltration malicious hypothesis cannot be distinguished with confidence.",
+        "confidence": 0.70
+      },
+      "evidence_chain": [
+        "Observable 1: partner bucket ACL (gs://partner-analytics-export-acme) — if owned by expected partner, benign; if ownership changed, malicious",
+        "Data retrieval: GCS IAM API — needs connector with storage.buckets.getIamPolicy permission; current connector lacks this",
+        "Observable 2: exported data schema/content — if matches partner agreement scope, benign; if includes out-of-scope tables (PII, financials), escalate immediately",
+        "read-config: current GCP connector does not capture export content schema — gap in coverage",
+        "Conclusion: two unresolvable gaps. Escalate for analyst to verify bucket ownership and export scope via GCP console."
+      ]
+    }
+  ],
+  "expected_aggregation": {
+    "rule": "all-disagree",
+    "worker_actions": {
+      "benign": "resolved",
+      "malicious": "escalated",
+      "incomplete": "escalated"
+    },
+    "_note": "While malicious+incomplete both say escalated, their evidence chains are irreconcilably different: malicious suspects active compromise, incomplete says data is missing for any verdict. The benign worker has a plausible evidence chain that directly contradicts both. This is a genuine 3-way irreconcilable divergence in the evidence picture.",
+    "required_call": "escalate-to-stage-c",
+    "required_action_class": "ambiguous",
+    "required_flags": ["system-genuinely-uncertain"],
+    "required_flag_text": "system genuinely uncertain",
+    "all_evidence_chains_compiled": true,
+    "final_action": "escalated",
+    "reason_must_include": [
+      "system genuinely uncertain",
+      "W-benign",
+      "W-malicious",
+      "W-incomplete"
+    ]
+  }
+}
