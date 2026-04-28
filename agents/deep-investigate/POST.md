@@ -163,6 +163,13 @@ Based on your hypothesis, call tools to find confirming or disconfirming evidenc
 - `read-config` — detector and connector configuration (scope, thresholds)
 - `load-skill` — domain-specific analysis if your hypothesis requires it
 
+### Discovering Connector Skills
+
+**`load-skill` is discovery-only.** It returns the catalog of registered connector
+skills and the tools each provides. The tools it lists are already in your allowlist
+— just call them by name. `load-skill` does not register new tools at runtime;
+the catalog is statically wired into the operational chart at boot time.
+
 ### Step 3: Credential theft test (hypothesis-aware)
 
 For `benign` hypothesis: find evidence ONLY a legitimate user would produce.

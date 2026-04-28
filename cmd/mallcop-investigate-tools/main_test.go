@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -557,6 +558,408 @@ func TestReadFinding_RequiresFindingID(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "finding-id is required") {
 		t.Errorf("error message = %v, want mention of finding-id required", err)
+	}
+}
+
+// ---- baseline-stats tests --------------------------------------------------
+
+// testBaselineEventsArray is a flat JSON array of event records used for
+// baseline-stats tests.
+const testBaselineEventsArray = `[
+	{"actor":"alice@example.com","source":"github","type":"push","timestamp":"2026-04-10T09:00:00Z"},
+	{"actor":"alice@example.com","source":"github","type":"push","timestamp":"2026-04-10T22:00:00Z"},
+	{"actor":"alice@example.com","source":"aws","type":"login","timestamp":"2026-04-09T03:00:00Z"},
+	{"actor":"bob@example.com","source":"github","type":"login","timestamp":"2026-04-10T10:00:00Z"}
+]`
+
+func TestBaselineStats_HappyPath(t *testing.T) {
+	dir := makeFixtureDir(t, testBaselineEventsArray, "", "")
+
+	out := captureStdout(t, func() {
+		err := run([]string{
+			"--tool", "baseline-stats",
+			"--mode", "exam",
+			"--fixture-dir", dir,
+			"--entity", "alice@example.com",
+		})
+		if err != nil {
+			t.Errorf("run() returned error: %v", err)
+		}
+	})
+
+	var result baselineStatsResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+
+	if result.CountTotal != 3 {
+		t.Errorf("CountTotal = %d, want 3 (3 alice events)", result.CountTotal)
+	}
+	if result.CountBySource["github"] != 2 {
+		t.Errorf("CountBySource[github] = %d, want 2", result.CountBySource["github"])
+	}
+	if result.CountBySource["aws"] != 1 {
+		t.Errorf("CountBySource[aws] = %d, want 1", result.CountBySource["aws"])
+	}
+	if result.CountByType["push"] != 2 {
+		t.Errorf("CountByType[push] = %d, want 2", result.CountByType["push"])
+	}
+	if result.CountByType["login"] != 1 {
+		t.Errorf("CountByType[login] = %d, want 1", result.CountByType["login"])
+	}
+	// Hour 09 and 22 and 03 for alice
+	if result.TimeOfDayDistribution["09"] != 1 {
+		t.Errorf("time_of_day_distribution[09] = %d, want 1", result.TimeOfDayDistribution["09"])
+	}
+	if result.TimeOfDayDistribution["22"] != 1 {
+		t.Errorf("time_of_day_distribution[22] = %d, want 1", result.TimeOfDayDistribution["22"])
+	}
+	if result.FirstSeen == nil {
+		t.Error("first_seen must not be nil")
+	} else if *result.FirstSeen != "2026-04-09T03:00:00Z" {
+		t.Errorf("first_seen = %q, want 2026-04-09T03:00:00Z", *result.FirstSeen)
+	}
+	if result.LastSeen == nil {
+		t.Error("last_seen must not be nil")
+	} else if *result.LastSeen != "2026-04-10T22:00:00Z" {
+		t.Errorf("last_seen = %q, want 2026-04-10T22:00:00Z", *result.LastSeen)
+	}
+}
+
+func TestBaselineStats_FilterEmpty(t *testing.T) {
+	// Filter by entity that has no events — expect all zeros, null timestamps.
+	dir := makeFixtureDir(t, testBaselineEventsArray, "", "")
+
+	out := captureStdout(t, func() {
+		err := run([]string{
+			"--tool", "baseline-stats",
+			"--mode", "exam",
+			"--fixture-dir", dir,
+			"--entity", "nobody@example.com",
+		})
+		if err != nil {
+			t.Errorf("run() returned error: %v", err)
+		}
+	})
+
+	var result baselineStatsResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+
+	if result.CountTotal != 0 {
+		t.Errorf("CountTotal = %d, want 0 for unknown entity", result.CountTotal)
+	}
+	if result.FirstSeen != nil {
+		t.Errorf("first_seen should be null for empty result, got %q", *result.FirstSeen)
+	}
+	if result.LastSeen != nil {
+		t.Errorf("last_seen should be null for empty result, got %q", *result.LastSeen)
+	}
+	// time_of_day_distribution must have all 24 keys initialized to 0
+	if len(result.TimeOfDayDistribution) != 24 {
+		t.Errorf("time_of_day_distribution should have 24 keys, got %d", len(result.TimeOfDayDistribution))
+	}
+	for h := 0; h < 24; h++ {
+		key := fmt.Sprintf("%02d", h)
+		if result.TimeOfDayDistribution[key] != 0 {
+			t.Errorf("time_of_day_distribution[%s] = %d, want 0 for empty result", key, result.TimeOfDayDistribution[key])
+		}
+	}
+}
+
+func TestBaselineStats_NoFile(t *testing.T) {
+	// No baseline.json — returns empty stats, no error.
+	dir := makeFixtureDir(t, "", "", "")
+
+	out := captureStdout(t, func() {
+		err := run([]string{
+			"--tool", "baseline-stats",
+			"--mode", "exam",
+			"--fixture-dir", dir,
+		})
+		if err != nil {
+			t.Errorf("run() returned unexpected error: %v", err)
+		}
+	})
+
+	var result baselineStatsResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+
+	if result.CountTotal != 0 {
+		t.Errorf("CountTotal = %d, want 0 when no file", result.CountTotal)
+	}
+	if result.FirstSeen != nil || result.LastSeen != nil {
+		t.Errorf("first_seen/last_seen must be null when no file")
+	}
+}
+
+// ---- read-config tests -----------------------------------------------------
+
+const testConfigJSON = `{
+	"detectors": {
+		"brute-force-detector": {"threshold": 5, "enabled": true},
+		"off-hours-login": {"threshold": 1, "enabled": false}
+	},
+	"connectors": {
+		"github": {"scope": "org", "enabled": true, "sources": ["audit_log", "repos"]},
+		"aws": {"scope": "account", "enabled": true, "sources": ["cloudtrail"]}
+	}
+}`
+
+func TestReadConfig_HappyPath(t *testing.T) {
+	dir := makeFixtureDir(t, "", "", "")
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(testConfigJSON), 0o644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		err := run([]string{
+			"--tool", "read-config",
+			"--mode", "exam",
+			"--fixture-dir", dir,
+		})
+		if err != nil {
+			t.Errorf("run() returned error: %v", err)
+		}
+	})
+
+	var result configResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+	if len(result.Detectors) != 2 {
+		t.Errorf("want 2 detectors, got %d", len(result.Detectors))
+	}
+	if len(result.Connectors) != 2 {
+		t.Errorf("want 2 connectors, got %d", len(result.Connectors))
+	}
+}
+
+func TestReadConfig_FilterByDetector(t *testing.T) {
+	dir := makeFixtureDir(t, "", "", "")
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(testConfigJSON), 0o644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		err := run([]string{
+			"--tool", "read-config",
+			"--mode", "exam",
+			"--fixture-dir", dir,
+			"--detector", "brute-force-detector",
+		})
+		if err != nil {
+			t.Errorf("run() returned error: %v", err)
+		}
+	})
+
+	var result configResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+	if len(result.Detectors) != 1 {
+		t.Errorf("want 1 detector (filtered), got %d", len(result.Detectors))
+	}
+	if _, ok := result.Detectors["brute-force-detector"]; !ok {
+		t.Errorf("expected brute-force-detector in result")
+	}
+}
+
+func TestReadConfig_NoFile(t *testing.T) {
+	// config.json absent — returns empty config, no error.
+	dir := makeFixtureDir(t, "", "", "")
+
+	out := captureStdout(t, func() {
+		err := run([]string{
+			"--tool", "read-config",
+			"--mode", "exam",
+			"--fixture-dir", dir,
+		})
+		if err != nil {
+			t.Errorf("run() returned unexpected error: %v", err)
+		}
+	})
+
+	var result configResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+	if len(result.Detectors) != 0 {
+		t.Errorf("want 0 detectors when no file, got %d", len(result.Detectors))
+	}
+	if len(result.Connectors) != 0 {
+		t.Errorf("want 0 connectors when no file, got %d", len(result.Connectors))
+	}
+}
+
+// ---- load-skill tests ------------------------------------------------------
+
+// writeCatalog writes a YAML skill catalog to a temp dir and sets
+// MALLCOP_REPO_ROOT to point there, returning the dir and a cleanup func.
+func writeCatalog(t *testing.T, yamlContent string) (repoRoot string, cleanup func()) {
+	t.Helper()
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "skill-catalog.yaml"), []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("write skill-catalog.yaml: %v", err)
+	}
+	orig := os.Getenv("MALLCOP_REPO_ROOT")
+	os.Setenv("MALLCOP_REPO_ROOT", dir)
+	return dir, func() {
+		os.Setenv("MALLCOP_REPO_ROOT", orig)
+	}
+}
+
+const testSkillCatalogYAML = `
+skills:
+  - name: aws-iam
+    version: "1.0.0"
+    source: aws
+    description: AWS IAM privilege analysis skill.
+    status: active
+    binding: static-chart
+    tools:
+      - name: aws-iam-query
+        description: Query IAM policies and roles.
+  - name: github-audit
+    version: "1.1.0"
+    source: github
+    description: GitHub audit log analysis.
+    status: experimental
+    binding: static-chart
+    tools:
+      - name: github-audit-query
+        description: Query GitHub audit log.
+`
+
+func TestLoadSkill_HappyPath(t *testing.T) {
+	_, cleanup := writeCatalog(t, testSkillCatalogYAML)
+	defer cleanup()
+
+	out := captureStdout(t, func() {
+		err := run([]string{"--tool", "load-skill"})
+		if err != nil {
+			t.Errorf("run() returned error: %v", err)
+		}
+	})
+
+	var result loadSkillResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+
+	if len(result.Skills) != 2 {
+		t.Errorf("want 2 skills (no filter), got %d", len(result.Skills))
+	}
+	if result.BindingNote == "" {
+		t.Errorf("binding_note must not be empty")
+	}
+}
+
+func TestLoadSkill_FilterBySkillName(t *testing.T) {
+	_, cleanup := writeCatalog(t, testSkillCatalogYAML)
+	defer cleanup()
+
+	out := captureStdout(t, func() {
+		err := run([]string{"--tool", "load-skill", "--skill-name", "aws-iam"})
+		if err != nil {
+			t.Errorf("run() returned error: %v", err)
+		}
+	})
+
+	var result loadSkillResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+
+	if len(result.Skills) != 1 {
+		t.Errorf("want 1 skill (filtered by name), got %d", len(result.Skills))
+	}
+	if result.Skills[0].Name != "aws-iam" {
+		t.Errorf("skill name = %q, want aws-iam", result.Skills[0].Name)
+	}
+}
+
+func TestLoadSkill_FilterBySourceHint(t *testing.T) {
+	_, cleanup := writeCatalog(t, testSkillCatalogYAML)
+	defer cleanup()
+
+	out := captureStdout(t, func() {
+		err := run([]string{"--tool", "load-skill", "--source-hint", "GitHub"}) // case-insensitive
+		if err != nil {
+			t.Errorf("run() returned error: %v", err)
+		}
+	})
+
+	var result loadSkillResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+
+	if len(result.Skills) != 1 {
+		t.Errorf("want 1 skill (filtered by source_hint=github), got %d", len(result.Skills))
+	}
+	if result.Skills[0].Name != "github-audit" {
+		t.Errorf("skill name = %q, want github-audit", result.Skills[0].Name)
+	}
+}
+
+func TestLoadSkill_BindingNotePresent(t *testing.T) {
+	_, cleanup := writeCatalog(t, testSkillCatalogYAML)
+	defer cleanup()
+
+	out := captureStdout(t, func() {
+		err := run([]string{"--tool", "load-skill"})
+		if err != nil {
+			t.Errorf("run() returned error: %v", err)
+		}
+	})
+
+	var result loadSkillResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+
+	if !strings.Contains(result.BindingNote, "does not register new tools at runtime") {
+		t.Errorf("binding_note must state that load-skill does not register new tools at runtime; got %q", result.BindingNote)
+	}
+	if !strings.Contains(result.BindingNote, "statically registered") {
+		t.Errorf("binding_note must mention 'statically registered'; got %q", result.BindingNote)
+	}
+}
+
+func TestLoadSkill_NoCatalogFile(t *testing.T) {
+	// No catalog file — empty catalog is normal at boot.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "config"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	orig := os.Getenv("MALLCOP_REPO_ROOT")
+	os.Setenv("MALLCOP_REPO_ROOT", dir)
+	defer os.Setenv("MALLCOP_REPO_ROOT", orig)
+
+	out := captureStdout(t, func() {
+		err := run([]string{"--tool", "load-skill"})
+		if err != nil {
+			t.Errorf("run() returned unexpected error: %v", err)
+		}
+	})
+
+	var result loadSkillResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse output JSON: %v\nout=%q", err, out)
+	}
+	if len(result.Skills) != 0 {
+		t.Errorf("want 0 skills when no catalog file, got %d", len(result.Skills))
+	}
+	if result.BindingNote == "" {
+		t.Errorf("binding_note must not be empty even when catalog is absent")
 	}
 }
 

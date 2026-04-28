@@ -29,6 +29,17 @@
 //	  --actor alice@example.com --source github \
 //	  --since 2026-04-01T00:00:00Z
 //
+//	mallcop-investigate-tools --tool baseline-stats \
+//	  --mode exam --fixture-dir /path/to/fixture \
+//	  --entity alice@example.com --source github
+//
+//	mallcop-investigate-tools --tool read-config \
+//	  --mode exam --fixture-dir /path/to/fixture \
+//	  --detector my-detector --connector github
+//
+//	mallcop-investigate-tools --tool load-skill \
+//	  --skill-name aws-iam
+//
 // --mode production is stubbed: returns an error until Phase 2 ships a
 // checkpoint-backed store.
 package main
@@ -42,6 +53,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func main() {
@@ -56,13 +69,13 @@ func main() {
 func run(args []string) error {
 	fs := flag.NewFlagSet("mallcop-investigate-tools", flag.ContinueOnError)
 
-	tool := fs.String("tool", "", "one of: check-baseline, search-events, search-findings, read-finding (required)")
+	tool := fs.String("tool", "", "one of: check-baseline, search-events, search-findings, read-finding, baseline-stats, read-config, load-skill (required)")
 	mode := fs.String("mode", "exam", "exam (reads from --fixture-dir) or production (stubbed)")
-	fixtureDir := fs.String("fixture-dir", "", "path to fixture directory (required in exam mode)")
+	fixtureDir := fs.String("fixture-dir", "", "path to fixture directory (required in exam mode for fixture-based tools)")
 
-	// check-baseline flags
-	entity := fs.String("entity", "", "entity ID or email to look up (check-baseline)")
-	source := fs.String("source", "", "source connector (check-baseline, search-events, search-findings)")
+	// check-baseline / baseline-stats flags
+	entity := fs.String("entity", "", "entity ID or email to look up (check-baseline, baseline-stats)")
+	source := fs.String("source", "", "source connector (check-baseline, search-events, search-findings, baseline-stats, read-config)")
 	hours := fs.Int("hours", 168, "look-back window in hours (check-baseline)")
 
 	// search-events flags
@@ -73,6 +86,14 @@ func run(args []string) error {
 
 	// read-finding flags
 	findingID := fs.String("finding-id", "", "finding ID to read (read-finding)")
+
+	// read-config flags
+	detector := fs.String("detector", "", "detector name filter (read-config, optional)")
+	connector := fs.String("connector", "", "connector name filter (read-config, optional)")
+
+	// load-skill flags
+	skillName := fs.String("skill-name", "", "skill name filter (load-skill, optional)")
+	sourceHint := fs.String("source-hint", "", "source hint filter (load-skill, optional)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -111,12 +132,29 @@ func run(args []string) error {
 				if v, ok := input["finding_id"].(string); ok && *findingID == "" {
 					*findingID = v
 				}
+				if v, ok := input["detector"].(string); ok && *detector == "" {
+					*detector = v
+				}
+				if v, ok := input["connector"].(string); ok && *connector == "" {
+					*connector = v
+				}
+				if v, ok := input["skill_name"].(string); ok && *skillName == "" {
+					*skillName = v
+				}
+				if v, ok := input["source_hint"].(string); ok && *sourceHint == "" {
+					*sourceHint = v
+				}
 			}
 		}
 	}
 
 	if *tool == "" {
-		return errors.New("--tool is required (check-baseline, search-events, search-findings, read-finding, or an F1G action tool)")
+		return errors.New("--tool is required (check-baseline, search-events, search-findings, read-finding, baseline-stats, read-config, load-skill, or an F1G action tool)")
+	}
+
+	// load-skill is a catalog-only discovery tool — no fixture-dir or mode needed.
+	if *tool == "load-skill" {
+		return loadSkill(*skillName, *sourceHint)
 	}
 
 	// F1G action tools: dispatch before mode/fixture-dir checks.
@@ -166,8 +204,12 @@ func run(args []string) error {
 		return searchFindings(absFixtureDir, *actor, *source, *since)
 	case "read-finding":
 		return readFinding(absFixtureDir, *findingID)
+	case "baseline-stats":
+		return baselineStats(absFixtureDir, *entity, *source)
+	case "read-config":
+		return readConfig(absFixtureDir, *detector, *connector)
 	default:
-		return fmt.Errorf("unknown --tool %q; use check-baseline, search-events, search-findings, read-finding, or an F1G action tool", *tool)
+		return fmt.Errorf("unknown --tool %q; use check-baseline, search-events, search-findings, read-finding, baseline-stats, read-config, load-skill, or an F1G action tool", *tool)
 	}
 }
 
@@ -548,6 +590,311 @@ func readFinding(fixtureDir, findingID string) error {
 	return emitJSON(map[string]interface{}{
 		"error":      "not_found",
 		"finding_id": findingID,
+	})
+}
+
+// ---- baseline-stats --------------------------------------------------------
+
+// baselineStatsResult is the JSON output contract for baseline-stats.
+type baselineStatsResult struct {
+	CountTotal            int            `json:"count_total"`
+	CountBySource         map[string]int `json:"count_by_source"`
+	CountByType           map[string]int `json:"count_by_type"`
+	TimeOfDayDistribution map[string]int `json:"time_of_day_distribution"`
+	WeekdayDistribution   map[string]int `json:"weekday_distribution"`
+	FirstSeen             *string        `json:"first_seen"`
+	LastSeen              *string        `json:"last_seen"`
+}
+
+// newEmptyBaselineStatsResult returns a zeroed baselineStatsResult with
+// initialized maps and nil timestamps (per spec: null when no events match).
+func newEmptyBaselineStatsResult() baselineStatsResult {
+	tod := make(map[string]int, 24)
+	for h := 0; h < 24; h++ {
+		tod[fmt.Sprintf("%02d", h)] = 0
+	}
+	wd := map[string]int{
+		"mon": 0, "tue": 0, "wed": 0, "thu": 0,
+		"fri": 0, "sat": 0, "sun": 0,
+	}
+	return baselineStatsResult{
+		CountTotal:            0,
+		CountBySource:         map[string]int{},
+		CountByType:           map[string]int{},
+		TimeOfDayDistribution: tod,
+		WeekdayDistribution:   wd,
+		FirstSeen:             nil,
+		LastSeen:              nil,
+	}
+}
+
+// weekdayKey maps time.Weekday to the lowercase 3-letter key used in the output.
+func weekdayKey(d time.Weekday) string {
+	switch d {
+	case time.Monday:
+		return "mon"
+	case time.Tuesday:
+		return "tue"
+	case time.Wednesday:
+		return "wed"
+	case time.Thursday:
+		return "thu"
+	case time.Friday:
+		return "fri"
+	case time.Saturday:
+		return "sat"
+	default:
+		return "sun"
+	}
+}
+
+// baselineStats aggregates statistics from the baseline.json fixture.
+// The fixture used here is events-shaped: a JSON array of records with at
+// minimum {actor, source, timestamp, type}.  It falls back to zero results
+// if the file is absent (same graceful-not-found behaviour as check-baseline).
+func baselineStats(fixtureDir, entity, source string) error {
+	f, err := safeOpen(fixtureDir, "baseline.json")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return emitJSON(newEmptyBaselineStatsResult())
+		}
+		return fmt.Errorf("open baseline.json: %w", err)
+	}
+	defer f.Close()
+
+	// baseline.json may be an event-array OR the structured baseline file used by
+	// check-baseline.  Try to decode as an array first; fall back to the struct.
+	var rawData json.RawMessage
+	if err := json.NewDecoder(f).Decode(&rawData); err != nil {
+		return fmt.Errorf("decode baseline.json: %w", err)
+	}
+
+	// Try as a flat event array.
+	type eventRecord struct {
+		Actor     string `json:"actor"`
+		Source    string `json:"source"`
+		Type      string `json:"type"`
+		Timestamp string `json:"timestamp"`
+	}
+	var events []eventRecord
+	if err := json.Unmarshal(rawData, &events); err != nil {
+		// Not an array — the fixture is in check-baseline struct format.
+		// Return empty stats rather than error; stats require event records.
+		return emitJSON(newEmptyBaselineStatsResult())
+	}
+
+	result := newEmptyBaselineStatsResult()
+
+	for _, ev := range events {
+		// Apply optional filters.
+		if entity != "" && !strings.EqualFold(ev.Actor, entity) {
+			continue
+		}
+		if source != "" && !strings.EqualFold(ev.Source, source) {
+			continue
+		}
+
+		result.CountTotal++
+
+		if ev.Source != "" {
+			result.CountBySource[ev.Source]++
+		}
+		if ev.Type != "" {
+			result.CountByType[ev.Type]++
+		}
+
+		if ev.Timestamp != "" {
+			t, err := time.Parse(time.RFC3339, ev.Timestamp)
+			if err == nil {
+				// Time-of-day bucket (hour, zero-padded).
+				hourKey := fmt.Sprintf("%02d", t.UTC().Hour())
+				result.TimeOfDayDistribution[hourKey]++
+
+				// Weekday bucket.
+				result.WeekdayDistribution[weekdayKey(t.UTC().Weekday())]++
+
+				// first_seen / last_seen tracking.
+				if result.FirstSeen == nil || ev.Timestamp < *result.FirstSeen {
+					ts := ev.Timestamp
+					result.FirstSeen = &ts
+				}
+				if result.LastSeen == nil || ev.Timestamp > *result.LastSeen {
+					ts := ev.Timestamp
+					result.LastSeen = &ts
+				}
+			}
+		}
+	}
+
+	return emitJSON(result)
+}
+
+// ---- read-config -----------------------------------------------------------
+
+// configFile is the on-disk shape of config.json.
+type configFile struct {
+	Detectors  map[string]json.RawMessage `json:"detectors"`
+	Connectors map[string]json.RawMessage `json:"connectors"`
+}
+
+// configResult is the JSON output contract for read-config.
+type configResult struct {
+	Detectors  map[string]json.RawMessage `json:"detectors"`
+	Connectors map[string]json.RawMessage `json:"connectors"`
+}
+
+// readConfig reads connector and detector configuration from config.json.
+// Returns an empty result if the file is absent (normal boot state).
+func readConfig(fixtureDir, detector, connector string) error {
+	f, err := safeOpen(fixtureDir, "config.json")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return emitJSON(configResult{
+				Detectors:  map[string]json.RawMessage{},
+				Connectors: map[string]json.RawMessage{},
+			})
+		}
+		return fmt.Errorf("open config.json: %w", err)
+	}
+	defer f.Close()
+
+	var cfg configFile
+	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
+		return fmt.Errorf("decode config.json: %w", err)
+	}
+
+	result := configResult{
+		Detectors:  map[string]json.RawMessage{},
+		Connectors: map[string]json.RawMessage{},
+	}
+
+	// If no filters, return everything.
+	if detector == "" && connector == "" {
+		result.Detectors = cfg.Detectors
+		result.Connectors = cfg.Connectors
+		return emitJSON(result)
+	}
+
+	// Apply detector filter.
+	if detector != "" {
+		if cfg.Detectors != nil {
+			if v, ok := cfg.Detectors[detector]; ok {
+				result.Detectors[detector] = v
+			}
+		}
+	} else {
+		result.Detectors = cfg.Detectors
+	}
+
+	// Apply connector filter.
+	if connector != "" {
+		if cfg.Connectors != nil {
+			if v, ok := cfg.Connectors[connector]; ok {
+				result.Connectors[connector] = v
+			}
+		}
+	} else {
+		result.Connectors = cfg.Connectors
+	}
+
+	return emitJSON(result)
+}
+
+// ---- load-skill ------------------------------------------------------------
+
+// skillCatalog is the on-disk shape of config/skill-catalog.yaml.
+type skillCatalog struct {
+	Skills []skillEntry `yaml:"skills"`
+}
+
+// skillTool is a single tool entry within a skill.
+type skillTool struct {
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description" json:"description"`
+}
+
+// skillEntry is a single skill in the catalog.
+type skillEntry struct {
+	Name        string      `yaml:"name" json:"name"`
+	Version     string      `yaml:"version" json:"version"`
+	Source      string      `yaml:"source,omitempty" json:"source,omitempty"`
+	Description string      `yaml:"description" json:"description"`
+	Status      string      `yaml:"status" json:"status"`
+	Binding     string      `yaml:"binding" json:"binding"`
+	Tools       []skillTool `yaml:"tools,omitempty" json:"tools,omitempty"`
+	NotesFile   string      `yaml:"notes_file,omitempty" json:"notes_file,omitempty"`
+}
+
+// loadSkillResult is the JSON output contract for load-skill.
+type loadSkillResult struct {
+	Skills      []skillEntry `json:"skills"`
+	BindingNote string       `json:"binding_note"`
+}
+
+const skillBindingNote = "Tools listed here are statically registered in the operational chart's tool_allowlist. " +
+	"Calling load-skill is a discovery operation; it does not register new tools at runtime."
+
+// resolveRepoRoot returns the repo root directory.
+// Resolution order:
+//  1. MALLCOP_REPO_ROOT env var (set by the engine in operational mode)
+//  2. CWD (consistent with the path-resolution pattern in the existing tools)
+func resolveRepoRoot() (string, error) {
+	if v := os.Getenv("MALLCOP_REPO_ROOT"); v != "" {
+		return filepath.Abs(v)
+	}
+	return os.Getwd()
+}
+
+// loadSkill reads the skill catalog from config/skill-catalog.yaml (repo-relative)
+// and returns the matching entries.  Filters by skill_name (exact match) or
+// source_hint (case-insensitive match on the source field).
+// Returns an empty skills list when the catalog file is absent (normal at boot).
+func loadSkill(skillName, sourceHint string) error {
+	repoRoot, err := resolveRepoRoot()
+	if err != nil {
+		return fmt.Errorf("resolve repo root: %w", err)
+	}
+
+	catalogPath := filepath.Join(repoRoot, "config", "skill-catalog.yaml")
+	data, err := os.ReadFile(catalogPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return emitJSON(loadSkillResult{
+				Skills:      []skillEntry{},
+				BindingNote: skillBindingNote,
+			})
+		}
+		return fmt.Errorf("read skill-catalog.yaml: %w", err)
+	}
+
+	var catalog skillCatalog
+	if err := yaml.Unmarshal(data, &catalog); err != nil {
+		return fmt.Errorf("parse skill-catalog.yaml: %w", err)
+	}
+
+	// Filter skills.
+	filtered := []skillEntry{}
+	for _, s := range catalog.Skills {
+		if skillName != "" && s.Name != skillName {
+			continue
+		}
+		if sourceHint != "" && !strings.EqualFold(s.Source, sourceHint) {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+
+	// If no filters applied, return all skills (nil slice → empty array in JSON).
+	if skillName == "" && sourceHint == "" {
+		filtered = catalog.Skills
+		if filtered == nil {
+			filtered = []skillEntry{}
+		}
+	}
+
+	return emitJSON(loadSkillResult{
+		Skills:      filtered,
+		BindingNote: skillBindingNote,
 	})
 }
 

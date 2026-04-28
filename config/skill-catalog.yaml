@@ -1,0 +1,38 @@
+# mallcop skill catalog. Static today (binding: "static-chart"). Connector
+# factory PRs append entries; tools listed here MUST be statically registered
+# in the operational chart's tool_allowlist for the engine to invoke them.
+#
+# Future v1: when legion gains dynamic tool registration, entries with
+# binding: "dynamic" will be live-injectable. Today, all entries are
+# binding: "static-chart".
+#
+# Schema per entry:
+#   name:        <string, required>
+#   version:     <string, required>
+#   source:      <string, optional — e.g. "github", "aws">
+#   description: <string, required>
+#   status:      active | deprecated | experimental
+#   binding:     static-chart   # always for now
+#   tools:
+#     - name:        <string, required>
+#       description: <string, required>
+#   notes_file:  <path, optional — pointer to a longer skill playbook>
+#
+# Example entry (commented out — uncomment and fill in when adding a real skill):
+#
+# - name: github-connector
+#   version: "1.0.0"
+#   source: github
+#   description: >
+#     GitHub connector skill. Provides tools for querying GitHub audit logs,
+#     repository access events, and organization membership changes.
+#   status: active
+#   binding: static-chart
+#   tools:
+#     - name: github-audit-query
+#       description: Query GitHub audit log for org-level events by actor, repo, or action.
+#     - name: github-repo-access
+#       description: List current repository collaborator permissions for a given repo.
+#   notes_file: docs/skills/github-connector.md
+
+skills: []

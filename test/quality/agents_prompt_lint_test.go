@@ -8,6 +8,61 @@ import (
 	"testing"
 )
 
+// TestInvestigatePromptHasLoadSkillDiscoveryNote verifies that
+// agents/investigate/POST.md contains the required clarification that load-skill
+// is discovery-only and does NOT register new tools at runtime.
+func TestInvestigatePromptHasLoadSkillDiscoveryNote(t *testing.T) {
+	root := repoRoot(t)
+	promptPath := filepath.Join(root, "agents", "investigate", "POST.md")
+
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", promptPath, err)
+	}
+	content := string(data)
+	lower := strings.ToLower(content)
+
+	// Must contain the discovery-only clarification.
+	if !strings.Contains(lower, "discovery-only") && !strings.Contains(lower, "discovery only") {
+		t.Errorf("agents/investigate/POST.md: missing 'discovery-only' note for load-skill — agents must understand load-skill does not register new tools")
+	}
+
+	// Must state that tools are already in the allowlist.
+	if !strings.Contains(lower, "already in your allowlist") && !strings.Contains(lower, "already in your tool") {
+		t.Errorf("agents/investigate/POST.md: must clarify that tools from load-skill are already in the allowlist")
+	}
+
+	// Must state that load-skill does NOT register new tools at runtime.
+	if !strings.Contains(lower, "does not register new tools at runtime") {
+		t.Errorf("agents/investigate/POST.md: must explicitly state that load-skill does NOT register new tools at runtime")
+	}
+}
+
+// TestDeepInvestigatePromptHasLoadSkillDiscoveryNote verifies that
+// agents/deep-investigate/POST.md contains the required clarification that
+// load-skill is discovery-only and does NOT register new tools at runtime.
+func TestDeepInvestigatePromptHasLoadSkillDiscoveryNote(t *testing.T) {
+	root := repoRoot(t)
+	promptPath := filepath.Join(root, "agents", "deep-investigate", "POST.md")
+
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", promptPath, err)
+	}
+	content := string(data)
+	lower := strings.ToLower(content)
+
+	// Must contain the discovery-only clarification.
+	if !strings.Contains(lower, "discovery-only") && !strings.Contains(lower, "discovery only") {
+		t.Errorf("agents/deep-investigate/POST.md: missing 'discovery-only' note for load-skill — agents must understand load-skill does not register new tools")
+	}
+
+	// Must state that load-skill does NOT register new tools at runtime.
+	if !strings.Contains(lower, "does not register new tools at runtime") {
+		t.Errorf("agents/deep-investigate/POST.md: must explicitly state that load-skill does NOT register new tools at runtime")
+	}
+}
+
 // TestHealPromptExists verifies that agents/heal/POST.md exists and contains
 // the key directives required by F1H: narrow parser-fix scope (log_format_drift
 // only), three scenario types, patch structure, annotate-finding + resolve-finding
