@@ -69,6 +69,29 @@ func TestHealPromptExists(t *testing.T) {
 	if !strings.Contains(lower, "read-finding") {
 		t.Errorf("agents/heal/POST.md: missing 'read-finding' tool reference — heal must use read-finding to load the full finding")
 	}
+
+	// Negative assertions: heal scope must stay narrow. The Python source-of-truth
+	// is parser-fix only. Broad-remediation language from the prior legion version
+	// must not regress in. These tokens are the specific writes the old POST.md
+	// authorized; heal must NEVER do these (those belong to task:escalate).
+	forbiddenTokens := []string{
+		"revoke-credential",
+		"quarantine-user",
+		"rotate-key",
+		"disable-account",
+		"revert-config",
+		"remediate-action",
+		"approve-action",
+		"escalate-to-stage-c",
+		"escalate-to-investigator",
+		"escalate-to-deep",
+		"request-approval",
+	}
+	for _, ft := range forbiddenTokens {
+		if strings.Contains(lower, ft) {
+			t.Errorf("agents/heal/POST.md: forbidden token %q present — heal scope must stay narrow (parser-fix only); broad-remediation tools belong to task:escalate, not task:heal", ft)
+		}
+	}
 }
 
 // TestDeepInvestigatePromptExists verifies that agents/deep-investigate/POST.md

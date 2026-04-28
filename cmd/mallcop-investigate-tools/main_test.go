@@ -428,6 +428,138 @@ func TestSearchFindings_ProductionStubbed(t *testing.T) {
 	}
 }
 
+// ---- read-finding ----------------------------------------------------------
+
+const testFindingsForReadJSONL = `{"finding_id":"fnd-rf-001","actor":"alice@example.com","source":"github","title":"Unusual push pattern","severity":"medium"}
+{"id":"fnd-rf-002","actor":"bob@example.com","source":"azure","title":"Off-hours login","severity":"low"}
+`
+
+func TestReadFinding_HappyPath(t *testing.T) {
+	dir := makeFixtureDir(t, "", "", testFindingsForReadJSONL)
+
+	out := captureStdout(t, func() {
+		err := run([]string{
+			"--tool", "read-finding",
+			"--mode", "exam",
+			"--fixture-dir", dir,
+			"--finding-id", "fnd-rf-001",
+		})
+		if err != nil {
+			t.Errorf("run() returned error: %v", err)
+		}
+	})
+
+	var finding map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &finding); err != nil {
+		t.Fatalf("parse finding: %v\nout=%q", err, out)
+	}
+	if finding["finding_id"] != "fnd-rf-001" {
+		t.Errorf("finding_id = %v, want fnd-rf-001", finding["finding_id"])
+	}
+	if finding["actor"] != "alice@example.com" {
+		t.Errorf("actor = %v, want alice@example.com", finding["actor"])
+	}
+	if finding["error"] != nil {
+		t.Errorf("unexpected error key in happy-path output: %v", finding["error"])
+	}
+}
+
+func TestReadFinding_HappyPath_IDFallback(t *testing.T) {
+	// findings without finding_id but with id should still be findable.
+	dir := makeFixtureDir(t, "", "", testFindingsForReadJSONL)
+
+	out := captureStdout(t, func() {
+		err := run([]string{
+			"--tool", "read-finding",
+			"--mode", "exam",
+			"--fixture-dir", dir,
+			"--finding-id", "fnd-rf-002",
+		})
+		if err != nil {
+			t.Errorf("run() returned error: %v", err)
+		}
+	})
+
+	var finding map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &finding); err != nil {
+		t.Fatalf("parse finding: %v\nout=%q", err, out)
+	}
+	if finding["id"] != "fnd-rf-002" {
+		t.Errorf("id = %v, want fnd-rf-002", finding["id"])
+	}
+	if finding["error"] != nil {
+		t.Errorf("unexpected error key in id-fallback output: %v", finding["error"])
+	}
+}
+
+func TestReadFinding_NotFound(t *testing.T) {
+	dir := makeFixtureDir(t, "", "", testFindingsForReadJSONL)
+
+	out := captureStdout(t, func() {
+		err := run([]string{
+			"--tool", "read-finding",
+			"--mode", "exam",
+			"--fixture-dir", dir,
+			"--finding-id", "fnd-rf-does-not-exist",
+		})
+		if err != nil {
+			t.Errorf("run() returned unexpected error for not-found: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse result: %v\nout=%q", err, out)
+	}
+	if result["error"] != "not_found" {
+		t.Errorf("error = %v, want not_found", result["error"])
+	}
+	if result["finding_id"] != "fnd-rf-does-not-exist" {
+		t.Errorf("finding_id echo = %v, want fnd-rf-does-not-exist", result["finding_id"])
+	}
+}
+
+func TestReadFinding_NoFindingsFile(t *testing.T) {
+	// findings.jsonl absent — must return not_found, not an error.
+	dir := makeFixtureDir(t, "", "", "")
+
+	out := captureStdout(t, func() {
+		err := run([]string{
+			"--tool", "read-finding",
+			"--mode", "exam",
+			"--fixture-dir", dir,
+			"--finding-id", "fnd-rf-001",
+		})
+		if err != nil {
+			t.Errorf("run() returned unexpected error when findings.jsonl absent: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse result: %v\nout=%q", err, out)
+	}
+	if result["error"] != "not_found" {
+		t.Errorf("error = %v, want not_found when findings.jsonl absent", result["error"])
+	}
+}
+
+func TestReadFinding_RequiresFindingID(t *testing.T) {
+	dir := makeFixtureDir(t, "", "", testFindingsForReadJSONL)
+
+	err := run([]string{
+		"--tool", "read-finding",
+		"--mode", "exam",
+		"--fixture-dir", dir,
+	})
+	if err == nil {
+		t.Fatal("expected error for missing --finding-id, got nil")
+	}
+	if !strings.Contains(err.Error(), "finding-id is required") {
+		t.Errorf("error message = %v, want mention of finding-id required", err)
+	}
+}
+
 // ---- security invariant tests ----------------------------------------------
 
 // TestInvestigateTools_NoNetworkImports greps main.go for forbidden imports.
