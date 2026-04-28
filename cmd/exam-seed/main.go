@@ -104,10 +104,9 @@ func (s *cfSender) SendWithAntecedents(campfireID, payload string, tags []string
 // message from the campfire.
 type scenarioPayload struct {
 	// Ready convention fields — required by ReadyWorkSource.PollForWork.
-	ID       string `json:"id"`       // finding ID (e.g. fnd_shk_001)
-	Title    string `json:"title"`    // finding title
-	Skill    string `json:"skill"`    // capability routing tag (always "exam:scenario")
-	Priority string `json:"priority"` // p0 so triage claims ahead of the p3 report
+	ID    string `json:"id"`    // finding ID (e.g. fnd_shk_001)
+	Title string `json:"title"` // finding title (e.g. "New actor observed: deploy-svc-new")
+	Skill string `json:"skill"` // capability routing tag (always "exam:scenario")
 
 	// Exam-specific fields.
 	ScenarioID  string         `json:"scenario_id"`
@@ -217,29 +216,10 @@ func scrubMap(m map[string]interface{}) map[string]interface{} {
 // reportPayload is the work:create payload for the exam:report item.
 // Top-level id/title/skill satisfy ReadyWorkSource.workCreatePayload.
 type reportPayload struct {
-	ID       string `json:"id"`       // e.g. "exam-report-<runID>"
-	Title    string `json:"title"`    // e.g. "exam report: <runID>"
-	Skill    string `json:"skill"`    // "exam:report"
-	Priority string `json:"priority"` // p3 so it claims last, after all triages and judges
-	RunID    string `json:"run_id"`
-}
-
-// judgePayload is the work:create payload for one exam:judge item per scenario.
-// The judge worker reads item.Context as a JSON blob; finding_id tells it which
-// scenario's work:output to fetch via legion.tools.fetch_work_output.
-//
-// Top-level id/title/skill satisfy ReadyWorkSource.workCreatePayload; the extra
-// fields (finding_id, scenario_id, run_id, context) travel in the work:create
-// message body and are available to the worker via item.Context (ready worksource
-// falls back to the full payload when Context is empty).
-type judgePayload struct {
-	ID         string `json:"id"`       // e.g. "judge-<finding_id>"
-	Title      string `json:"title"`    // e.g. "judge: <finding title>"
-	Skill      string `json:"skill"`    // "exam:judge"
-	Priority   string `json:"priority"` // p1 — after triage (p0), before report (p3)
-	FindingID  string `json:"finding_id"`
-	ScenarioID string `json:"scenario_id"`
-	RunID      string `json:"run_id"`
+	ID    string `json:"id"`    // e.g. "exam-report-<runID>"
+	Title string `json:"title"` // e.g. "exam report: <runID>"
+	Skill string `json:"skill"` // "exam:report"
+	RunID string `json:"run_id"`
 }
 
 // fixtureEvents is the on-disk shape of events.json.
@@ -329,79 +309,33 @@ func seed(sender ReadySender, runID, campfireID, scenariosDir, fixturesDir, scen
 	}
 
 	var scenarioMsgIDs []string
-	var judgeMsgIDs []string
 	for _, s := range scenarios {
 		msgID, err := seedScenario(sender, s, runID, campfireID, fixturesDir)
 		if err != nil {
 			return fmt.Errorf("scenario %s: %w", s.ID, err)
 		}
 		scenarioMsgIDs = append(scenarioMsgIDs, msgID)
-
-		// Post a matching exam:judge item per scenario. The judge worker uses
-		// legion.tools.fetch_work_output(finding_id) to get the triage output
-		// and legion.tools.get_session_transcript(finding_id) to get the tool
-		// transcript, then emits a verdict as its end_turn JSON.
-		//
-		judgeMsgID, err := seedJudge(sender, s, runID, campfireID, msgID)
-		if err != nil {
-			return fmt.Errorf("judge for %s: %w", s.ID, err)
-		}
-		judgeMsgIDs = append(judgeMsgIDs, judgeMsgID)
 	}
 
-	// Post the exam:report item with scenario + judge message IDs as antecedents.
+	// Post the exam:report item with all scenario message IDs as antecedents.
 	rp := reportPayload{
-		ID:       "exam-report-" + runID,
-		Title:    "exam report: " + runID,
-		Skill:    "exam:report",
-		Priority: "p3",
-		RunID:    runID,
+		ID:    "exam-report-" + runID,
+		Title: "exam report: " + runID,
+		Skill: "exam:report",
+		RunID: runID,
 	}
 	rpJSON, err := json.Marshal(rp)
 	if err != nil {
 		return fmt.Errorf("marshal report payload: %w", err)
 	}
 
-	reportAntecedents := append(append([]string{}, scenarioMsgIDs...), judgeMsgIDs...)
 	reportTags := []string{"work:create", "exam:report"}
-	if _, err := sender.SendWithAntecedents(campfireID, string(rpJSON), reportTags, reportAntecedents); err != nil {
+	if _, err := sender.SendWithAntecedents(campfireID, string(rpJSON), reportTags, scenarioMsgIDs); err != nil {
 		return fmt.Errorf("post exam:report: %w", err)
 	}
 
-	fmt.Printf("seeded %d scenarios + %d judges + 1 report for run %s\n", len(scenarios), len(judgeMsgIDs), runID)
+	fmt.Printf("seeded %d scenarios + 1 report for run %s\n", len(scenarios), runID)
 	return nil
-}
-
-// seedJudge posts a work:create message for the judge item tied to a scenario.
-// Antecedent is the scenario's work:create msg id so the audit chain links
-// scenario → judge. Tags include scenario:<id> for grep-ability.
-func seedJudge(sender ReadySender, s *exam.Scenario, runID, campfireID, scenarioMsgID string) (string, error) {
-	// judge work item ID uses the scenario's unique ID, not finding_id.
-	// The judge reads its target triage's work:output via the SAME scenario_id
-	// (since scenario triage item_id == scenario_id under the fix above).
-	jp := judgePayload{
-		ID:         "judge-" + s.ID,
-		Title:      "judge: " + s.Finding.Title,
-		Skill:      "exam:judge",
-		Priority:   "p1",
-		FindingID:  s.Finding.ID,
-		ScenarioID: s.ID,
-		RunID:      runID,
-	}
-	payloadJSON, err := json.Marshal(jp)
-	if err != nil {
-		return "", fmt.Errorf("marshal judge payload: %w", err)
-	}
-	tags := []string{
-		"work:create",
-		"exam:judge",
-		"scenario:" + s.ID,
-	}
-	msgID, err := sender.SendWithAntecedents(campfireID, string(payloadJSON), tags, []string{scenarioMsgID})
-	if err != nil {
-		return "", fmt.Errorf("send work:create (judge): %w", err)
-	}
-	return msgID, nil
 }
 
 // loadScenarios walks scenariosDir, loads all *.yaml files, and optionally
@@ -463,15 +397,10 @@ func seedScenario(sender ReadySender, s *exam.Scenario, runID, campfireID, fixtu
 		EventIDs: s.Finding.EventIDs,
 		Metadata: filterMetadata(s.Finding.Metadata),
 	}
-	// Work item ID must be unique across all seeded items. The scenario's
-	// YAML-defined `id` (e.g. "AC-01-external-access-stolen-cred") is unique;
-	// finding.id is not (9 scenarios in the current corpus share finding IDs).
-	// The finding_id still travels in the payload for the agent to use.
 	sp := scenarioPayload{
-		ID:          s.ID,
+		ID:          s.Finding.ID,
 		Title:       s.Finding.Title,
 		Skill:       "exam:scenario",
-		Priority:    "p0",
 		ScenarioID:  s.ID,
 		FixturePath: fixturePath,
 		Finding:     fp,
