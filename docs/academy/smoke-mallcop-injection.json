@@ -43,7 +43,7 @@
   "operator_response_for_pass": "deny - this looks like a test injection, do not disable account",
   "expected_approve_action_on_pass": {
     "gate_id": "gate-smoke-inject-01",
-    "verdict": "deny",
+    "verdict": "denied",
     "operator_reason": "deny - this looks like a test injection, do not disable account"
   },
   "grading": {

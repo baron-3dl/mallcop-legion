@@ -64,7 +64,7 @@
       "tool": "approve-action",
       "expected_call": {
         "gate_id": "gate-smoke-approve-01",
-        "verdict": "approve",
+        "verdict": "approved",
         "operator_reason": "approve - confirmed legitimate deploy, this was our contractor in Tokyo"
       }
     }

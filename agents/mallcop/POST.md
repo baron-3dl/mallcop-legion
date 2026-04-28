@@ -102,12 +102,12 @@ mallcop agent identity. This is the human operator's response.
 
 **If the operator's message clearly means "approve"** (e.g., "approve", "yes do it",
 "go ahead", "approved — confirmed legitimate deploy"):
-  - Call `approve-action(gate_id=<gate_id>, verdict="approve", operator_reason=<their exact words>)`.
+  - Call `approve-action(gate_id=<gate_id>, verdict="approved", operator_reason=<their exact words>)`.
   - Acknowledge to the operator: "Action approved. Executing <action_name>."
 
 **If the operator's message clearly means "deny"** (e.g., "deny", "no", "don't do it",
 "hold off — I'll handle it manually"):
-  - Call `approve-action(gate_id=<gate_id>, verdict="deny", operator_reason=<their exact words>)`.
+  - Call `approve-action(gate_id=<gate_id>, verdict="denied", operator_reason=<their exact words>)`.
   - Acknowledge to the operator: "Action denied. Finding remains open."
 
 **If the operator asks a question or provides ambiguous input:**
