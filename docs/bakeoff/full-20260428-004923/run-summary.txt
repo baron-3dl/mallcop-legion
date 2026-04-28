@@ -1,0 +1,17 @@
+Bakeoff run: full-20260428-004923
+Slate: exams/slates/full-survivors.yaml (4 models)
+Scenarios dir: exams/scenarios
+Max concurrent: 4
+Budget cap: $150.00 (pre-flight enforced)
+
+Per-model results:
+  glm-4.7-flash            wall=4m23s scenarios=51 pass=23 fail=18 pass_rate=0.45 exit=ok
+  glm-4.7                  wall=6m15s scenarios=56 pass=15 fail=32 pass_rate=0.27 exit=ok
+  glm-5                    wall=34m21s scenarios=53 pass=24 fail=22 pass_rate=0.45 exit=ok
+  qwen3-32b                wall=2m54s scenarios=56 pass=0 fail=56 pass_rate=0.00 exit=ok
+
+Anomalies:
+  - glm-4.7-flash: 51/56 scenarios harvested (5 missing). Partial coverage — root cause TBD (legion --exit-on-idle reaped before all scenarios checkpointed, or per-scenario crashes). No 0-verdict swallow; remaining 51 produced verdicts.
+  - glm-5:         53/56 scenarios harvested (3 missing). Same class of partial coverage as glm-4.7-flash. Investigate before promoting glm-5 to a lane.
+  - glm-4.7, qwen3-32b: full 56/56 coverage. qwen3-32b's 0/56 is a real model-quality fail, not a swallow (every scenario produced a verdict that the judge marked fail).
+  - Cost telemetry MISSING: orchestrator does not surface token usage or USD spent per model in either bakeoff-<model>.json or run-summary.txt. Cannot audit actual spend against $150 cap from artifacts alone. Worst-case pre-flight was $13.40; actual spend bounded by that ×1.5 tolerance ($20.10) but not measured. File rd item.

@@ -1,0 +1,11 @@
+{
+  "models": {
+    "llama-3.3-70b": {
+      "pass_rate": null,
+      "sovereignty": "allied",
+      "scenarios_run": 0,
+      "scenarios_passed": 0,
+      "blended_per_mtok": 0.72
+    }
+  }
+}

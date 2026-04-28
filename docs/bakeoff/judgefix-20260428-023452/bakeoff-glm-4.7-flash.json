@@ -1,0 +1,11 @@
+{
+  "models": {
+    "glm-4.7-flash": {
+      "pass_rate": 0,
+      "sovereignty": "open",
+      "scenarios_run": 1,
+      "scenarios_passed": 0,
+      "blended_per_mtok": 0.04
+    }
+  }
+}

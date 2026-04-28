@@ -1,0 +1,36 @@
+# Full bakeoff slate: 13 candidate models for the academy bakeoff.
+# Sovereignty values mirror Forge's internal/catalog/models.yaml.
+# When --catalog is provided, the sovereignty field can be omitted —
+# the orchestrator will populate from the catalog.
+models:
+  # open
+  - id: glm-4.7-flash
+    sovereignty: open
+  - id: glm-4.7
+    sovereignty: open
+  - id: glm-5
+    sovereignty: open
+  - id: glm-5.1
+    sovereignty: open
+  - id: qwen3-32b
+    sovereignty: open
+  - id: deepseek-r1
+    sovereignty: open
+
+  # allied
+  - id: llama-3.3-70b
+    sovereignty: allied
+  - id: mistral-large-2
+    sovereignty: allied
+
+  # us_only
+  - id: nova-lite
+    sovereignty: us_only
+  - id: nova-micro
+    sovereignty: us_only
+  - id: nova-pro
+    sovereignty: us_only
+  - id: claude-haiku-4-5
+    sovereignty: us_only
+  - id: claude-sonnet-4-6
+    sovereignty: us_only

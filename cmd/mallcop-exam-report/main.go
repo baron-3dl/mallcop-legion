@@ -110,18 +110,40 @@ func main() {
 	fmt.Printf("report written to %s\n", *outDir)
 }
 
-// readVerdicts shells out to `cf read <campfire> --tag judge:verdict --json --all`
-// and parses the payload of each returned message as a JudgeVerdict.
+// readVerdicts queries the campfire for judge worker outputs and extracts the
+// verdict JSON from each.
+//
+// Source-of-truth tags: `exam:judge` AND `work:output` — both must be
+// present. cf's `--tag` flag is OR semantics (repeatable matches ANY tag),
+// so we filter by `exam:judge` server-side and intersect with `work:output`
+// in code. We deliberately do NOT rely on legion's content-aware
+// `judge:verdict` auto-tag — that tag is a courtesy that only fires when
+// the payload parses as raw JSON, but glm-* models intermittently wrap
+// their output in ```json``` markdown fences which defeats it. The
+// formatting is the consumer's problem (we picked the model and wrote
+// the agent prompt), so we tolerate it here.
+//
+// Payload shape: legion's PostWorkerOutput posts the work:output envelope
+//   {"item_id": "<id>", "output": "<raw model text>"}
+// where the raw text is the judge agent's final response — the verdict JSON,
+// possibly fence-wrapped. We unwrap the envelope, strip any markdown fence,
+// then parse as JudgeVerdict. For backward compatibility with judge outputs
+// that legion DID auto-tag (raw JSON with no fence), we also accept the
+// payload directly as JudgeVerdict when the envelope unwrap fails.
+//
+// Empty-verdict guard: parseJudgeOutput rejects any payload that parses
+// without a populated `verdict` field. Without this, triage outputs and
+// exam-report run summaries — which share neither tag combination but
+// could leak through if the query is loosened — would inflate counts.
 func readVerdicts(campfire string) ([]JudgeVerdict, error) {
 	cfBin, err := exec.LookPath("cf")
 	if err != nil {
 		return nil, fmt.Errorf("cf binary not found on PATH: %w", err)
 	}
 
-	cmd := exec.Command(cfBin, "read", campfire, "--tag", "judge:verdict", "--json", "--all")
+	cmd := exec.Command(cfBin, "read", campfire, "--tag", "exam:judge", "--json", "--all")
 	out, err := cmd.Output()
 	if err != nil {
-		// An empty campfire returns exit 0 with [] — any real error is fatal.
 		return nil, fmt.Errorf("cf read: %w", err)
 	}
 
@@ -137,16 +159,91 @@ func readVerdicts(campfire string) ([]JudgeVerdict, error) {
 
 	var verdicts []JudgeVerdict
 	for _, msg := range msgs {
-		var v JudgeVerdict
-		if err := json.Unmarshal([]byte(msg.Payload), &v); err != nil {
-			// Skip unparseable messages — log and continue.
-			fmt.Fprintf(os.Stderr, "warn: skipping unparseable judge:verdict payload: %v\n", err)
+		// Intersect: server-side filter is exam:judge OR work:output (cf's
+		// --tag is OR); we need both. Skip messages missing work:output.
+		if !hasTag(msg.Tags, "work:output") {
+			continue
+		}
+		v, err := parseJudgeOutput(msg.Payload)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warn: skipping unparseable judge output: %v\n", err)
 			continue
 		}
 		verdicts = append(verdicts, v)
 	}
 
 	return verdicts, nil
+}
+
+// hasTag reports whether tags contains target (exact match).
+func hasTag(tags []string, target string) bool {
+	for _, t := range tags {
+		if t == target {
+			return true
+		}
+	}
+	return false
+}
+
+// parseJudgeOutput extracts the verdict JSON from a judge worker's
+// work:output payload. Handles two payload shapes:
+//
+//  1. Envelope: {"item_id": "...", "output": "<raw text>"} — the standard
+//     legion PostWorkerOutput shape. The "output" string is the agent's
+//     final response, optionally wrapped in a markdown ```json fence.
+//  2. Direct: a raw JudgeVerdict JSON object — happens when legion's
+//     content-aware auto-tag path posted the verdict body unwrapped.
+//     Retained for backward compatibility with older judge outputs.
+func parseJudgeOutput(payload string) (JudgeVerdict, error) {
+	// Shape 2 first — direct parse. If this works AND yields a populated
+	// verdict (the field every judge MUST emit), we're done.
+	var direct JudgeVerdict
+	if err := json.Unmarshal([]byte(payload), &direct); err == nil && direct.Verdict != "" {
+		return direct, nil
+	}
+
+	// Shape 1 — envelope. Extract the inner output string, strip any fence,
+	// then parse as JudgeVerdict.
+	var env struct {
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal([]byte(payload), &env); err != nil {
+		return JudgeVerdict{}, fmt.Errorf("payload is neither verdict JSON nor work:output envelope: %w", err)
+	}
+	stripped := stripJSONFence(env.Output)
+	var v JudgeVerdict
+	if err := json.Unmarshal([]byte(stripped), &v); err != nil {
+		return JudgeVerdict{}, fmt.Errorf("envelope.output not parseable as verdict (after fence-strip): %w", err)
+	}
+	// Empty-verdict guard: encoding/json is lenient — triage outputs (which
+	// have action/reason but no verdict) parse cleanly into a zero-valued
+	// JudgeVerdict and would otherwise inflate scenario counts. Reject any
+	// payload that doesn't carry an actual verdict.
+	if v.Verdict == "" {
+		return JudgeVerdict{}, fmt.Errorf("envelope.output parsed but has no verdict field (probably a triage or report output that slipped past the tag filter)")
+	}
+	return v, nil
+}
+
+// stripJSONFence removes a leading ```json (or bare ```) line and trailing
+// ``` line from s. If no fence is present, returns s unchanged. The agent
+// POST.md tells the model to emit raw JSON, but glm-* models intermittently
+// add a fence anyway — this is the tolerance layer.
+func stripJSONFence(s string) string {
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "```") {
+		return t
+	}
+	// Strip opening fence (```json\n or ```\n).
+	nl := strings.IndexByte(t, '\n')
+	if nl < 0 {
+		return t
+	}
+	t = t[nl+1:]
+	// Strip closing fence: trim trailing whitespace, then drop trailing ```.
+	t = strings.TrimRight(t, " \t\n\r")
+	t = strings.TrimSuffix(t, "```")
+	return strings.TrimRight(t, " \t\n\r")
 }
 
 // aggregate builds the Report from a slice of JudgeVerdicts.

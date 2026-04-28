@@ -1,0 +1,11 @@
+{
+  "models": {
+    "qwen3-32b": {
+      "pass_rate": 0.14285714285714285,
+      "sovereignty": "open",
+      "scenarios_run": 56,
+      "scenarios_passed": 8,
+      "blended_per_mtok": 0.4
+    }
+  }
+}

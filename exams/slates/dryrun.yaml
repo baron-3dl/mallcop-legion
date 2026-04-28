@@ -1,0 +1,13 @@
+# Single-model probe slate. Used to verify the orchestrator end-to-end
+# against real Forge. Pair with `--scenario AF-01-fat-finger-benign` for
+# the cheapest possible verification (~$0.01 spend).
+#
+# Use glm-4.7 (non-flash) — flash sometimes wraps judge JSON in a
+# ```json``` markdown fence, which suppresses legion's content-aware
+# `judge:verdict` auto-tag and makes mallcop-exam-report see 0 verdicts.
+# glm-4.7 emits raw JSON reliably in observed runs. Claude models cannot
+# be used here because legion routes claude-* directly to Anthropic
+# (not Forge), and the mallcop-sk-* tenant key fails Anthropic auth.
+models:
+  - id: glm-4.7
+    sovereignty: open

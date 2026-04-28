@@ -1,0 +1,11 @@
+{
+  "models": {
+    "glm-5": {
+      "pass_rate": 0.8095238095238095,
+      "sovereignty": "open",
+      "scenarios_run": 42,
+      "scenarios_passed": 34,
+      "blended_per_mtok": 2.1
+    }
+  }
+}
