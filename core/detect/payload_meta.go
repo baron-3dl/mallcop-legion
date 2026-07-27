@@ -74,6 +74,52 @@ func hasApprovalSignal(payload json.RawMessage) bool {
 	return false
 }
 
+// metaBool reads key k from a meta map as a bool, accepting the first present
+// alias. A JSON bool returns as-is; the string "true" also reads true (the
+// corpus/eval shape carries some flags as strings). A missing/other value
+// yields false, matching the zero value a direct json.Unmarshal would leave.
+func metaBool(meta map[string]any, aliases ...string) bool {
+	for _, k := range aliases {
+		v, ok := meta[k]
+		if !ok {
+			continue
+		}
+		switch t := v.(type) {
+		case bool:
+			return t
+		case string:
+			return t == "true"
+		}
+	}
+	return false
+}
+
+// metaStrSlice reads key k from a meta map as a []string, accepting the first
+// present alias. A JSON array yields its string elements (non-string elements
+// skipped); an already-[]string value returns as-is. A missing value yields nil
+// — the same zero value a direct json.Unmarshal leaves for an absent array.
+func metaStrSlice(meta map[string]any, aliases ...string) []string {
+	for _, k := range aliases {
+		v, ok := meta[k]
+		if !ok {
+			continue
+		}
+		switch t := v.(type) {
+		case []any:
+			out := make([]string, 0, len(t))
+			for _, e := range t {
+				if s, ok := e.(string); ok {
+					out = append(out, s)
+				}
+			}
+			return out
+		case []string:
+			return t
+		}
+	}
+	return nil
+}
+
 // metaFloat reads key k from a meta map as a float64, accepting the first present
 // alias. JSON numbers decode to float64; a string number is parsed. Returns
 // (value, true) on the first numeric alias found, else (0, false).
