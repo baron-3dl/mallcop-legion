@@ -81,6 +81,47 @@ func TestPrivEscalationFiresOnCloudRoles(t *testing.T) {
 	}
 }
 
+// TestPrivEscalationOnNIP86Allowlist proves the relay's NIP-86 write-allowlist
+// change reaches priv-escalation with the shape the loganalytics connector now
+// emits (mallcoppro-956), exercised through the real Detect path. The connector
+// GRANT (allowpubkey) maps to role_assignment with role "relay-write-allowlist"
+// (carries the "write" elevated token) so priv-escalation casts its committee
+// vote; the REVOKE (banpubkey) maps to action "remove_role_assignment" so the
+// narrowing guard drops it. Before the fix the connector set role to the raw
+// method name ("allowpubkey"), which matched no elevated keyword, so
+// priv-escalation never voted for a genuine write-allowlist grant.
+func TestPrivEscalationOnNIP86Allowlist(t *testing.T) {
+	fires := func(action, roleName string) bool {
+		bl := &baseline.Baseline{
+			KnownActors: []string{"relay-admin"}, // isolate priv-escalation from new-actor
+			ActorRoles:  map[string][]string{"relay-admin": {"viewer"}},
+		}
+		ev := event.Event{
+			ID: "nip86-" + roleName, Source: "loganalytics", Type: "role_assignment",
+			Actor: "relay-admin", Timestamp: ts(16, 30),
+			Payload: raw(t, map[string]string{
+				"action":      action,
+				"role":        "relay-write-allowlist",
+				"role_name":   roleName,
+				"target_user": "attacker-pubkey",
+			}),
+		}
+		for _, f := range Detect([]event.Event{ev}, bl) {
+			if f.Type == "priv-escalation" {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !fires("role_assignment", "allowpubkey") {
+		t.Error("priv-escalation did NOT fire on NIP-86 allowpubkey GRANT (write-allowlist elevation)")
+	}
+	if fires("remove_role_assignment", "banpubkey") {
+		t.Error("priv-escalation fired on NIP-86 banpubkey REVOKE — a revoke narrows, it does not elevate")
+	}
+}
+
 // TestPrivEscalationGateIsTargetAware proves the baseline gate + in-scan dedup
 // key is (actor, role, target) — not (actor, role) alone (mallcoppro-9af, ruled
 // by Baron 2026-07-15). Before this fix, once (actor, role) was baselined, that
