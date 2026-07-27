@@ -83,6 +83,38 @@ type depPayload struct {
 	Direct bool `json:"direct"`
 }
 
+// readDepPayload resolves the dependency-change discriminators from an event
+// payload, tolerating BOTH on-disk layouts the canonical schema defines via
+// payloadMeta's metadata-first fallback (core/detect/payload_meta.go): the
+// corpus/eval-seeder shape nests the fields under payload.metadata, the
+// production connector shape carries them flat at the payload root. Keys are the
+// depPayload json tags verbatim (no invented aliases), so the FLAT path reads
+// exactly as the previous direct json.Unmarshal did and only the metadata-nested
+// path is newly supported.
+//
+// THIS FIXES THE SAME LATENT DATA-DROP config_drift fixed for mallcoppro-192
+// (readConfigPayload, mallcoppro-9d6): dependency_tamper previously
+// json.Unmarshal'd ev.Payload straight onto depPayload, which only ever
+// populated fields for the flat production shape — every metadata-nested
+// corpus/eval scenario silently read empty strings and no rule fired. This is a
+// plumbing fix (how a field is read), not a change to what any rule decides once
+// it has the field.
+func readDepPayload(payload json.RawMessage) depPayload {
+	meta := payloadMeta(payload)
+	return depPayload{
+		Package:         metaStr(meta, "package"),
+		Ecosystem:       metaStr(meta, "ecosystem"),
+		OldVersion:      metaStr(meta, "old_version"),
+		NewVersion:      metaStr(meta, "new_version"),
+		ExpectedHash:    metaStr(meta, "expected_hash"),
+		ActualHash:      metaStr(meta, "actual_hash"),
+		Registry:        metaStr(meta, "registry"),
+		AddedPackages:   metaStrSlice(meta, "added_packages"),
+		RemovedPackages: metaStrSlice(meta, "removed_packages"),
+		Direct:          metaBool(meta, "direct"),
+	}
+}
+
 // dependencyTamperEvaluate returns findings for dependency supply chain
 // anomalies. This is a pure function: no I/O, no globals mutated.
 func dependencyTamperEvaluate(ev event.Event, _ *baseline.Baseline) []finding.Finding {
@@ -94,8 +126,7 @@ func dependencyTamperEvaluate(ev event.Event, _ *baseline.Baseline) []finding.Fi
 		return nil
 	}
 
-	var dp depPayload
-	_ = json.Unmarshal(ev.Payload, &dp)
+	dp := readDepPayload(ev.Payload)
 
 	var findings []finding.Finding
 
