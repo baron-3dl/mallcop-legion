@@ -576,3 +576,129 @@ func TestHandleQuestion_EmitsBusyHeartbeatsDuringASlowAnswer(t *testing.T) {
 			busyHeartbeats, answerDelay, heartbeatPeriod, recs)
 	}
 }
+
+// recordDecisionScriptedServer is a REAL httptest transport (mirrors
+// scriptedServer in investigate_test.go) whose scripted turn 1 requests the
+// record_decision tool (op=suppress) instead of search_events, then answers
+// with a text turn once it sees the real tool_result. This is the ONLY
+// stubbed layer: the tool itself (recordDecisionTool), the config load
+// (propose-only default, no mallcop.yaml on disk), and the outbox-writing
+// serve loop are all real production code.
+func recordDecisionScriptedServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	var calls int
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"type":        "message",
+				"role":        "assistant",
+				"stop_reason": "tool_use",
+				"content": []map[string]any{
+					{
+						"type": "tool_use",
+						"id":   "toolu_rd_001",
+						"name": "record_decision",
+						"input": map[string]any{
+							"op":      "suppress",
+							"pattern": "github/login/ghost",
+							"reason":  "known automation account",
+						},
+					},
+				},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"type":        "message",
+			"role":        "assistant",
+			"stop_reason": "end_turn",
+			"content":     []map[string]any{{"type": "text", "text": "proposed a suppress directive; approve to apply."}},
+		})
+	}))
+}
+
+// TestHandleQuestion_ToolResultRecordCarriesToolAndStructuredOutput is the
+// mallcoppro-00a enforcement test (Gap A producer side): a record_decision
+// call at the propose-only autonomy dial (config.AutonomyNon, the default —
+// no mallcop.yaml is written for this test's RepoRoot, so config.LoadEffective
+// falls back to Defaults()) must emit a tool_result outbox record carrying
+// BOTH "tool" == "record_decision" and a structured "output" object whose
+// "proposed" field is present -- the exact two fields mallcop-pro's
+// chat_page.go Apply/Discard render (mallcoppro-573) keys off of. Before this
+// fix, onToolResult only emitted {type,q,step,summary}; summary for this tool
+// falls through summarizeToolResult's generic "<tool> returned N bytes"
+// fallback, which carries no machine-readable payload at all.
+func TestHandleQuestion_ToolResultRecordCarriesToolAndStructuredOutput(t *testing.T) {
+	st := seedStore(t)
+	srv := recordDecisionScriptedServer(t)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	inboxPath := filepath.Join(dir, "inbox.jsonl")
+	outboxPath := filepath.Join(dir, "outbox.jsonl")
+	// repoRoot is a bare tmp dir with no mallcop.yaml on disk, so
+	// record_decision's config.LoadEffective(override) resolves via Load's
+	// os.ErrNotExist branch to config.Defaults() -- Learning.Autonomy ==
+	// config.AutonomyNon -- deterministically, regardless of where the test
+	// binary happens to run from.
+	repoRoot := t.TempDir()
+
+	question := map[string]any{"type": "question", "seq": 1, "id": "q_decide", "text": "suppress ghost's known automation logins"}
+	line, _ := json.Marshal(question)
+	if err := os.WriteFile(inboxPath, append(line, '\n'), 0o644); err != nil {
+		t.Fatalf("write inbox: %v", err)
+	}
+
+	client := &inference.DirectClient{BaseURL: srv.URL, Model: "test-model"}
+	opts := ServeOptions{
+		Options:         Options{Client: client, Model: "test-model", Store: st, RepoRoot: repoRoot},
+		InboxPath:       inboxPath,
+		OutboxPath:      outboxPath,
+		IdleTimeout:     150 * time.Millisecond,
+		PollInterval:    20 * time.Millisecond,
+		HeartbeatPeriod: time.Hour,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := Serve(ctx, opts); err != nil {
+		t.Fatalf("Serve: unexpected error: %v", err)
+	}
+
+	recs := readOutboxRecords(t, outboxPath)
+	var toolResult map[string]any
+	for _, rec := range recs {
+		if rec["type"] == "tool_result" {
+			toolResult = rec
+			break
+		}
+	}
+	if toolResult == nil {
+		t.Fatalf("outbox never got a tool_result record: %v", recs)
+	}
+	if toolResult["tool"] != "record_decision" {
+		t.Fatalf(`tool_result record "tool" = %v, want "record_decision": %v`, toolResult["tool"], toolResult)
+	}
+	output, ok := toolResult["output"].(map[string]any)
+	if !ok {
+		t.Fatalf(`tool_result record "output" = %v (%T), want a structured object: %v`, toolResult["output"], toolResult["output"], toolResult)
+	}
+	if output["applied"] != false {
+		t.Fatalf(`tool_result output "applied" = %v, want false (propose-only dial must not commit): %v`, output["applied"], output)
+	}
+	proposed, ok := output["proposed"].(map[string]any)
+	if !ok {
+		t.Fatalf(`tool_result output "proposed" = %v (%T), want the structured ProposedDirective payload: %v`, output["proposed"], output["proposed"], output)
+	}
+	if proposed["op"] != "suppress" || proposed["pattern"] != "github/login/ghost" {
+		t.Fatalf(`tool_result output "proposed" = %v, want op=suppress pattern=github/login/ghost`, proposed)
+	}
+
+	// summary stays populated too (backward-compat) -- this fix only ADDS
+	// tool/output, it never removes the pre-existing summary field.
+	if s, _ := toolResult["summary"].(string); s == "" {
+		t.Fatalf("tool_result record lost its summary field: %v", toolResult)
+	}
+}

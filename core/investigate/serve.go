@@ -282,7 +282,11 @@ func handleQuestion(ctx context.Context, opts ServeOptions, ob *outboxWriter, re
 			_ = emit(ob, opts.Mailbox, map[string]any{"type": "tool_call", "q": rec.ID, "step": step, "tool": name, "input": input}, false)
 		},
 		onToolResult: func(step int, name string, result any, err error) {
-			_ = emit(ob, opts.Mailbox, map[string]any{"type": "tool_result", "q": rec.ID, "step": step, "summary": summarizeToolResult(name, result, err)}, false)
+			trRec := map[string]any{"type": "tool_result", "q": rec.ID, "step": step, "tool": name, "summary": summarizeToolResult(name, result, err)}
+			if out := toolResultOutput(result, err); out != nil {
+				trRec["output"] = out
+			}
+			_ = emit(ob, opts.Mailbox, trRec, false)
 		},
 	}
 
@@ -337,6 +341,31 @@ func startBusyHeartbeats(ctx context.Context, opts ServeOptions, ob *outboxWrite
 		}
 	}()
 	return func() { once.Do(func() { close(done) }) }
+}
+
+// toolResultOutput carries the tool's raw structured *Output payload onto
+// the outbox tool_result record (mallcoppro-00a, Gap A producer side).
+// summarizeToolResult above renders a short human string for display, but
+// the write-tools' propose-only payloads (recorddecisiontool.go
+// RecordDecisionOutput{Proposed:...}, configtool.go/recordownedtool.go
+// {RequiresConfirm:true}, selfexttool.go {Proposed:true}) live in the
+// structured result itself, not in that string -- so a generic "<tool>
+// returned N bytes" fallback silently drops them and the browser's
+// Apply/Discard render (mallcoppro-573) has nothing to key off of. This
+// marshals `result` to JSON and hands back a json.RawMessage so it embeds
+// as a nested JSON object/array in the outbox record rather than as an
+// escaped string. Returns nil (no "output" field at all) when there is no
+// result to carry -- a tool error, or a marshal failure, both of which
+// already have their failure text in "summary".
+func toolResultOutput(result any, err error) any {
+	if err != nil || result == nil {
+		return nil
+	}
+	b, marshalErr := json.Marshal(result)
+	if marshalErr != nil {
+		return nil
+	}
+	return json.RawMessage(b)
 }
 
 // summarizeToolResult renders the short human trace string the protocol's
