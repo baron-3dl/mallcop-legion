@@ -47,10 +47,31 @@ import (
 // whose free-text --description is recorded for the operator's own audit but is
 // NEVER forwarded raw into a proposal (see collect.DetectorGaps).
 //
+// TWO more verbs, watch and severity, are the Gap C attention-consumer issuance
+// seam (mallcoppro-4da, dual-audience R4: everything the chat surface can do
+// must be reachable from linux-mode too). Both are ANNOTATION-ONLY directives —
+// R9 holds for the CLI issuance side exactly as it holds for the pipeline
+// consumers in core/pipeline/consumer_attention.go: neither verb can ever
+// suppress a finding or touch a committee verdict.
+//
+//	watch    — persists a 'focus' directive. core/pipeline's attentionWeightConsumer
+//	           accumulates Meta.weight onto the finding's FindingVerdict.Weight,
+//	           which raises its rank in finding output and its share of
+//	           core/inquest's metered-call investigation budget. --weight is
+//	           optional; an absent/non-positive value is left out of Meta so the
+//	           consumer's own defaultFocusWeight (1.0) applies — one source of
+//	           truth for the default, not two.
+//	severity — persists a 'severity' directive carrying Meta.severity=<level>.
+//	           core/pipeline's severityOverrideConsumer sets
+//	           FindingVerdict.SeverityOverride, a display/ranking LABEL override
+//	           on finding.Severity — it never changes the underlying verdict.
+//
 // Usage:
 //
 //	mallcop feedback <finding_id> approve|dismiss --store <dir> [--reason "..."] [--by <operator>]
 //	mallcop feedback <finding_id> mute --ttl 30d --store <dir> [--reason "..."] [--by <operator>]
+//	mallcop feedback <finding_id> watch --store <dir> [--weight <n>] [--reason "..."] [--by <operator>]
+//	mallcop feedback <finding_id> severity <level> --store <dir> [--reason "..."] [--by <operator>]
 //	mallcop feedback report-miss --store <dir> --source <src> --event-type <type> [--actor <a>] [--window <w>] [--description "..."] [--by <operator>]
 func runFeedback(args []string) error {
 	// report-miss takes NO positional finding_id (there is no finding). Route it
@@ -64,24 +85,43 @@ func runFeedback(args []string) error {
 	// flag package stops at the first non-flag token, so we peel the positionals
 	// off the front ourselves and parse the remainder as flags.
 	if len(args) < 2 {
-		return fmt.Errorf("feedback: usage: mallcop feedback <finding_id> approve|dismiss --store <dir> [--reason \"...\"] [--by <operator>]\n       mallcop feedback <finding_id> mute --ttl 30d --store <dir> [--reason \"...\"] [--by <operator>]\n       mallcop feedback report-miss --store <dir> --source <src> --event-type <type> [--actor <a>] [--window <w>] [--description \"...\"]")
+		return fmt.Errorf("feedback: usage: mallcop feedback <finding_id> approve|dismiss --store <dir> [--reason \"...\"] [--by <operator>]\n       mallcop feedback <finding_id> mute --ttl 30d --store <dir> [--reason \"...\"] [--by <operator>]\n       mallcop feedback <finding_id> watch --store <dir> [--weight <n>] [--reason \"...\"] [--by <operator>]\n       mallcop feedback <finding_id> severity <level> --store <dir> [--reason \"...\"] [--by <operator>]\n       mallcop feedback report-miss --store <dir> --source <src> --event-type <type> [--actor <a>] [--window <w>] [--description \"...\"]")
 	}
 	findingID := args[0]
 	verb := args[1]
+
+	// severity takes a THIRD positional arg (the level) before any flags:
+	// `mallcop feedback <id> severity <level> --store <dir> ...`. Peel it off the
+	// same way the finding_id/verb positionals are peeled off above, before the
+	// remainder is handed to the flag.FlagSet.
+	var severityLevel string
+	flagArgs := args[2:]
+	if verb == "severity" {
+		// A missing level looks like `args[2]` either being absent entirely, or
+		// being the next flag (e.g. `severity --store <dir>`) — in both cases
+		// there is no bare level token, so fail with the usage error rather
+		// than silently swallowing a flag as the level.
+		if len(args) < 3 || (len(args[2]) > 0 && args[2][0] == '-') {
+			return fmt.Errorf("feedback: usage: mallcop feedback <finding_id> severity <level> --store <dir> [--reason \"...\"] [--by <operator>]")
+		}
+		severityLevel = args[2]
+		flagArgs = args[3:]
+	}
 
 	fs := flag.NewFlagSet("feedback", flag.ContinueOnError)
 	storePath := fs.String("store", "", "Path to the git-repo store written by 'mallcop scan' (required)")
 	reason := fs.String("reason", "", "Operator rationale for this decision (free text, recorded for audit)")
 	by := fs.String("by", "", "Operator identity (defaults to $USER)")
 	ttl := fs.String("ttl", "", "Mute duration (e.g. \"30d\", \"12h\") — required for the mute verb; ignored otherwise")
+	weight := fs.Float64("weight", 0, "Attention weight for watch (optional; defaults to the pipeline consumer's own default when omitted or non-positive)")
 
-	if err := fs.Parse(args[2:]); err != nil {
+	if err := fs.Parse(flagArgs); err != nil {
 		return err
 	}
 	switch verb {
-	case "approve", "dismiss", "mute":
+	case "approve", "dismiss", "mute", "watch", "severity":
 	default:
-		return fmt.Errorf("feedback: unknown action %q (want approve|dismiss|mute)", verb)
+		return fmt.Errorf("feedback: unknown action %q (want approve|dismiss|mute|watch|severity)", verb)
 	}
 
 	if *storePath == "" {
@@ -101,6 +141,10 @@ func runFeedback(args []string) error {
 		if muteTTL <= 0 {
 			return fmt.Errorf("feedback: --ttl %q must be a positive duration", *ttl)
 		}
+	}
+
+	if verb == "severity" && severityLevel == "" {
+		return fmt.Errorf("feedback: severity requires a level (e.g. mallcop feedback <id> severity high)")
 	}
 
 	operator := *by
@@ -126,25 +170,49 @@ func runFeedback(args []string) error {
 	pattern := f.Source + "/" + f.Type + "/" + f.Actor
 
 	// Record the verb + rationale distinctly in Meta for the audit trail, while
-	// the always-works mechanism is the persisted directive (suppress, or a
-	// time-boxed mute below). recordedAt anchors the mute TTL to issuance time
-	// (not the eventual replay clock), so --ttl is relative to "now" at the
-	// moment the operator ran the command.
+	// the always-works mechanism is the persisted directive (suppress, a
+	// time-boxed mute, or an attention/severity annotation below). recordedAt
+	// anchors the mute TTL to issuance time (not the eventual replay clock), so
+	// --ttl is relative to "now" at the moment the operator ran the command.
+	//
+	// metaFields is map[string]any (not map[string]string, as it was before
+	// watch/severity existed) because Meta.weight must decode as a float64 —
+	// core/store.DirectiveMeta.ParseMeta (core/store/records.go) unmarshals
+	// json "weight" straight into a float64 field, so a stringified weight
+	// would silently fail to decode as anything but its zero value.
 	recordedAt := time.Now().UTC()
-	metaFields := map[string]string{
+	metaFields := map[string]any{
 		"verb":       verb,
 		"finding_id": f.ID,
 		"recorded":   recordedAt.Format(time.RFC3339),
 	}
 	op := "suppress"
 	var expiresAt time.Time
-	if verb == "mute" {
+	switch verb {
+	case "mute":
 		op = "mute"
 		expiresAt = recordedAt.Add(muteTTL)
 		// "expires_at" is the exact key core/store.DirectiveMeta.ParseMeta
 		// (core/store/records.go) decodes and core/pipeline's mute consumer
 		// (core/pipeline/consumer_mute.go) reads.
 		metaFields["expires_at"] = expiresAt.Format(time.RFC3339)
+	case "watch":
+		// "focus" is the Op core/pipeline/consumer_attention.go registers its
+		// attentionWeightConsumer on (alongside the "watch-closer" alias). Only
+		// include Meta.weight when the operator gave an explicit positive
+		// value — an absent key (not a zero-value key) is what lets the
+		// consumer's defaultFocusWeight fall through, so the default lives in
+		// exactly one place.
+		op = "focus"
+		if *weight > 0 {
+			metaFields["weight"] = *weight
+		}
+	case "severity":
+		// "severity" is the Op core/pipeline/consumer_attention.go registers
+		// its severityOverrideConsumer on; Meta.severity is the exact key
+		// DirectiveMeta.ParseMeta decodes and the consumer reads.
+		op = "severity"
+		metaFields["severity"] = severityLevel
 	}
 	meta, err := json.Marshal(metaFields)
 	if err != nil {
@@ -158,6 +226,10 @@ func runFeedback(args []string) error {
 			reasonText = "operator approved: activity known-good"
 		case "mute":
 			reasonText = fmt.Sprintf("operator muted for %s: finding paused, not dismissed", *ttl)
+		case "watch":
+			reasonText = "operator flagged for closer attention"
+		case "severity":
+			reasonText = fmt.Sprintf("operator overrode severity to %s", severityLevel)
 		default:
 			reasonText = "operator dismissed: finding not actionable"
 		}
@@ -179,10 +251,19 @@ func runFeedback(args []string) error {
 	fmt.Printf("  %s pattern: %s\n", op, pattern)
 	fmt.Printf("  Operator:         %s\n", operator)
 	fmt.Printf("  Reason:           %s\n", reasonText)
-	if verb == "mute" {
+	switch verb {
+	case "mute":
 		fmt.Printf("  Expires:          %s\n", expiresAt.Format(time.RFC3339))
 		fmt.Printf("Scans before this time will suppress matching findings; scans after it will resume flagging them.\n")
-	} else {
+	case "watch":
+		if *weight > 0 {
+			fmt.Printf("  Weight:           %g\n", *weight)
+		}
+		fmt.Printf("The next scan will raise this finding's rank and investigation-attention share; it will never be suppressed.\n")
+	case "severity":
+		fmt.Printf("  Severity:         %s\n", severityLevel)
+		fmt.Printf("The next scan will display this finding at the overridden severity; the underlying committee verdict is unchanged.\n")
+	default:
 		fmt.Printf("The next scan will suppress findings matching this pattern.\n")
 	}
 	// A dismiss is exactly the moment 'mallcop scenario capture --must-not-fire'
