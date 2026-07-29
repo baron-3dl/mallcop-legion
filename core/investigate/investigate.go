@@ -912,6 +912,37 @@ func ToolDefs() []agent.Tool {
 				"required": []string{"lane", "detector_id", "event_type"},
 			},
 		},
+		// record_owned (mallcoppro-e07): name one of the operator's OWN
+		// accounts/roles/relays into mallcop.yaml's org.owned block through the
+		// SAME shared primitive as `mallcop config set org.owned` (R4 dual-
+		// audience, R5 the loop never writes the file directly). Appended last to
+		// keep this registration localized.
+		{
+			Name: "record_owned",
+			Description: "Record one of the operator's OWN accounts, roles, or relays into mallcop.yaml's " +
+				"org.owned block — through the SAME code path as the `mallcop config set org.owned` CLI " +
+				"(never a parallel one). Use this when your investigation establishes that a recurring, " +
+				"baseline-known actor is actually the operator's own infrastructure (e.g. their inference " +
+				"relay or a service role), so the NEXT scan names it by relationship instead of narrating " +
+				"it as an unknown external actor. Supply `match` (an account id, ARN, or role-name segment " +
+				"to substring-match), plus a short `name` and a plain-language `relationship`. This is a " +
+				"TENANT-LOCAL config write inside the operator's own blast radius (NOT a contribution to " +
+				"the shared corpus), gated on the autonomy dial: at the propose-only dial it writes " +
+				"nothing and returns a proposal the operator can Apply or Discard — pass confirm=true ONLY " +
+				"after the operator explicitly approves; at an auto dial (semi/fully) it commits " +
+				"immediately. Naming only — this NEVER overrides a finding's verdict. Every applied change " +
+				"lands as a config write the operator can revert.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"match":        map[string]any{"type": "string", "description": "Account id, ARN, or role-name segment to substring-match against a finding's identity fields. Required; must be a full, specific segment (a too-short match is rejected)."},
+					"name":         map[string]any{"type": "string", "description": "Short label for the owned entity, e.g. \"forge-proxy\"."},
+					"relationship": map[string]any{"type": "string", "description": "Plain-language relationship phrase narrate will use, e.g. \"operator's own hourly inference relay\"."},
+					"confirm":      map[string]any{"type": "boolean", "description": "The operator's EXPLICIT approval, required only at the propose-only autonomy dial. Set true ONLY after the operator approved recording this entity. Ignored at an auto dial."},
+				},
+				"required": []string{"match"},
+			},
+		},
 	}
 }
 
@@ -1024,6 +1055,15 @@ func ExecuteTool(opts Options, name string, input any) (any, error) {
 		// store.SelfextDispatchRecord through opts.Store.Append -- the SAME
 		// seam set_config uses, never an HTTP call.
 		return dispatchSelfextTool(opts, in)
+	case "record_owned":
+		var in RecordOwnedInput
+		if err := json.Unmarshal(raw, &in); err != nil {
+			return nil, fmt.Errorf("decode record_owned input: %w", err)
+		}
+		// Implementation in recordownedtool.go: routes through the SAME shared
+		// config primitive (config.AddOwned + WriteConfigAtomic) the CLI uses, and
+		// enforces the autonomy dial gate (propose-only proposes; auto commits).
+		return recordOwnedTool(opts, in)
 
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)

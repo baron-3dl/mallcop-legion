@@ -229,6 +229,68 @@ func TestRunConfigSet_DispatchesContributeBack(t *testing.T) {
 	}
 }
 
+// ---- `mallcop config set org.owned` ----
+
+func TestConfigSetOrgOwned_AddsEntryAndPersistsToFile(t *testing.T) {
+	dir := t.TempDir()
+	path := seedConfig(t, dir)
+
+	err := runConfigSetOrgOwned([]string{
+		"--config", path,
+		"--match", "225635015146",
+		"--name", "forge-proxy",
+		"--relationship", "operator's own hourly inference relay",
+	})
+	if err != nil {
+		t.Fatalf("config set org.owned: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(cfg.Org.Owned) != 1 {
+		t.Fatalf("Org.Owned len = %d on disk, want 1: %+v", len(cfg.Org.Owned), cfg.Org.Owned)
+	}
+	want := config.OwnedEntity{Match: "225635015146", Name: "forge-proxy", Relationship: "operator's own hourly inference relay"}
+	if cfg.Org.Owned[0] != want {
+		t.Fatalf("Org.Owned[0] = %+v, want %+v", cfg.Org.Owned[0], want)
+	}
+}
+
+func TestConfigSetOrgOwned_TooShortMatchFailsAndFileUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	path := seedConfig(t, dir)
+
+	err := runConfigSetOrgOwned([]string{"--config", path, "--match", "aws", "--name", "too-short"})
+	if err == nil {
+		t.Fatal("expected error for a too-short --match, got nil")
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(cfg.Org.Owned) != 0 {
+		t.Fatalf("Org.Owned = %+v on disk, want empty after a rejected match", cfg.Org.Owned)
+	}
+}
+
+func TestRunConfigSet_DispatchesOrgOwned(t *testing.T) {
+	dir := t.TempDir()
+	path := seedConfig(t, dir)
+
+	if err := runConfigSet([]string{"org.owned", "--config", path, "--match", "225635015146", "--name", "forge-proxy"}); err != nil {
+		t.Fatalf("config set org.owned via dispatch: %v", err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(cfg.Org.Owned) != 1 || cfg.Org.Owned[0].Match != "225635015146" {
+		t.Fatalf("org.owned not persisted via runConfigSet dispatch: %+v", cfg.Org.Owned)
+	}
+}
+
 // ---- dispatch (`mallcop config` vs `mallcop config set ...`) ----
 
 func TestRunConfigSet_UnknownTargetErrors(t *testing.T) {

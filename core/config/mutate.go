@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // This file is the SHARED MUTATION PRIMITIVE (rd mallcoppro-2df): the one place
@@ -43,6 +44,37 @@ func AddConnector(cfg Config, conn Connector) (Config, error) {
 
 	next := cfg
 	next.Connectors = append(append([]Connector{}, cfg.Connectors...), conn)
+
+	if err := Validate(next); err != nil {
+		return cfg, err
+	}
+	return next, nil
+}
+
+// AddOwned returns a copy of cfg with owned appended to Org.Owned, after
+// validating owned in isolation (Match is non-empty and at least minOrgMatchLen
+// characters — the SAME floor validate() enforces on load, so a chat- or
+// CLI-proposed short/blank match can never silently substring-match every
+// identity field and mark unrelated findings owned) and re-validating the
+// resulting whole config. cfg itself is never mutated in place.
+//
+// This is the WRITE last-mile for org-ownership (rd mallcoppro-e07): mallcoppro-995
+// shipped the READ side (org.owned static config -> inquest evidence.org_context);
+// this is the sanctioned operator-authorized seam that appends an entry, routed
+// through WriteConfigAtomic by the caller (cli/configset.go's `config set
+// org.owned` and core/investigate's record_owned tool). The loop itself never
+// hand-writes mallcop.yaml (R5). org-context stays NAMING-ONLY — an appended
+// entry augments narrative + attention, never overrides a committee verdict.
+func AddOwned(cfg Config, owned OwnedEntity) (Config, error) {
+	if strings.TrimSpace(owned.Match) == "" {
+		return cfg, fmt.Errorf("config: org.owned.match must be non-empty — an empty match string substring-matches EVERY identity field, silently marking every finding as owned")
+	}
+	if len(owned.Match) < minOrgMatchLen {
+		return cfg, fmt.Errorf("config: org.owned.match %q is only %d characters — must be at least %d (a full account id or ARN/role-name segment) to avoid false-positive substring matches across unrelated findings", owned.Match, len(owned.Match), minOrgMatchLen)
+	}
+
+	next := cfg
+	next.Org.Owned = append(append([]OwnedEntity{}, cfg.Org.Owned...), owned)
 
 	if err := Validate(next); err != nil {
 		return cfg, err
