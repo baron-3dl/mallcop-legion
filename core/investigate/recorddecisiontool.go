@@ -156,6 +156,13 @@ func recordDecisionTool(opts Options, in RecordDecisionInput) (any, error) {
 	}
 
 	pattern := in.Pattern
+	// resolvedFindingID is the stable finding id the directive is anchored to,
+	// captured when the target was resolved via finding_id. It is carried in
+	// Meta below (see the metaJSON merge) so core/collect.DetectorGaps'
+	// override_fp join can key this suppression back to its resolution EXACTLY
+	// as a `mallcop feedback dismiss` directive does — the dual-audience (R4)
+	// requirement that a chat-recorded FP trains the detector, not just masks it.
+	resolvedFindingID := ""
 	if in.FindingID != "" {
 		if opts.Store == nil {
 			return nil, fmt.Errorf("record_decision: no store available to resolve finding_id")
@@ -172,6 +179,7 @@ func recordDecisionTool(opts Options, in RecordDecisionInput) (any, error) {
 		// "<source>/<type>/<actor>" key, so the directive steers the CLASS of
 		// finding, not one transient per-run id.
 		pattern = f.Source + "/" + f.Type + "/" + f.Actor
+		resolvedFindingID = f.ID
 	}
 
 	// Resolve the effective mallcop.yaml the SAME way set_config.go does:
@@ -227,6 +235,32 @@ func recordDecisionTool(opts Options, in RecordDecisionInput) (any, error) {
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {
 		return nil, fmt.Errorf("record_decision: encode meta: %w", err)
+	}
+
+	// Dual-audience parity with cli/feedback.go (R4): when the directive was
+	// anchored to a concrete finding, carry that finding's stable id and the
+	// human verb in Meta — the SAME two keys `mallcop feedback approve|dismiss`
+	// writes. core/collect.DetectorGaps' override_fp join reads Meta.finding_id
+	// (and Meta.verb) to key a suppression back to its resolution; without them
+	// a chat-recorded FP would only MASK the finding on the next scan and never
+	// surface as the override_fp training signal the loop learns from. Merged
+	// onto the struct-encoded Meta (not a replacement) so every existing
+	// DirectiveMeta field — severity/weight/target_kind/expires_at — round-trips
+	// unchanged for the consumers that read them.
+	if resolvedFindingID != "" {
+		var m map[string]any
+		if err := json.Unmarshal(metaJSON, &m); err != nil {
+			return nil, fmt.Errorf("record_decision: re-encode meta: %w", err)
+		}
+		if m == nil {
+			m = map[string]any{}
+		}
+		m["finding_id"] = resolvedFindingID
+		m["verb"] = op
+		metaJSON, err = json.Marshal(m)
+		if err != nil {
+			return nil, fmt.Errorf("record_decision: encode meta: %w", err)
+		}
 	}
 
 	actor := "mallcop-investigate"
