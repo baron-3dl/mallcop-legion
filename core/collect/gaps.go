@@ -289,7 +289,18 @@ func DetectorGaps(st *store.Store, rows []eval.DetectFidelityRow) ([]GapCandidat
 		})
 	}
 
+	// Gap E2: an operator prioritize/criticality directive re-sorts (never
+	// filters) the ranked output — a higher accumulated weight surfaces
+	// first; gaps tied on weight (the common case: zero directives, or none
+	// matching) keep the original deterministic gapSortKey order. dirs is
+	// already loaded above for (b)/(d); reused here so this costs no extra
+	// store read.
+	weights := weightGaps(defaultPriorityDispatcher, out, dirs)
 	sort.SliceStable(out, func(i, j int) bool {
+		wi, wj := weights[gapSortKey(out[i])], weights[gapSortKey(out[j])]
+		if wi != wj {
+			return wi > wj
+		}
 		return gapSortKey(out[i]) < gapSortKey(out[j])
 	})
 	return out, nil

@@ -268,6 +268,21 @@ func RunAll(ctx context.Context, in Input) (out Outcome) {
 	findings := append([]EscalatedFinding(nil), in.Findings...)
 	sort.Slice(findings, func(i, j int) bool { return findings[i].Finding.ID < findings[j].Finding.ID })
 
+	// Gap E2: an operator prioritize/criticality directive re-sorts (never
+	// filters) this finding-ID order — a source the operator called out
+	// spends the metered narrate budget first when MaxPerScan can't cover
+	// every escalated finding this scan. A directive load failure degrades
+	// to the pre-existing finding-ID order (sortByAttention treats nil
+	// directives as "everyone weighs 0") rather than failing the scan — this
+	// package never returns an error the caller must handle (see RunAll's
+	// doc above).
+	if dirs, derr := in.Store.LoadDirectives(); derr == nil {
+		sortByAttention(findings, dirs)
+	} else {
+		out.Errors = append(out.Errors, fmt.Sprintf(
+			"inquest: load directives for attention weighting: %v — falling back to finding-ID order", derr))
+	}
+
 	callsUsed := 0
 	for _, ef := range findings {
 		investigated, degraded, skipped, errMsg := processOne(ctx, in, ef, maxPerScan, &callsUsed)
