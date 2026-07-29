@@ -68,22 +68,24 @@ func attentionWeight(f EscalatedFinding, directives []store.Directive) float64 {
 	return w
 }
 
-// sortByAttention orders findings by accumulated directive weight,
-// descending, with the pre-existing deterministic finding-ID order as the
-// tiebreak (both the zero-directives case and any weight tie). directives
-// may be nil (no store directives, or the caller couldn't load them) — every
-// finding then weighs 0 and the order is byte-identical to the pre-E2
-// finding-ID sort.
+// sortByAttention orders findings by accumulated E2 directive weight,
+// descending, and preserves the INCOMING order on any tie (both the
+// zero-directives case and any weight tie) rather than re-deciding ties by
+// finding-ID itself. This composes with RunAll's Gap C attention-weight sort
+// (mallcoppro-4da) that runs immediately before this one: that sort already
+// establishes a deterministic order (its own weight, descending, ID as its
+// tiebreak), so a stable no-reorder-on-tie here means "no matching E2
+// directive" is a true no-op on top of Gap C's ordering — not a silent
+// re-sort back to plain finding-ID order that would discard a focus/
+// watch-closer weight whenever no prioritize/criticality directive also
+// exists. directives may be nil (no store directives, or the caller couldn't
+// load them) — every finding then weighs 0 and this call changes nothing.
 func sortByAttention(findings []EscalatedFinding, directives []store.Directive) {
 	weights := make(map[string]float64, len(findings))
 	for _, f := range findings {
 		weights[f.Finding.ID] = attentionWeight(f, directives)
 	}
 	sort.SliceStable(findings, func(i, j int) bool {
-		wi, wj := weights[findings[i].Finding.ID], weights[findings[j].Finding.ID]
-		if wi != wj {
-			return wi > wj
-		}
-		return findings[i].Finding.ID < findings[j].Finding.ID
+		return weights[findings[i].Finding.ID] > weights[findings[j].Finding.ID]
 	})
 }

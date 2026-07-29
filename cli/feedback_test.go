@@ -178,6 +178,158 @@ func TestFeedbackMute_RequiresTTL(t *testing.T) {
 	}
 }
 
+// TestFeedbackWatch_WritesFocusDirectiveWithExplicitWeight proves `mallcop
+// feedback <id> watch --weight <n>` persists a 'focus' Op (the Op
+// core/pipeline/consumer_attention.go's attentionWeightConsumer is registered
+// on) whose Meta.weight round-trips through store.Directive.ParseMeta as the
+// exact float64 the operator gave — the CLI issuance side of Gap C
+// (mallcoppro-4da).
+func TestFeedbackWatch_WritesFocusDirectiveWithExplicitWeight(t *testing.T) {
+	dir := t.TempDir()
+	f := finding.Finding{
+		ID:     "finding-watch-1",
+		Source: "detector:secrets-exposure",
+		Type:   "secrets-exposure",
+		Actor:  "alice",
+	}
+	seedFinding(t, dir, f)
+
+	if err := runFeedback([]string{f.ID, "watch", "--weight", "2.5", "--store", dir, "--by", "baron"}); err != nil {
+		t.Fatalf("runFeedback watch: %v", err)
+	}
+
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	directives, err := st.LoadDirectives()
+	if err != nil {
+		t.Fatalf("load directives: %v", err)
+	}
+	if len(directives) != 1 {
+		t.Fatalf("expected 1 directive, got %d", len(directives))
+	}
+	d := directives[0]
+	if d.Op != "focus" {
+		t.Fatalf("Op = %q, want focus", d.Op)
+	}
+	wantPattern := "detector:secrets-exposure/secrets-exposure/alice"
+	if d.Pattern != wantPattern {
+		t.Fatalf("Pattern = %q, want %q", d.Pattern, wantPattern)
+	}
+	if d.Actor != "baron" {
+		t.Fatalf("Actor = %q, want baron", d.Actor)
+	}
+	meta, err := d.ParseMeta()
+	if err != nil {
+		t.Fatalf("ParseMeta: %v", err)
+	}
+	if meta.Weight != 2.5 {
+		t.Fatalf("meta.Weight = %v, want 2.5", meta.Weight)
+	}
+	if meta.Severity != "" {
+		t.Fatalf("watch must never set Severity, got %q", meta.Severity)
+	}
+}
+
+// TestFeedbackWatch_OmitsWeightMetaWhenFlagAbsent proves a bare `watch` (no
+// --weight) writes a focus directive with NO Meta.weight key at all, so
+// core/pipeline's attentionWeightConsumer falls through to its own
+// defaultFocusWeight rather than the CLI silently encoding a second copy of
+// that default.
+func TestFeedbackWatch_OmitsWeightMetaWhenFlagAbsent(t *testing.T) {
+	dir := t.TempDir()
+	f := finding.Finding{ID: "finding-watch-2", Source: "s", Type: "t", Actor: "a"}
+	seedFinding(t, dir, f)
+
+	if err := runFeedback([]string{f.ID, "watch", "--store", dir}); err != nil {
+		t.Fatalf("runFeedback watch: %v", err)
+	}
+
+	st, _ := store.Open(dir)
+	directives, _ := st.LoadDirectives()
+	if len(directives) != 1 {
+		t.Fatalf("expected 1 directive, got %d", len(directives))
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(directives[0].Meta, &raw); err != nil {
+		t.Fatalf("decode raw meta: %v", err)
+	}
+	if _, ok := raw["weight"]; ok {
+		t.Fatalf("expected no weight key in Meta when --weight omitted, got %v", raw)
+	}
+}
+
+// TestFeedbackSeverity_WritesSeverityDirective proves `mallcop feedback <id>
+// severity <level>` persists a 'severity' Op (the Op
+// core/pipeline/consumer_attention.go's severityOverrideConsumer is registered
+// on) whose Meta.severity round-trips through ParseMeta as the given level —
+// the CLI issuance side of Gap C (mallcoppro-4da).
+func TestFeedbackSeverity_WritesSeverityDirective(t *testing.T) {
+	dir := t.TempDir()
+	f := finding.Finding{
+		ID:     "finding-sev-1",
+		Source: "detector:new-actor",
+		Type:   "new-actor",
+		Actor:  "bob",
+	}
+	seedFinding(t, dir, f)
+
+	if err := runFeedback([]string{f.ID, "severity", "critical", "--store", dir, "--by", "baron"}); err != nil {
+		t.Fatalf("runFeedback severity: %v", err)
+	}
+
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	directives, err := st.LoadDirectives()
+	if err != nil {
+		t.Fatalf("load directives: %v", err)
+	}
+	if len(directives) != 1 {
+		t.Fatalf("expected 1 directive, got %d", len(directives))
+	}
+	d := directives[0]
+	if d.Op != "severity" {
+		t.Fatalf("Op = %q, want severity", d.Op)
+	}
+	wantPattern := "detector:new-actor/new-actor/bob"
+	if d.Pattern != wantPattern {
+		t.Fatalf("Pattern = %q, want %q", d.Pattern, wantPattern)
+	}
+	meta, err := d.ParseMeta()
+	if err != nil {
+		t.Fatalf("ParseMeta: %v", err)
+	}
+	if meta.Severity != "critical" {
+		t.Fatalf("meta.Severity = %q, want critical", meta.Severity)
+	}
+	if meta.Weight != 0 {
+		t.Fatalf("severity must never set Weight, got %v", meta.Weight)
+	}
+}
+
+// TestFeedbackSeverity_RequiresLevel proves severity with no level argument
+// fails cleanly and writes no directive, rather than persisting an empty
+// override.
+func TestFeedbackSeverity_RequiresLevel(t *testing.T) {
+	dir := t.TempDir()
+	f := finding.Finding{ID: "finding-sev-2", Source: "s", Type: "t", Actor: "a"}
+	seedFinding(t, dir, f)
+
+	err := runFeedback([]string{f.ID, "severity", "--store", dir})
+	if err == nil {
+		t.Fatal("expected error for severity with no level, got nil")
+	}
+
+	st, _ := store.Open(dir)
+	directives, _ := st.LoadDirectives()
+	if len(directives) != 0 {
+		t.Fatalf("expected no directive written when severity level is missing, got %d", len(directives))
+	}
+}
+
 // TestFeedback_BadFindingIDErrorsCleanly proves an unknown finding-id fails with
 // a clear error and writes NO directive.
 func TestFeedback_BadFindingIDErrorsCleanly(t *testing.T) {
