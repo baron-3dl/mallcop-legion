@@ -881,6 +881,37 @@ func ToolDefs() []agent.Tool {
 				"required": []string{"op", "reason"},
 			},
 		},
+		// dispatch_selfext (mallcoppro-0d95): dispatch a self-extension
+		// authoring run (`mallcop selfext --run`) through the SAME store-append
+		// seam set_config uses to write config -- never a parallel one, never an
+		// HTTP call (core/investigate is net/http-banned). Appended last to keep
+		// this registration localized.
+		{
+			Name: "dispatch_selfext",
+			Description: "Dispatch a self-extension authoring run for a detection gap you found in this " +
+				"conversation -- the CODE lane that writes a net-new detector (`mallcop selfext --run`). " +
+				"This does NOT run authoring inline; it commits a durable dispatch record the operator's " +
+				"runner picks up. Reads the operator's REAL autonomy dial off mallcop.yaml -- you cannot " +
+				"pass an autonomy value yourself. At \"non\" (propose-only, the default) NOTHING is " +
+				"dispatched: you get back a proposal to surface as an Apply/Discard row. At \"semi\" or " +
+				"\"fully\" the dispatch commits immediately, within the dial the operator already set -- " +
+				"that is what the dial means, so no separate confirm is needed here (unlike raising the " +
+				"dial itself, which set_config always gates).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"lane":          map[string]any{"type": "string", "description": "Authoring lane, e.g. \"heal\" or \"investigate\". Required."},
+					"detector_id":   map[string]any{"type": "string", "description": "Proposed authored detector id, e.g. \"authored-deploy-burst\". Required."},
+					"event_type":    map[string]any{"type": "string", "description": "Connector event type the detector keys on, e.g. \"github.deployment\". Required."},
+					"target_family": map[string]any{"type": "string", "description": "Optional finding-metadata family tag (default: detector_id)."},
+					"severity":      map[string]any{"type": "string", "description": "Structural severity of the gap exemplar (default \"medium\")."},
+					"actor":         map[string]any{"type": "string", "description": "Structural actor field of the gap exemplar."},
+					"source":        map[string]any{"type": "string", "description": "Structural source field of the gap exemplar."},
+					"reason":        map[string]any{"type": "string", "description": "Why this gap is worth authoring a detector for -- preserved on the committed record for audit."},
+				},
+				"required": []string{"lane", "detector_id", "event_type"},
+			},
+		},
 	}
 }
 
@@ -984,6 +1015,15 @@ func ExecuteTool(opts Options, name string, input any) (any, error) {
 		// through the SAME store.KindDirectives seam cli/feedback.go uses, and
 		// enforces the autonomy-dial gate (propose-only vs auto commit).
 		return recordDecisionTool(opts, in)
+	case "dispatch_selfext":
+		var in SelfextDispatchInput
+		if err := json.Unmarshal(raw, &in); err != nil {
+			return nil, fmt.Errorf("decode dispatch_selfext input: %w", err)
+		}
+		// Implementation in selfexttool.go: dial-gated commit of a
+		// store.SelfextDispatchRecord through opts.Store.Append -- the SAME
+		// seam set_config uses, never an HTTP call.
+		return dispatchSelfextTool(opts, in)
 
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)

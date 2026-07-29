@@ -1,6 +1,6 @@
-// Package store is the git-repo source of truth for mallcop's seven append-only
+// Package store is the git-repo source of truth for mallcop's eight append-only
 // streams: events, findings, resolutions, baseline, conversation, directives,
-// and scans.
+// scans, and selfext_dispatches.
 //
 // ONE-BRAIN keystone. Every other core subsystem (the agent loop, the scan
 // pipeline) CONSUMES this package; this package consumes nothing from them. The
@@ -45,8 +45,8 @@ import (
 	"time"
 )
 
-// Kind identifies one of the six append-only streams. The string value is also
-// the on-disk basename (Kind+".jsonl").
+// Kind identifies one of the eight append-only streams. The string value is
+// also the on-disk basename (Kind+".jsonl").
 type Kind string
 
 // maxStreamBytes is the sanity ceiling for a single stream blob and for one
@@ -81,26 +81,40 @@ const (
 	// additive — an older binary that has never heard of KindScans reads every
 	// other stream unaffected.
 	KindScans Kind = "scans"
+	// KindSelfextDispatches is the self-extension dispatch-request stream
+	// (mallcoppro-0d95): one record per `dispatch_selfext` chat-tool call that
+	// actually COMMITTED (an "auto" autonomy dial read; a "non"/propose-only
+	// read returns a proposal to the model and appends nothing — see
+	// core/investigate/selfexttool.go). It is the SAME durable-record pattern
+	// as KindScans (mallcoppro-e3c): purely additive, so an older binary that
+	// has never heard of it reads every other stream unaffected. This is the
+	// outcome-level parity point with mallcop-pro's UI dispatch endpoint — the
+	// privileged mallcop-pro side later consumes this stream rather than the
+	// chat loop making an HTTP call (core/investigate is net/http-banned; see
+	// imports_test.go).
+	KindSelfextDispatches Kind = "selfext_dispatches"
 )
 
 // kinds is the closed set of valid streams. Append/Load reject anything else so
 // a typo can never create a rogue, unreplayed file in the repo.
 var kinds = map[Kind]bool{
-	KindEvents:       true,
-	KindFindings:     true,
-	KindResolutions:  true,
-	KindBaseline:     true,
-	KindConversation: true,
-	KindDirectives:   true,
-	KindScans:        true,
+	KindEvents:            true,
+	KindFindings:          true,
+	KindResolutions:       true,
+	KindBaseline:          true,
+	KindConversation:      true,
+	KindDirectives:        true,
+	KindScans:             true,
+	KindSelfextDispatches: true,
 }
 
-// Kinds returns the seven stream kinds in deterministic order. Useful for
+// Kinds returns the eight stream kinds in deterministic order. Useful for
 // callers that want to enumerate or snapshot every stream.
 func Kinds() []Kind {
 	return []Kind{
 		KindEvents, KindFindings, KindResolutions,
 		KindBaseline, KindConversation, KindDirectives, KindScans,
+		KindSelfextDispatches,
 	}
 }
 

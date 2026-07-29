@@ -156,3 +156,60 @@ func (s *Store) LoadScans() ([]ScanRecord, error) {
 	}
 	return out, nil
 }
+
+// SelfextDispatchRecord is one entry on the selfext_dispatches stream
+// (mallcoppro-0d95, Design §Gap A): a durable request to run mallcop's
+// self-extension engine (`mallcop selfext --run`/`--propose`), appended by the
+// investigating model's `dispatch_selfext` chat tool when the operator's
+// autonomy dial reads "semi" or "fully" (an "auto" read — see
+// core/investigate/selfexttool.go). A "non"/propose-only read never appends a
+// record: the tool returns a `{proposed:...}` result to the model instead, so
+// this stream contains ONLY dispatches that were actually authorized to run.
+//
+// This is the durable record the privileged mallcop-pro side later consumes
+// to actually kick off the authoring run (e.g. a workflow_dispatch) — the
+// chat loop itself never makes that call (core/investigate is
+// net/http-banned; see imports_test.go). Fields mirror the CLI's own
+// `mallcop selfext --run` gap-description flags (cli/selfext.go's runArgs) so
+// a consumer can build the equivalent CLI invocation directly from a record.
+type SelfextDispatchRecord struct {
+	RequestedAt time.Time `json:"requested_at"`
+	// Lane is the authoring lane requested, e.g. "heal" or "investigate" —
+	// mirrors `mallcop selfext --run --lane`.
+	Lane string `json:"lane"`
+	// DetectorID, EventType, TargetFamily, Severity, Actor, Source describe
+	// the detection gap to author against — mirrors `mallcop selfext --run`'s
+	// --detector-id/--event-type/--target-family/--severity/--actor/--source.
+	DetectorID   string `json:"detector_id,omitempty"`
+	EventType    string `json:"event_type,omitempty"`
+	TargetFamily string `json:"target_family,omitempty"`
+	Severity     string `json:"severity,omitempty"`
+	Actor        string `json:"actor,omitempty"`
+	Source       string `json:"source,omitempty"`
+	// Reason is the model's rationale for the dispatch, preserved for audit
+	// (mirrors Directive.Reason's role on the directives stream).
+	Reason string `json:"reason,omitempty"`
+	// Autonomy is the dial reading that authorized this commit ("semi" or
+	// "fully" — never "non", since a "non" read never appends a record).
+	Autonomy string `json:"autonomy"`
+}
+
+// LoadSelfextDispatches replays the selfext_dispatches stream into typed
+// SelfextDispatchRecord records, oldest first. A store that predates
+// KindSelfextDispatches, or has never had an authorized dispatch, returns an
+// empty slice, not an error — mirrors LoadScans/LoadDirectives' contract.
+func (s *Store) LoadSelfextDispatches() ([]SelfextDispatchRecord, error) {
+	raws, err := s.Load(KindSelfextDispatches)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SelfextDispatchRecord, 0, len(raws))
+	for i, raw := range raws {
+		var r SelfextDispatchRecord
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return nil, fmt.Errorf("store: decode selfext dispatch record %d: %w", i, err)
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
