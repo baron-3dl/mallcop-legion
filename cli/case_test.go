@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/mallcop-app/mallcop/core/cases"
-	"github.com/mallcop-app/mallcop/core/store"
 )
 
 // buildRecurringCase runs 2 force-push scans for the same actor so the store
@@ -78,17 +77,22 @@ func TestRunCaseClose_DrivesCollapseToClosedState(t *testing.T) {
 	}
 
 	// Replaying the directive is what cli/scan.go's collapseCases call does
-	// on every scan (mallcoppro-a1c's design: replay every call, not just
-	// when new escalations land). Drive it directly with thisRun=0 (no new
-	// findings this call) to prove the directive-only replay path — the
-	// EXACT scenario a close-case issued between scans needs, since a case
-	// that never recurs again must still end up closed.
-	st, err := store.Open(storePath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	if err := collapseCases(st, 0); err != nil {
-		t.Fatalf("collapseCases replay: %v", err)
+	// on EVERY scan (mallcoppro-a1c's design: replay every call, not just
+	// when new escalations land) — proven here through the REAL production
+	// entrypoint (runScan → cli/scan.go's unconditional collapseCases call),
+	// not by driving collapseCases(st, 0) directly. The third scan runs over
+	// an EMPTY events file: zero events, zero findings, FindingsDetected==0
+	// — the exact "close issued, case never recurs again" scenario the
+	// close-case directive exists for. Before the mallcoppro-a1c fix, cli/
+	// scan.go gated the collapseCases call on `sum.FindingsDetected > 0`,
+	// so this exact scan would never have replayed the directive and the
+	// case would have stayed "recurring" forever. A zero-finding scan
+	// reports no findings, so runScan returns nil, NOT the findings
+	// sentinel.
+	zeroFindingsPath := filepath.Join(filepath.Dir(storePath), "events-empty.jsonl")
+	writeFile(t, zeroFindingsPath, "")
+	if err := runScan([]string{"--store", storePath, "--connector", "file", "--events", zeroFindingsPath}); err != nil {
+		t.Fatalf("third scan (zero-finding window): want nil error, got %v", err)
 	}
 
 	got := readCasesJSON(t, storePath)
@@ -125,12 +129,14 @@ func TestRunCaseAge_DrivesCollapseToAgedState(t *testing.T) {
 		t.Fatalf("runCase age: %v", err)
 	}
 
-	st, err := store.Open(storePath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	if err := collapseCases(st, 0); err != nil {
-		t.Fatalf("collapseCases replay: %v", err)
+	// Same production-entrypoint replay as
+	// TestRunCaseClose_DrivesCollapseToClosedState above: a third, real
+	// `mallcop scan` over an empty (zero-finding) events window, not a
+	// direct collapseCases(st, 0) call.
+	zeroFindingsPath := filepath.Join(filepath.Dir(storePath), "events-empty.jsonl")
+	writeFile(t, zeroFindingsPath, "")
+	if err := runScan([]string{"--store", storePath, "--connector", "file", "--events", zeroFindingsPath}); err != nil {
+		t.Fatalf("third scan (zero-finding window): want nil error, got %v", err)
 	}
 
 	got := readCasesJSON(t, storePath)
