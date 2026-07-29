@@ -106,6 +106,78 @@ func TestFeedbackApprove_RecordsVerbDistinctly(t *testing.T) {
 	}
 }
 
+// TestFeedbackMute_WritesTimeBoxedDirective proves `mallcop feedback <id>
+// mute --ttl 30d` persists a 'mute' Op (not 'suppress') whose
+// Meta.expires_at core/store.Directive.ParseMeta decodes to ~30 days from
+// issuance — the field core/pipeline's mute consumer reads (Gap C,
+// mallcoppro-ae2).
+func TestFeedbackMute_WritesTimeBoxedDirective(t *testing.T) {
+	dir := t.TempDir()
+	f := finding.Finding{
+		ID:     "finding-mute-1",
+		Source: "detector:secrets-exposure",
+		Type:   "secrets-exposure",
+		Actor:  "alice",
+	}
+	seedFinding(t, dir, f)
+
+	before := time.Now().UTC()
+	if err := runFeedback([]string{f.ID, "mute", "--ttl", "30d", "--store", dir, "--by", "baron"}); err != nil {
+		t.Fatalf("runFeedback mute: %v", err)
+	}
+	after := time.Now().UTC()
+
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	directives, err := st.LoadDirectives()
+	if err != nil {
+		t.Fatalf("load directives: %v", err)
+	}
+	if len(directives) != 1 {
+		t.Fatalf("expected 1 directive, got %d", len(directives))
+	}
+	d := directives[0]
+	if d.Op != "mute" {
+		t.Fatalf("Op = %q, want mute", d.Op)
+	}
+	meta, err := d.ParseMeta()
+	if err != nil {
+		t.Fatalf("ParseMeta: %v", err)
+	}
+	if meta.ExpiresAt.IsZero() {
+		t.Fatal("expected ExpiresAt to be set for a mute directive")
+	}
+	// RFC3339 (what the CLI persists expires_at as, and what ParseMeta
+	// decodes) truncates to whole seconds, so widen the window by 1s on
+	// each side to tolerate that truncation rather than racing it.
+	minExpiry := before.Add(30 * 24 * time.Hour).Add(-time.Second)
+	maxExpiry := after.Add(30 * 24 * time.Hour).Add(time.Second)
+	if meta.ExpiresAt.Before(minExpiry) || meta.ExpiresAt.After(maxExpiry) {
+		t.Fatalf("ExpiresAt = %v, want between %v and %v", meta.ExpiresAt, minExpiry, maxExpiry)
+	}
+}
+
+// TestFeedbackMute_RequiresTTL proves mute without --ttl fails cleanly and
+// writes no directive, rather than silently muting forever.
+func TestFeedbackMute_RequiresTTL(t *testing.T) {
+	dir := t.TempDir()
+	f := finding.Finding{ID: "finding-mute-2", Source: "s", Type: "t", Actor: "a"}
+	seedFinding(t, dir, f)
+
+	err := runFeedback([]string{f.ID, "mute", "--store", dir})
+	if err == nil {
+		t.Fatal("expected error for mute with no --ttl, got nil")
+	}
+
+	st, _ := store.Open(dir)
+	directives, _ := st.LoadDirectives()
+	if len(directives) != 0 {
+		t.Fatalf("expected no directive written on --ttl error, got %d", len(directives))
+	}
+}
+
 // TestFeedback_BadFindingIDErrorsCleanly proves an unknown finding-id fails with
 // a clear error and writes NO directive.
 func TestFeedback_BadFindingIDErrorsCleanly(t *testing.T) {
