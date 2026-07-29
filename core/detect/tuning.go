@@ -130,3 +130,23 @@ func ApplyTuning(t Tuning) {
 	}
 	activePrivEscalationTuning.Store(next)
 }
+
+// TuningKey normalizes a detector identifier — as returned by Detector.Name(),
+// carried in a finding's Source ("detector:<name>"), or surfaced as a
+// core/collect.GapCandidate.DetectorFamily — into the top-level section key
+// detectors/tuning.yaml stores that detector's widen data under.
+//
+// The two live on DIFFERENT naming conventions: every Detector.Name() in this
+// package's registry is kebab-case ("priv-escalation", "config-drift", ...,
+// see frameworkDetectorNames in detect.go), while a Tuning struct field's yaml
+// key is Go-struct-field snake_case per the tags above ("priv_escalation").
+// LoadTuningFile's strict KnownFields decode makes an unnormalized
+// (kebab-case) section key a LOUD parse error rather than a silent miss — so
+// ANY writer that produces a tuning.yaml section key (selfext/router's
+// writeTuningOverlay, or a future one) MUST route the detector id through this
+// function first, or a real widen (family "priv-escalation", as
+// core/collect.DetectorGaps emits it) silently becomes unloadable data
+// (mallcoppro-b42).
+func TuningKey(detectorFamily string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(detectorFamily)), "-", "_")
+}

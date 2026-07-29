@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mallcop-app/mallcop/core/detect"
 	"github.com/mallcop-app/mallcop/selfext/proposer"
 	"gopkg.in/yaml.v3"
 )
@@ -96,11 +97,23 @@ func writeMappingOverlay(dir string, m *proposer.MappingProposal, knownTypes map
 
 // writeTuningOverlay merges added values into detector→extra_*→[values] in
 // tuning.yaml, additively (dedup preserved, nothing ever removed).
+//
+// The overlay key is NORMALIZED via detect.TuningKey (mallcoppro-b42): a
+// TuningDelta.Detector arrives in the detector-REGISTRY convention (kebab-case,
+// e.g. "priv-escalation" — what core/collect.DetectorGaps and
+// detect.Detector.Name() both use), but detectors/tuning.yaml's section keys
+// are Go-struct-field snake_case (core/detect/tuning.go's yaml tags, e.g.
+// "priv_escalation"). Writing the RAW (unnormalized) family as the map key
+// produces a tuning.yaml that LoadTuningFile's strict KnownFields decode
+// rejects outright as an unknown section — a real widen would silently never
+// load. detect.TuningKey is the ONE place both the write side (here) and the
+// read side (core/detect/tuning.go) agree on, so a real "priv-escalation" gap
+// widen lands under "priv_escalation" — the key the detector actually reads.
 func writeTuningOverlay(dir string, td *proposer.TuningDelta) (string, error) {
 	if td == nil {
 		return "", fmt.Errorf("router: tuning proposal has nil payload")
 	}
-	detector := strings.ToLower(strings.TrimSpace(td.Detector))
+	detector := detect.TuningKey(td.Detector)
 	key := strings.ToLower(strings.TrimSpace(td.Key))
 	if detector == "" || key == "" || len(td.AddedValues) == 0 {
 		return "", fmt.Errorf("router: tuning proposal missing detector/key/added_values")

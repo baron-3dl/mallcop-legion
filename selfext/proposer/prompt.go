@@ -155,3 +155,122 @@ func mappingTool(gap MappingGap) Tool {
 		},
 	}
 }
+
+// gapSystemPrompt frames a GapCandidate-driven tuning run — the DATA-lane
+// consumer of operator override / committee dissent judgment (mallcoppro-b42,
+// design §Gap B). It is constant (no interpolation); the only variable data is
+// the trusted structural gap, carried in the user turn / tool schema. R9
+// (consensus not rules): the ONLY lever offered is an additive extra_* list —
+// there is no tool shape that can suppress, force-escalate, or otherwise
+// change a verdict. This WIDENS what the committee sees; it never overrides
+// the committee.
+const gapSystemPrompt = "You extend a DEFENSIVE security-monitoring product's detection coverage in " +
+	"response to a human operator's override or a consensus committee's dissent. " +
+	"You may ONLY WIDEN coverage with add-only DATA: append new keyword(s) to a detector's EXISTING " +
+	"additive extra_* tuning list, so the committee sees more of the signal that caused the " +
+	"disagreement. You must call the provided tool exactly once with a valid choice. " +
+	"You must NOT narrow, remove, suppress, force-escalate, or otherwise change how the committee " +
+	"votes; those are refused and are not offered by any tool here."
+
+// BuildGapPrompt constructs the tuning-widen instruction from a GapCandidate's
+// TRUSTED STRUCTURAL fields only — Kind, DetectorFamily, Source, and the
+// structured Evidence (HumanVerb/AgentAction for an override, the dissent
+// marker for a dissent cluster). It NEVER interpolates raw operator free text
+// or raw event payloads (GapCandidate/GapEvidence carry none — see mallcop
+// core/collect.GapEvidence), so a scanned artifact or an operator's free-text
+// report-miss description cannot inject an instruction. Mirrors BuildPrompt's
+// discipline for the mapping lane.
+func BuildGapPrompt(g GapCandidate) string {
+	var b strings.Builder
+	switch g.Kind {
+	case "override_fp":
+		fmt.Fprintf(&b, `An OPERATOR overrode detector %q's finding on source %q: the operator's verb
+was %q while the agent's stored decision was %q. This disagreement is a
+precision signal the committee should see MORE of, not a rule to patch the
+verdict with — widen the detector's additive tuning list so future scans
+surface this signal to the committee before it reaches a stored decision.
+
+  detector    : %s
+  source      : %s
+  human verb  : %s
+  agent verb  : %s
+`, g.DetectorFamily, g.Source, g.Evidence.HumanVerb, g.Evidence.AgentAction,
+			g.DetectorFamily, g.Source, g.Evidence.HumanVerb, g.Evidence.AgentAction)
+	case "dissent":
+		fmt.Fprintf(&b, `A consensus COMMITTEE DISSENTED on detector %q's finding on source %q (the
+panel did not fully agree). Widen the detector's additive tuning list so the
+committee sees more of the signal that caused disagreement — never resolve a
+dissent by force-escalating or suppressing.
+
+  detector    : %s
+  source      : %s
+`, g.DetectorFamily, g.Source, g.DetectorFamily, g.Source)
+	default:
+		fmt.Fprintf(&b, "Widen detector %q's additive tuning coverage for source %q.\n", g.DetectorFamily, g.Source)
+	}
+	fmt.Fprintf(&b, `
+Call %s exactly once with:
+  detector     = %q
+  key          = one of the ADDITIVE keys below (verbatim; do not invent a new key)
+  added_values = 1+ new keyword(s) this detector's family should additionally watch for
+
+Allowed additive keys (the ONLY valid choices):
+%s
+
+Rules:
+  - detector MUST equal %q (a proposal may only widen its own gap's detector).
+  - key MUST be an exact member of the list above (a calibration knob — a
+    threshold, a confidence penalty — is refused; only additive extra_* lists
+    are expressible here).
+  - Do NOT propose a suppression, a force-escalation, a narrowing rule, or any
+    removal. This WIDENS what the committee sees; it never overrides the
+    committee's verdict.`,
+		toolTuning, g.DetectorFamily, bulletList(additiveTuningKeyList()), g.DetectorFamily)
+	return b.String()
+}
+
+// buildGapRequest assembles the one metered inference request for a
+// GapCandidate: the trusted-only tuning prompt plus a tool whose input_schema
+// pins detector to the gap's own family and constrains key to the closed
+// additive-key enum. The schema is a hint to the model; StrictParseGap is the
+// actual gate.
+func (p *Proposer) buildGapRequest(g GapCandidate) MessagesRequest {
+	return MessagesRequest{
+		Model:     p.lane(),
+		MaxTokens: defaultMaxTokens,
+		System:    gapSystemPrompt,
+		Messages: []Message{{
+			Role:    "user",
+			Content: []ContentBlock{{Type: "text", Text: BuildGapPrompt(g)}},
+		}},
+		Tools: []Tool{gapTuningTool(g)},
+	}
+}
+
+// gapTuningTool advertises propose_tuning with detector pinned to the gap's
+// own family (const) and key constrained to the closed additive-key enum via
+// JSON-schema. added_values requires at least one entry (add-only: an empty
+// widen is a no-op, refused by parseTuning too).
+func gapTuningTool(g GapCandidate) Tool {
+	return Tool{
+		Name:        toolTuning,
+		Description: "Widen the detector's additive extra_* tuning list in response to an operator override or committee dissent. Add-only; widen-only.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"detector": map[string]any{"type": "string", "const": g.DetectorFamily},
+				"key": map[string]any{
+					"type": "string",
+					"enum": additiveTuningKeyList(),
+				},
+				"added_values": map[string]any{
+					"type":     "array",
+					"items":    map[string]any{"type": "string"},
+					"minItems": 1,
+				},
+			},
+			"required":             []string{"detector", "key", "added_values"},
+			"additionalProperties": false,
+		},
+	}
+}

@@ -180,6 +180,49 @@ func mappingFingerprint(g MappingGap) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// gapFingerprint is the stable anti-thrash key for a GapCandidate: sha256 over
+// the normalized (kind, detector_family, source, first_finding_id) tuple,
+// domain-prefixed "gap\x00" so it never collides with a mapping fingerprint
+// ("map\x00") or a K7 TrustedGap fingerprint in the SHARED reject set.
+func gapFingerprint(g GapCandidate) string {
+	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+	var fid string
+	if len(g.FindingIDs) > 0 {
+		fid = g.FindingIDs[0]
+	}
+	sum := sha256.Sum256([]byte("gap\x00" + norm(g.Kind) + "\x00" + norm(g.DetectorFamily) + "\x00" + norm(g.Source) + "\x00" + norm(fid)))
+	return hex.EncodeToString(sum[:])
+}
+
+// ProposeGap runs ONE add-only tuning-widen proposal for a GapCandidate —
+// the DATA-lane consumer of operator override (override_fp) / consensus
+// dissent (dissent) judgment (mallcoppro-b42, design §Gap B). It shares the
+// EXACT SAME anti-thrash/spend/parse/record lifecycle as Propose (runLoop);
+// only the request/parse are tuning-shaped instead of mapping-shaped.
+//
+// R9 (consensus not rules): this only WIDENS what the committee sees (an
+// additive extra_* keyword list) — it never emits a suppress/force-escalate
+// rule; StrictParseGap refuses any shape but propose_tuning.
+//
+// Callers filter to override_fp/dissent kinds before calling this (detect_miss
+// has no finding to tune against; reported_miss is the CODE-lane's separate
+// seed — mallcoppro-0e9 — and is deliberately not routed here).
+func (p *Proposer) ProposeGap(ctx context.Context, gap GapCandidate) (Outcome, error) {
+	if verr := p.validate(); verr != nil {
+		return Outcome{}, verr
+	}
+	fp := gapFingerprint(gap)
+	log := p.logger().With("fingerprint", fp, "kind", gap.Kind, "detector", gap.DetectorFamily, "source", gap.Source)
+	return p.runLoop(ctx, fp, log,
+		func() MessagesRequest { return p.buildGapRequest(gap) },
+		func(resp MessagesResponse) (Proposal, error) { return StrictParseGap(resp, gap) },
+		func(prop *Proposal) {
+			prop.SampleEventIDs = gap.SampleEventIDs
+			prop.Severity = gap.Severity
+		},
+	)
+}
+
 // Propose runs ONE add-only coverage proposal for a mapping gap, copying the
 // engine.Run ordering exactly and routing every billing step through the
 // Session so the METERED and BYOI rails share ONE code path:

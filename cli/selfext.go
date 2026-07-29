@@ -411,8 +411,9 @@ func runSelfextPropose(a proposeArgs) error {
 	if err != nil {
 		return err
 	}
-	if len(env.MappingGaps) == 0 {
-		fmt.Println("selfext --propose: no mapping gaps in the envelope — nothing to propose.")
+	tuningGaps := filterTuningGapCandidates(env.GapCandidates)
+	if len(env.MappingGaps) == 0 && len(tuningGaps) == 0 {
+		fmt.Println("selfext --propose: no mapping gaps or override/dissent gap candidates in the envelope — nothing to propose.")
 		return nil
 	}
 
@@ -446,8 +447,8 @@ func runSelfextPropose(a proposeArgs) error {
 	}
 
 	ctx := context.Background()
-	fmt.Fprintf(os.Stderr, "selfext --propose: %d mapping gap(s); BYOK (no cap), budget hint $%.2f/gap\n",
-		len(env.MappingGaps), a.budgetUSD)
+	fmt.Fprintf(os.Stderr, "selfext --propose: %d mapping gap(s), %d override/dissent gap candidate(s); BYOK (no cap), budget hint $%.2f/gap\n",
+		len(env.MappingGaps), len(tuningGaps), a.budgetUSD)
 
 	var proposed, routed int
 	for _, mg := range env.MappingGaps {
@@ -473,8 +474,55 @@ func runSelfextPropose(a proposeArgs) error {
 		printRouteDecision(dec)
 	}
 
+	// GapCandidates (mallcoppro-b42, design §Gap B): override_fp/dissent gaps —
+	// operator/committee judgment core/collect.DetectorGaps already surfaces —
+	// route into the SAME DATA-lane proposal → gate → route pipeline as a
+	// mapping gap, just tuning-shaped instead of mapping-shaped. detect_miss has
+	// no finding to tune against; reported_miss is the CODE-lane's own seed
+	// (mallcoppro-0e9, a separate item) and is deliberately left untouched here.
+	for _, gc := range tuningGaps {
+		out, err := p.ProposeGap(ctx, gc)
+		if err != nil {
+			return fmt.Errorf("selfext --propose: propose gap %s %s/%s: %w", gc.Kind, gc.DetectorFamily, gc.Source, err)
+		}
+		printProposeGapOutcome(gc, out)
+		if !out.Proposed || out.Proposal == nil {
+			continue
+		}
+		proposed++
+
+		g, gerr := resolveProposeGate(ctx, a, knownTypes, *out.Proposal)
+		if gerr != nil {
+			fmt.Printf("         gate step failed: %v (routing with a non-GREEN gate → human-gate)\n", gerr)
+		}
+		dec, rerr := rt.Route(*out.Proposal, g, a.consent)
+		if rerr != nil {
+			return fmt.Errorf("selfext --propose: route gap %s %s/%s: %w", gc.Kind, gc.DetectorFamily, gc.Source, rerr)
+		}
+		routed++
+		printRouteDecision(dec)
+	}
+
 	fmt.Fprintf(os.Stderr, "selfext --propose: done — %d proposed, %d routed.\n", proposed, routed)
 	return nil
+}
+
+// filterTuningGapCandidates selects the GapCandidates this DATA-lane propose
+// pass consumes: override_fp (an operator's suppress-verb disagreed with the
+// agent's stored decision) and dissent (a consensus committee did not fully
+// agree). Both are judgment signals that should WIDEN what the committee sees
+// (R9 — never a force-escalate/suppress rule). detect_miss carries no finding
+// to tune a detector against. reported_miss is intentionally excluded: it is
+// the CODE-lane's own seed (mallcoppro-0e9, a separate item) — routing it here
+// too would double-consume the same operator signal on two lanes.
+func filterTuningGapCandidates(gaps []proposer.GapCandidate) []proposer.GapCandidate {
+	var out []proposer.GapCandidate
+	for _, g := range gaps {
+		if g.Kind == "override_fp" || g.Kind == "dissent" {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // resolveProposeGate obtains the GateResult for a proposal. Preference order:
@@ -544,6 +592,27 @@ func vocabularySet(gaps []proposer.MappingGap) map[string]bool {
 // printProposeOutcome renders one proposer outcome for the operator.
 func printProposeOutcome(mg proposer.MappingGap, out proposer.Outcome) {
 	head := fmt.Sprintf("%s/%s (%dx)", mg.Source, mg.RawAction, mg.Count)
+	switch {
+	case out.Skipped:
+		fmt.Printf("SKIPPED  %s — known-reject fingerprint (spent $0)\n", head)
+	case out.Refused:
+		fmt.Printf("REFUSED  %s — %s (spent $0)\n", head, out.Reason)
+	case out.Proposed:
+		fmt.Printf("PROPOSED %s — %s $%.4f\n", head, describeProposal(out.Proposal), out.CostUSD)
+	case out.Rejected:
+		fmt.Printf("REJECTED %s — %s (fingerprint poisoned; cost $%.4f)\n", head, out.Reason, out.CostUSD)
+	case out.Failed:
+		fmt.Printf("FAILED   %s — %s (cost $%.4f)\n", head, out.Reason, out.CostUSD)
+	default:
+		fmt.Printf("UNKNOWN  %s — %+v\n", head, out)
+	}
+}
+
+// printProposeGapOutcome renders one proposer outcome for a GapCandidate
+// (override_fp/dissent) propose run — the tuning-lane sibling of
+// printProposeOutcome for the mapping lane.
+func printProposeGapOutcome(gc proposer.GapCandidate, out proposer.Outcome) {
+	head := fmt.Sprintf("gap:%s %s/%s", gc.Kind, gc.DetectorFamily, gc.Source)
 	switch {
 	case out.Skipped:
 		fmt.Printf("SKIPPED  %s — known-reject fingerprint (spent $0)\n", head)
