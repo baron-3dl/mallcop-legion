@@ -23,13 +23,49 @@ import (
 // Pattern is the target the op applies to (a finding type, source, actor glob,
 // or substring — the consumer decides matching semantics). Reason is the
 // human/agent rationale, preserved for audit. Meta carries op-specific extra
-// fields without schema churn.
+// fields without schema churn — see DirectiveMeta for the documented shape.
 type Directive struct {
 	Op      string          `json:"op"`
 	Pattern string          `json:"pattern,omitempty"`
 	Reason  string          `json:"reason,omitempty"`
 	Actor   string          `json:"actor,omitempty"` // who issued it (operator/agent)
 	Meta    json.RawMessage `json:"meta,omitempty"`
+}
+
+// DirectiveMeta is the documented (but NOT schema-enforced) shape of
+// Directive.Meta. Keeping Meta as json.RawMessage on the wire means adding a
+// field here is never a store schema change — old records simply omit the new
+// key and Unmarshal leaves it at its zero value. Consumers registered on the
+// pipeline's DirectiveDispatcher (core/pipeline/directives.go) parse the
+// fields they care about via Directive.ParseMeta; a consumer MUST tolerate a
+// zero value for every field (an absent key, not an error).
+//
+//	expires_at  — RFC3339 timestamp; the directive auto-expires on replay past
+//	              this instant (mute's TTL — see Gap C, mallcoppro-ce6).
+//	severity    — override for finding.Severity (the severity consumer).
+//	weight      — attention weight fed to finding ranking / inquest depth
+//	              budget (focus / watch-closer).
+//	target_kind — what Pattern names: "finding-key" (source/type/actor triple,
+//	              the default matchPattern semantics), "gap-key", or "source".
+type DirectiveMeta struct {
+	ExpiresAt  time.Time `json:"expires_at,omitempty"`
+	Severity   string    `json:"severity,omitempty"`
+	Weight     float64   `json:"weight,omitempty"`
+	TargetKind string    `json:"target_kind,omitempty"`
+}
+
+// ParseMeta decodes Directive.Meta into its documented shape. An empty/nil
+// Meta decodes to the zero DirectiveMeta and no error — a directive issued
+// before a given Meta field existed is valid, not malformed.
+func (d Directive) ParseMeta() (DirectiveMeta, error) {
+	var m DirectiveMeta
+	if len(d.Meta) == 0 {
+		return m, nil
+	}
+	if err := json.Unmarshal(d.Meta, &m); err != nil {
+		return DirectiveMeta{}, fmt.Errorf("store: decode directive meta: %w", err)
+	}
+	return m, nil
 }
 
 // Turn is one entry on the conversation stream — the durable agent-loop
