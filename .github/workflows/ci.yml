@@ -39,5 +39,16 @@ jobs:
         # (scan.go's agent.DefaultConsensusRuns=3 — not overridden by the test).
         run: go test -tags e2e -count=1 -v ./cli/...
 
+      - name: Operator-integration capstone (mallcoppro-b1b) — the whole sense→persist→feed-forward loop on one real store
+        # test/capstone/operator_loop_test.go is //go:build capstone — it never
+        # runs under the bare `go test ./...` above (the real validate-proposal
+        # gate subprocess it drives is heavy), so it needs its own step or it is
+        # silently skipped. Offline/deterministic: real git-backed store, real
+        # detector scans, real record_decision tool, real DirectiveDispatcher,
+        # real collect.DetectorGaps, real proposer (canned inference reply only),
+        # and a real `mallcop validate-proposal` gate built from this checkout —
+        # no network, no credentials, no cost.
+        run: go test -tags capstone -count=1 -v -timeout 600s ./test/capstone/...
+
       - name: Vet
         run: go vet ./...
