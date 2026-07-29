@@ -86,17 +86,25 @@ func TestApplyDirectives_UnsuppressCancelsLaterWins(t *testing.T) {
 	}
 }
 
+// TestApplyDirectives_NonDropOpsAreNoops proves an Op with NO registered
+// consumer never drops a finding. 'focus' has no consumer wired in this
+// package yet (Gap C's attention weighting lands elsewhere), so it stays the
+// no-op-verb characterization this test was written for. 'mute' USED to be
+// in this list pre-mallcoppro-ae2 (documented vocabulary, no consumer); it
+// is now implemented (core/pipeline/consumer_mute.go registers a drop
+// consumer honoring Meta.expires_at) and is proven separately in
+// consumer_mute_test.go — it is no longer a no-op and must not be asserted
+// as one here.
 func TestApplyDirectives_NonDropOpsAreNoops(t *testing.T) {
 	findings := []finding.Finding{
 		mkFinding("f1", "detector:secrets-exposure", "secrets-exposure", "alice"),
 	}
 	directives := []store.Directive{
 		{Op: "focus", Pattern: "detector:secrets-exposure/secrets-exposure/alice"},
-		{Op: "mute", Pattern: "detector:secrets-exposure/secrets-exposure/alice"},
 	}
 	kept := applyDirectives(findings, directives)
 	if len(kept) != 1 {
-		t.Fatalf("focus/mute must not drop findings, got %d kept", len(kept))
+		t.Fatalf("focus must not drop findings, got %d kept", len(kept))
 	}
 }
 

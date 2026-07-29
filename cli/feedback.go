@@ -25,6 +25,14 @@ import (
 //	dismiss — operator says the finding is noise / not actionable.
 //	approve — operator says the underlying activity is known-good / sanctioned.
 //
+// A fourth verb, mute, persists a TIME-BOXED 'mute' directive instead of an
+// indefinite 'suppress': `mallcop feedback <id> mute --ttl 30d`. It is for
+// "stop flagging this for now" (e.g. a known maintenance window) rather than
+// "this is permanently fine" — core/pipeline's mute consumer
+// (core/pipeline/consumer_mute.go) drops matching findings until
+// Meta.expires_at, then automatically resumes flagging on the first scan
+// after that instant, with no separate unmute step required.
+//
 // The suppress Pattern is derived from the finding's stable key
 // "<source>/<type>/<actor>" so the directive suppresses the CLASS of finding,
 // not just one transient per-run finding ID (which is not stable across scans).
@@ -42,6 +50,7 @@ import (
 // Usage:
 //
 //	mallcop feedback <finding_id> approve|dismiss --store <dir> [--reason "..."] [--by <operator>]
+//	mallcop feedback <finding_id> mute --ttl 30d --store <dir> [--reason "..."] [--by <operator>]
 //	mallcop feedback report-miss --store <dir> --source <src> --event-type <type> [--actor <a>] [--window <w>] [--description "..."] [--by <operator>]
 func runFeedback(args []string) error {
 	// report-miss takes NO positional finding_id (there is no finding). Route it
@@ -55,7 +64,7 @@ func runFeedback(args []string) error {
 	// flag package stops at the first non-flag token, so we peel the positionals
 	// off the front ourselves and parse the remainder as flags.
 	if len(args) < 2 {
-		return fmt.Errorf("feedback: usage: mallcop feedback <finding_id> approve|dismiss --store <dir> [--reason \"...\"] [--by <operator>]\n       mallcop feedback report-miss --store <dir> --source <src> --event-type <type> [--actor <a>] [--window <w>] [--description \"...\"]")
+		return fmt.Errorf("feedback: usage: mallcop feedback <finding_id> approve|dismiss --store <dir> [--reason \"...\"] [--by <operator>]\n       mallcop feedback <finding_id> mute --ttl 30d --store <dir> [--reason \"...\"] [--by <operator>]\n       mallcop feedback report-miss --store <dir> --source <src> --event-type <type> [--actor <a>] [--window <w>] [--description \"...\"]")
 	}
 	findingID := args[0]
 	verb := args[1]
@@ -64,18 +73,34 @@ func runFeedback(args []string) error {
 	storePath := fs.String("store", "", "Path to the git-repo store written by 'mallcop scan' (required)")
 	reason := fs.String("reason", "", "Operator rationale for this decision (free text, recorded for audit)")
 	by := fs.String("by", "", "Operator identity (defaults to $USER)")
+	ttl := fs.String("ttl", "", "Mute duration (e.g. \"30d\", \"12h\") — required for the mute verb; ignored otherwise")
 
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
 	}
 	switch verb {
-	case "approve", "dismiss":
+	case "approve", "dismiss", "mute":
 	default:
-		return fmt.Errorf("feedback: unknown action %q (want approve|dismiss)", verb)
+		return fmt.Errorf("feedback: unknown action %q (want approve|dismiss|mute)", verb)
 	}
 
 	if *storePath == "" {
 		return fmt.Errorf("feedback: --store is required (the git-repo path written by 'mallcop scan')")
+	}
+
+	var muteTTL time.Duration
+	if verb == "mute" {
+		if *ttl == "" {
+			return fmt.Errorf("feedback: --ttl is required for mute (e.g. --ttl 30d)")
+		}
+		var err error
+		muteTTL, err = parseTTL(*ttl)
+		if err != nil {
+			return fmt.Errorf("feedback: --ttl %q: %w", *ttl, err)
+		}
+		if muteTTL <= 0 {
+			return fmt.Errorf("feedback: --ttl %q must be a positive duration", *ttl)
+		}
 	}
 
 	operator := *by
@@ -101,27 +126,45 @@ func runFeedback(args []string) error {
 	pattern := f.Source + "/" + f.Type + "/" + f.Actor
 
 	// Record the verb + rationale distinctly in Meta for the audit trail, while
-	// the always-works mechanism is the persisted suppress directive.
-	meta, err := json.Marshal(map[string]string{
+	// the always-works mechanism is the persisted directive (suppress, or a
+	// time-boxed mute below). recordedAt anchors the mute TTL to issuance time
+	// (not the eventual replay clock), so --ttl is relative to "now" at the
+	// moment the operator ran the command.
+	recordedAt := time.Now().UTC()
+	metaFields := map[string]string{
 		"verb":       verb,
 		"finding_id": f.ID,
-		"recorded":   time.Now().UTC().Format(time.RFC3339),
-	})
+		"recorded":   recordedAt.Format(time.RFC3339),
+	}
+	op := "suppress"
+	var expiresAt time.Time
+	if verb == "mute" {
+		op = "mute"
+		expiresAt = recordedAt.Add(muteTTL)
+		// "expires_at" is the exact key core/store.DirectiveMeta.ParseMeta
+		// (core/store/records.go) decodes and core/pipeline's mute consumer
+		// (core/pipeline/consumer_mute.go) reads.
+		metaFields["expires_at"] = expiresAt.Format(time.RFC3339)
+	}
+	meta, err := json.Marshal(metaFields)
 	if err != nil {
 		return fmt.Errorf("feedback: encode meta: %w", err)
 	}
 
 	reasonText := *reason
 	if reasonText == "" {
-		if verb == "approve" {
+		switch verb {
+		case "approve":
 			reasonText = "operator approved: activity known-good"
-		} else {
+		case "mute":
+			reasonText = fmt.Sprintf("operator muted for %s: finding paused, not dismissed", *ttl)
+		default:
 			reasonText = "operator dismissed: finding not actionable"
 		}
 	}
 
 	d := store.Directive{
-		Op:      "suppress",
+		Op:      op,
 		Pattern: pattern,
 		Reason:  reasonText,
 		Actor:   operator,
@@ -133,10 +176,15 @@ func runFeedback(args []string) error {
 	}
 
 	fmt.Printf("Recorded %s for finding %s\n", verb, f.ID)
-	fmt.Printf("  Suppress pattern: %s\n", pattern)
+	fmt.Printf("  %s pattern: %s\n", op, pattern)
 	fmt.Printf("  Operator:         %s\n", operator)
 	fmt.Printf("  Reason:           %s\n", reasonText)
-	fmt.Printf("The next scan will suppress findings matching this pattern.\n")
+	if verb == "mute" {
+		fmt.Printf("  Expires:          %s\n", expiresAt.Format(time.RFC3339))
+		fmt.Printf("Scans before this time will suppress matching findings; scans after it will resume flagging them.\n")
+	} else {
+		fmt.Printf("The next scan will suppress findings matching this pattern.\n")
+	}
 	// A dismiss is exactly the moment 'mallcop scenario capture --must-not-fire'
 	// exists for (mallcoppro-65c4): the operator just confirmed this finding's
 	// underlying activity was a FALSE ALARM. Point at the pairing command so
@@ -264,4 +312,21 @@ func findFindingByID(st *store.Store, id string) (finding.Finding, error) {
 		}
 	}
 	return finding.Finding{}, fmt.Errorf("feedback: finding %q not found in store (run 'mallcop status --store ...' to list)", id)
+}
+
+// parseTTL parses a mute duration. time.ParseDuration already handles
+// "h"/"m"/"s" (and combinations); this adds a "d" (days) unit on top since
+// operator-facing mute windows are naturally day-scoped ("30d") and Go's
+// stdlib has no day unit. A bare integer+"d" suffix (e.g. "30d") is parsed
+// as N*24h; anything else falls through to time.ParseDuration unchanged.
+func parseTTL(s string) (time.Duration, error) {
+	if len(s) > 1 && s[len(s)-1] == 'd' {
+		numPart := s[:len(s)-1]
+		var days float64
+		if _, err := fmt.Sscanf(numPart, "%g", &days); err != nil {
+			return 0, fmt.Errorf("invalid day count %q: %w", numPart, err)
+		}
+		return time.Duration(days * float64(24*time.Hour)), nil
+	}
+	return time.ParseDuration(s)
 }
