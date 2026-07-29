@@ -800,6 +800,50 @@ func ToolDefs() []agent.Tool {
 				"required": []string{"id"},
 			},
 		},
+		// set_config (mallcoppro-7a6): reconfigure mallcop.yaml through the
+		// SAME shared primitive as `mallcop config set` (R4 dual-audience, R5
+		// the loop never writes the file directly). Appended last to keep this
+		// registration localized.
+		{
+			Name: "set_config",
+			Description: "Reconfigure the operator's mallcop.yaml — the autonomy dial, a data " +
+				"connector, or the contribute-back opt-in — through the SAME code path as the " +
+				"`mallcop config set` CLI (never a parallel one). Set `setting` to one of " +
+				"\"autonomy\", \"connector\", or \"contribute_back\" and supply that setting's value. " +
+				"TWO changes are ALWAYS operator-confirmed, never applied on your own initiative at " +
+				"ANY autonomy dial: RAISING the autonomy dial (non→semi/fully, semi→fully) and " +
+				"ENABLING contribute_back (true) — both widen the operator's blast radius. For " +
+				"either, pass confirm=true ONLY after the operator has EXPLICITLY approved that " +
+				"specific change in this conversation; without confirm the tool writes nothing and " +
+				"returns a proposal the operator can Apply or Discard. Lowering the dial, disabling " +
+				"contribute_back, and adding a connector are the safe direction and need no confirm. " +
+				"Every applied change lands as a config write the operator can revert.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"setting":         map[string]any{"type": "string", "enum": []string{"autonomy", "connector", "contribute_back"}, "description": "Which config surface to change. Required."},
+					"autonomy":        map[string]any{"type": "string", "enum": []string{"non", "semi", "fully"}, "description": "Requested dial position when setting=autonomy. Raising it requires confirm=true."},
+					"contribute_back": map[string]any{"type": "boolean", "description": "Requested contribute-back opt-in when setting=contribute_back. Enabling (true) requires confirm=true."},
+					"connector": map[string]any{
+						"type":        "object",
+						"description": "Connector to append when setting=connector. Same fields as `mallcop config set connector`.",
+						"properties": map[string]any{
+							"kind":   map[string]any{"type": "string", "description": "file | github | cloud. Required."},
+							"id":     map[string]any{"type": "string", "description": "Unique connector id. Required."},
+							"path":   map[string]any{"type": "string", "description": "Events JSONL path (kind=file)."},
+							"org":    map[string]any{"type": "string", "description": "GitHub org (kind=github)."},
+							"source": map[string]any{"type": "string", "description": "Cloud source name (kind=cloud)."},
+							"binary": map[string]any{"type": "string", "description": "Explicit sibling binary override (kind=cloud)."},
+							"since":  map[string]any{"type": "string", "description": "Since cursor (kind=cloud)."},
+							"args":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exec args (kind=cloud)."},
+							"env":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Env-var NAMES the connector reads (never inline secrets)."},
+						},
+					},
+					"confirm": map[string]any{"type": "boolean", "description": "The operator's EXPLICIT approval for an R3 hard-line change (dial raise / contribute_back enable). Only ever set true after the operator approved that exact change."},
+				},
+				"required": []string{"setting"},
+			},
+		},
 	}
 }
 
@@ -882,6 +926,17 @@ func ExecuteTool(opts Options, name string, input any) (any, error) {
 			return nil, fmt.Errorf("decode get_raw_event input: %w", err)
 		}
 		return tools.GetRawEvent(opts.Store, in)
+
+	case "set_config":
+		var in SetConfigInput
+		if err := json.Unmarshal(raw, &in); err != nil {
+			return nil, fmt.Errorf("decode set_config input: %w", err)
+		}
+		// Implementation in configtool.go: routes through the SAME shared
+		// config primitive (config.SetAutonomy/AddConnector/SetContributeBack +
+		// WriteConfigAtomic) the CLI uses, and enforces the R3 confirm gate on a
+		// dial raise / contribute-back enable.
+		return setConfigTool(opts, in)
 
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)
