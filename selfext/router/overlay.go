@@ -121,6 +121,22 @@ func writeTuningOverlay(dir string, td *proposer.TuningDelta) (string, error) {
 	if !proposer.IsAdditiveTuningKey(key) {
 		return "", fmt.Errorf("router: refusing to write non-additive tuning key %q", td.Key)
 	}
+	// SCHEMA GATE (mallcoppro-2c2, defense in depth): even a key that passes
+	// IsAdditiveTuningKey says nothing about whether THIS detector's family has
+	// a loadable tuning.yaml section, or whether the key belongs to THAT
+	// section's schema — core/detect/tuning.go's strict KnownFields decode
+	// rejects both an unknown top-level section and a key absent from a known
+	// section's struct. Router.Route's humanGateReason already screens this
+	// on the primary path; this is the belt to that suspenders for ANY caller
+	// of the exported WriteOverlay/writeTuningOverlay (e.g. cli/selfext.go's
+	// proposeGateViaWorktree, which writes ahead of Route's own gate) — this
+	// function must never produce a document the real loader then rejects.
+	if !detect.KnownTuningSection(detector) {
+		return "", fmt.Errorf("router: refusing to write tuning section %q (detector %q has no loadable tuning.yaml section — core/detect.LoadTuningFile would hard-reject it on the next scan)", detector, td.Detector)
+	}
+	if !detect.KnownTuningKey(detector, key) {
+		return "", fmt.Errorf("router: refusing to write tuning key %q under section %q (not part of its loadable schema — core/detect.LoadTuningFile would hard-reject it on the next scan)", key, detector)
+	}
 
 	path := filepath.Join(dir, tuningFile)
 	var doc map[string]map[string][]string
