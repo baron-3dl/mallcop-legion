@@ -136,9 +136,15 @@ func (d *DirectiveDispatcher) RankFindings(findings []finding.Finding, directive
 
 // ApplySeverityOverrides returns findings with Severity replaced per any
 // matching "severity" directive (a copy — the input slice/findings are left
-// untouched). R9: this changes ONLY the displayed finding.Severity label; it
-// runs after core/agent's committee has already resolved escalate/quiet for
-// every finding in the set, and it never feeds back into that vote.
+// untouched). R9: this changes ONLY the displayed finding.Severity label.
+// mallcoppro-e38 (R9 fix): the caller MUST NOT feed this function's output into
+// core/agent's committee (resolveAll / ResolveFindingWith) — core/agent reads
+// finding.Severity directly to route the triage/investigate gate
+// (triagerisk.go's triageResolveMustEscalate), so an overridden Severity would
+// silently flip the escalate/quiet verdict. core/pipeline.Run applies this to a
+// SEPARATE "display" copy (persisted findings batch + findings.json snapshot)
+// and threads the ORIGINAL, un-overridden findings into resolveAll — that
+// ordering, not this function, is what keeps the override display-only.
 func (d *DirectiveDispatcher) ApplySeverityOverrides(findings []finding.Finding, directives []store.Directive) []finding.Finding {
 	verdicts := d.AttentionVerdicts(findings, directives)
 	out := make([]finding.Finding, len(findings))
