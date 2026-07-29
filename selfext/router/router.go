@@ -56,6 +56,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mallcop-app/mallcop/core/detect"
 	"github.com/mallcop-app/mallcop/selfext/autonomy"
 	"github.com/mallcop-app/mallcop/selfext/engine"
 	"github.com/mallcop-app/mallcop/selfext/proposer"
@@ -274,6 +275,24 @@ func (r *Router) humanGateReason(p proposer.Proposal) string {
 		}
 		if !proposer.IsAdditiveTuningKey(p.Tuning.Key) {
 			return "committee-calibration knob " + p.Tuning.Key + " (not an additive extra_* list) — human review required"
+		}
+		// SCHEMA GATE (mallcoppro-2c2): the additive-key check above only proves
+		// the KEY is on the closed enum; it says nothing about whether the
+		// proposal's own family has a loadable tuning.yaml SECTION at all, or
+		// whether that key exists within THAT section's schema. Both are
+		// distinct from "known detector family" below (a detector can be a
+		// perfectly real, registered family — e.g. "unusual-login" — with zero
+		// tuning section, because no PrivEscalationTuning-shaped sibling struct
+		// exists for it yet). Writing either shape produces a tuning.yaml
+		// core/detect/tuning.go's strict KnownFields decode hard-rejects on the
+		// NEXT scan, so both must be caught HERE, before WriteOverlay ever runs,
+		// and routed to a human instead.
+		section := detect.TuningKey(p.Tuning.Detector)
+		if !detect.KnownTuningSection(section) {
+			return fmt.Sprintf("detector family %q has no loadable tuning.yaml section (writing one would hard-error the next scan's tuning load) — human review required", p.Tuning.Detector)
+		}
+		if !detect.KnownTuningKey(section, p.Tuning.Key) {
+			return fmt.Sprintf("tuning key %q is not part of the %q section's loadable schema — human review required", p.Tuning.Key, section)
 		}
 		if len(r.KnownDetectorFamilies) > 0 && !r.KnownDetectorFamilies[strings.ToLower(strings.TrimSpace(p.Tuning.Detector))] {
 			return "net-new detector family " + p.Tuning.Detector + " — human review required"

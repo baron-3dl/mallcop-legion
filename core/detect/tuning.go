@@ -150,3 +150,47 @@ func ApplyTuning(t Tuning) {
 func TuningKey(detectorFamily string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(detectorFamily)), "-", "_")
 }
+
+// knownTuningSchema is the AUTHORITATIVE catalog of what LoadTuningFile's
+// strict KnownFields decode actually accepts: TuningKey-normalized top-level
+// section -> the set of additive extra_* yaml keys that section's struct
+// exposes. Hand-derived from the Tuning/PrivEscalationTuning structs above and
+// MUST move in the SAME change as they do — any writer that produces a
+// tuning.yaml section+key pair (selfext/router's writeTuningOverlay,
+// selfext/proposer's additive-key allow-list, or a future one) MUST validate
+// against this catalog (via KnownTuningSection/KnownTuningKey) before writing,
+// or a proposed widen can pass every writer-side check yet still be an
+// UNLOADABLE document once this file's strict decode runs on the next scan
+// (mallcoppro-2c2): a section this catalog does not carry (e.g. "unusual_login"
+// — there is no PrivEscalationTuning sibling for it yet), or a key absent from
+// its per-section set (e.g. a phantom "extra_admin_actions" some caller
+// advertised but no struct field backs), is a KnownFields decode error — a
+// LOUD, scan-aborting failure, not a silent no-op.
+var knownTuningSchema = map[string]map[string]bool{
+	"priv_escalation": {
+		"extra_elevated_keywords":        true,
+		"extra_elevated_action_keywords": true,
+		"extra_elevation_event_types":    true,
+	},
+}
+
+// KnownTuningSection reports whether section (a detect.TuningKey-normalized
+// detector family) has a loadable top-level section in detectors/tuning.yaml's
+// schema. False means LoadTuningFile's strict KnownFields decode rejects the
+// section outright as unknown — any writer MUST check this before writing a
+// section key it did not itself hard-code as known-good.
+func KnownTuningSection(section string) bool {
+	_, ok := knownTuningSchema[strings.ToLower(strings.TrimSpace(section))]
+	return ok
+}
+
+// KnownTuningKey reports whether key names a loadable additive extra_* field
+// within section's schema (section must itself be known — see
+// KnownTuningSection; an unknown section reports false for every key).
+func KnownTuningKey(section, key string) bool {
+	keys, ok := knownTuningSchema[strings.ToLower(strings.TrimSpace(section))]
+	if !ok {
+		return false
+	}
+	return keys[strings.ToLower(strings.TrimSpace(key))]
+}

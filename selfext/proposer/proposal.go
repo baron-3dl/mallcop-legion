@@ -88,15 +88,23 @@ type Proposal struct {
 }
 
 // additiveTuningKeys is the allow-list of tuning.yaml keys that are ADDITIVE
-// extra_* lists (widen-only by construction). It mirrors the keys the mallcop
-// tuning loader accepts (detectors/tuning.yaml: priv_escalation.extra_elevated_keywords).
-// A key outside this set is a committee-calibration knob (a threshold, a
-// confidence penalty) — inexpressible in the widen-only tuning contract — and is
-// REJECTED by the strict parser / routed to a human by the router.
+// extra_* lists (widen-only by construction). It mirrors EXACTLY the keys the
+// mallcop tuning loader accepts (core/detect/tuning.go's PrivEscalationTuning
+// struct, detectors/tuning.yaml's priv_escalation section) — no more, no
+// fewer. It previously advertised two phantom keys (extra_admin_actions,
+// extra_sensitive_actions) that no loader field ever backed: the model could
+// propose them, the router's IsAdditiveTuningKey check waved them through as
+// "additive", and writeTuningOverlay wrote them straight into tuning.yaml —
+// which core/detect/tuning.go's strict KnownFields decode then hard-rejected
+// on the NEXT scan, aborting it (mallcoppro-2c2, subsumes mallcoppro-f7f).
+// A key outside this set is either a committee-calibration knob (a threshold,
+// a confidence penalty — inexpressible in the widen-only tuning contract) or a
+// key the loader simply does not read; either way it is REJECTED by the
+// strict parser / routed to a human by the router, never written.
 var additiveTuningKeys = map[string]bool{
-	"extra_elevated_keywords": true,
-	"extra_admin_actions":     true,
-	"extra_sensitive_actions": true,
+	"extra_elevated_keywords":        true,
+	"extra_elevated_action_keywords": true,
+	"extra_elevation_event_types":    true,
 }
 
 // IsAdditiveTuningKey reports whether key names an additive extra_* tuning list.
