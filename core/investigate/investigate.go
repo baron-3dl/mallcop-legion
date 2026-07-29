@@ -844,6 +844,43 @@ func ToolDefs() []agent.Tool {
 				"required": []string{"setting"},
 			},
 		},
+		// record_decision (mallcoppro-999): the model records an operator
+		// steering decision (suppress/mute/focus/severity/close-case) through
+		// the SAME store.KindDirectives append seam cli/feedback.go uses.
+		// Appended last, alongside set_config, to keep this registration
+		// localized (0d95/e07 also touch ToolDefs).
+		{
+			Name: "record_decision",
+			Description: "Record an operator steering decision on a finding (or a broader " +
+				"pattern), through the SAME persisted-directive mechanism as `mallcop feedback` — " +
+				"never a parallel one. Set `op` to one of \"suppress\" (stop flagging this), " +
+				"\"mute\" (temporarily silence, honoring `ttl`), \"focus\" (raise attention, set " +
+				"`weight`), \"severity\" (override, set `severity`), or \"close-case\" (the " +
+				"operator considers this resolved). Identify the target with EITHER `finding_id` " +
+				"(from a finding you already have — this derives the stable source/type/actor " +
+				"pattern so the decision covers the CLASS of finding, not one transient id) OR an " +
+				"explicit `pattern`. `reason` is required and is recorded verbatim for the audit " +
+				"trail. mallcop reads the operator's autonomy dial (learning.autonomy) from " +
+				"mallcop.yaml before writing: at the propose-only dial (the default) this tool " +
+				"commits NOTHING and returns a `proposed` directive for the operator to Apply or " +
+				"Discard — re-issue with confirm=true only after the operator explicitly approves " +
+				"it in this conversation. At an auto dial (semi/fully) the directive is committed " +
+				"immediately; it always lands as a git commit the operator can revert.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"op":         map[string]any{"type": "string", "enum": []string{"suppress", "mute", "focus", "severity", "close-case"}, "description": "Which steering decision to record. Required."},
+					"finding_id": map[string]any{"type": "string", "description": "The finding this decision targets (a truncated/prefix id also resolves). Exactly one of finding_id or pattern is required."},
+					"pattern":    map[string]any{"type": "string", "description": "An explicit directive pattern for a decision not anchored to one finding. Exactly one of finding_id or pattern is required."},
+					"reason":     map[string]any{"type": "string", "description": "Operator-facing rationale, recorded verbatim for the audit trail. Required."},
+					"severity":   map[string]any{"type": "string", "description": "Severity override value when op=\"severity\"."},
+					"weight":     map[string]any{"type": "number", "description": "Attention weight when op=\"focus\"."},
+					"ttl":        map[string]any{"type": "string", "description": "Go duration string (e.g. \"720h\" for 30 days) when op=\"mute\" — the mute auto-expires on replay past now+ttl."},
+					"confirm":    map[string]any{"type": "boolean", "description": "Re-issue a prior propose-only proposal with the operator's explicit approval. Only set true after the operator approved that exact decision."},
+				},
+				"required": []string{"op", "reason"},
+			},
+		},
 	}
 }
 
@@ -937,6 +974,16 @@ func ExecuteTool(opts Options, name string, input any) (any, error) {
 		// WriteConfigAtomic) the CLI uses, and enforces the R3 confirm gate on a
 		// dial raise / contribute-back enable.
 		return setConfigTool(opts, in)
+
+	case "record_decision":
+		var in RecordDecisionInput
+		if err := json.Unmarshal(raw, &in); err != nil {
+			return nil, fmt.Errorf("decode record_decision input: %w", err)
+		}
+		// Implementation in recorddecisiontool.go: appends a store.Directive
+		// through the SAME store.KindDirectives seam cli/feedback.go uses, and
+		// enforces the autonomy-dial gate (propose-only vs auto commit).
+		return recordDecisionTool(opts, in)
 
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)
