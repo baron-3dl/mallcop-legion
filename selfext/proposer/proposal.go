@@ -1,6 +1,9 @@
 package proposer
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // ProposalKind is the shape of an accepted (or, for the router's defense-in-depth
 // classification, a candidate) proposal.
@@ -103,4 +106,15 @@ var additiveTuningKeys = map[string]bool{
 func IsAdditiveTuningKey(key string) bool {
 	k := strings.ToLower(strings.TrimSpace(key))
 	return strings.HasPrefix(k, "extra_") && additiveTuningKeys[k]
+}
+
+// additiveTuningKeyList returns the additive extra_* keys as a stable-ordered
+// slice, for use as a closed enum in a tool schema (gapTuningTool, prompt.go).
+func additiveTuningKeyList() []string {
+	keys := make([]string, 0, len(additiveTuningKeys))
+	for k := range additiveTuningKeys {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

@@ -76,6 +76,23 @@ func readMappings(t *testing.T, path string) map[string]map[string]string {
 	return doc
 }
 
+// readTuning reads a tuning.yaml overlay written by WriteOverlay for a
+// KindTuning proposal (detector -> extra_* key -> added values). Shared by the
+// router unit tests and the GapCandidate e2e (e2e_selfext_test.go,
+// mallcoppro-b42).
+func readTuning(t *testing.T, path string) map[string]map[string][]string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %q: %v", path, err)
+	}
+	var doc map[string]map[string][]string
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse %q: %v", path, err)
+	}
+	return doc
+}
+
 func provenanceCount(t *testing.T, dir string) int {
 	t.Helper()
 	entries, err := os.ReadDir(dir)

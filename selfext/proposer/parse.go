@@ -168,6 +168,69 @@ func parseTuning(data []byte) (Proposal, error) {
 	}, nil
 }
 
+// StrictParseGap is the ADD-ONLY gate on the inference reply for a
+// GapCandidate-driven tuning run (StrictParse's sibling for the gap/tuning
+// lane — mallcoppro-b42, design §Gap B). It accepts EXACTLY one conforming
+// propose_tuning tool_use (or, as a fallback, one pure-JSON tuning object) and
+// REJECTS everything else — including a propose_mapping call, which is not
+// offered on this lane and is refused as an unrecognized tool. NEVER retries
+// (the caller poisons the fingerprint on any error).
+func StrictParseGap(resp MessagesResponse, gap GapCandidate) (Proposal, error) {
+	var recognized []ContentBlock
+	var unrecognizedTool bool
+	var textParts []string
+
+	for _, blk := range resp.Content {
+		switch blk.Type {
+		case "tool_use":
+			if blk.Name == toolTuning {
+				recognized = append(recognized, blk)
+			} else {
+				unrecognizedTool = true
+			}
+		case "text":
+			if strings.TrimSpace(blk.Text) != "" {
+				textParts = append(textParts, blk.Text)
+			}
+		}
+	}
+
+	switch {
+	case len(recognized) > 1:
+		return Proposal{}, fmt.Errorf("strict-parse reject: %d proposal blocks (want exactly one add-only proposal)", len(recognized))
+	case len(recognized) == 1:
+		data, err := toJSON(recognized[0].Input)
+		if err != nil {
+			return Proposal{}, err
+		}
+		return parseTuningForGap(data, gap)
+	}
+
+	if unrecognizedTool {
+		return Proposal{}, errors.New("strict-parse reject: reply used an unrecognized tool (only add-only propose_tuning is accepted for a gap candidate)")
+	}
+
+	joined := strings.TrimSpace(strings.Join(textParts, ""))
+	if joined == "" {
+		return Proposal{}, errors.New("strict-parse reject: empty reply (no add-only proposal)")
+	}
+	return parseTuningForGap(json.RawMessage(joined), gap)
+}
+
+// parseTuningForGap decodes and validates a TuningDelta exactly as parseTuning
+// does, plus an own-gap check mirroring parseMapping's: a proposal may only
+// widen the detector family its OWN gap concerns, never a different one.
+func parseTuningForGap(data []byte, gap GapCandidate) (Proposal, error) {
+	prop, err := parseTuning(data)
+	if err != nil {
+		return Proposal{}, err
+	}
+	if !strings.EqualFold(strings.TrimSpace(prop.Tuning.Detector), strings.TrimSpace(gap.DetectorFamily)) {
+		return Proposal{}, fmt.Errorf("strict-parse reject: tuning detector %q != gap detector family %q (a proposal may only widen its own gap)", prop.Tuning.Detector, gap.DetectorFamily)
+	}
+	return prop, nil
+}
+
 // inVocabulary reports whether canonical target is a member of vocab (each vocab
 // entry is canonicalized before comparison; mallcop's members are already
 // canonical, so this only guards a non-canonical entry).
