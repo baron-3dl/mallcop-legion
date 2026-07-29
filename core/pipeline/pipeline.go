@@ -353,12 +353,6 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 	}
 	findings = applyDirectives(findings, directives)
 
-	// Gap C (mallcoppro-4da): apply any "severity" directive's label override
-	// AFTER suppress/unsuppress has already decided which findings survive —
-	// this only renames finding.Severity on the kept set, it never feeds back
-	// into which findings were dropped (R9: annotation only).
-	findings = defaultDirectiveDispatcher.ApplySeverityOverrides(findings, directives)
-
 	// VOLUME CIRCUIT BREAKER (L4 resource floor, ports src/mallcop/budget.py
 	// check_circuit_breaker). A flood of findings — e.g. an attacker generating
 	// noise to drown a single real boundary violation — must NOT be quietly
@@ -387,14 +381,29 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 		DuplicatesSkipped: duplicatesSkipped,
 	}
 
+	// Gap C (mallcoppro-4da) / R9 FIX (mallcoppro-e38): apply any "severity"
+	// directive's label override to a SEPARATE display copy — never to `findings`
+	// itself. `findings` (original detector severity) is what gets threaded into
+	// resolveAll below, so an operator's severity relabel can NEVER change which
+	// tier/gate a finding routes through (core/agent/triagerisk.go's
+	// triageResolveMustEscalate reads finding.Severity directly — feeding it the
+	// override would silently flip the committee's escalate/quiet verdict, the
+	// exact R9 violation mallcoppro-e38 fixed: the operator's annotation must
+	// never feed back into the vote). displayFindings is used ONLY for what an
+	// operator/the web chat SEES (the persisted findings batch + findings.json
+	// snapshot below) — it never reaches resolveAll.
+	displayFindings := defaultDirectiveDispatcher.ApplySeverityOverrides(findings, directives)
+
 	// Persist the findings BEFORE resolving them, in ONE commit. The findings
 	// stream is the durable record of "what the floor flagged"; it must survive
 	// a crash during resolution. AppendBatch is the only path; the store
-	// linearizes.
-	if len(findings) > 0 {
-		batch := make([]any, len(findings))
-		for i := range findings {
-			batch[i] = findings[i]
+	// linearizes. Persists displayFindings (severity-overridden) so an operator's
+	// relabel is visible in the durable record — this is a display artifact, not
+	// resolve input (see the R9 note above `displayFindings`'s assignment).
+	if len(displayFindings) > 0 {
+		batch := make([]any, len(displayFindings))
+		for i := range displayFindings {
+			batch[i] = displayFindings[i]
 		}
 		if _, err := cfg.Store.AppendBatch(store.KindFindings, batch); err != nil {
 			return Summary{}, fmt.Errorf("pipeline: store findings batch: %w", err)
@@ -405,8 +414,10 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 	// findings as a single JSON document. The web chat reads this instead of the
 	// append-only findings.jsonl, which accumulates history + suppressed records
 	// across scans. Written on every scan (including the empty set, so a cleared
-	// scan overwrites a stale snapshot).
-	if _, err := cfg.Store.WriteSnapshot("findings.json", findings); err != nil {
+	// scan overwrites a stale snapshot). Uses displayFindings for the same reason
+	// as the store batch above — the severity label an operator sees, never the
+	// resolve input.
+	if _, err := cfg.Store.WriteSnapshot("findings.json", displayFindings); err != nil {
 		return Summary{}, fmt.Errorf("pipeline: write findings snapshot: %w", err)
 	}
 
