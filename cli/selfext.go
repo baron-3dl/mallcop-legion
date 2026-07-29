@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/mallcop-app/mallcop/selfext/autonomy"
@@ -160,6 +161,17 @@ func runSelfext(args []string) error {
 			examRepo:        *examRepo,
 			budgetUSD:       *budgetUSD,
 			autonomy:        autonomyDial,
+			// CODE-lane bridge config (mallcoppro-0e9, design §Gap B): a
+			// reported_miss GapCandidate seeds the SAME opencode/engine
+			// authoring path --run drives by hand-typed flags, so it needs
+			// the same authoring knobs. These flags are already parsed above
+			// for --run; --propose simply forwards them too.
+			opencodeBin:          *opencodeBin,
+			codeModel:            *codeModel,
+			sovereignty:          *sovereignty,
+			noJail:               *noJail,
+			maxOutputTokens:      *maxOutputTokens,
+			maxAuthoringAttempts: *maxAuthoringAttempts,
 		})
 	}
 
@@ -250,6 +262,7 @@ func runSelfextRun(a runArgs) error {
 	if repo == "" {
 		return errors.New("selfext --run: --target-repo or MALLCOP_TARGET_REPO is required")
 	}
+	a.targetRepo = repo
 	if a.detectorID == "" || a.eventType == "" {
 		return errors.New("selfext --run: --detector-id and --event-type are required")
 	}
@@ -262,38 +275,9 @@ func runSelfextRun(a runArgs) error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	log.Warn("selfext --run: BYOK mode — inference billed to YOUR OWN endpoint (NO spend cap, NO minted key; your key, your blast radius)", "endpoint", endpoint)
 
-	// BYOISession: authorizes with no cap, records $0, no ledger, no run key.
-	sess := &session.BYOISession{BaseURL: endpoint, Key: key, Logger: log}
-
-	rejects, err := engine.LoadRejectSet("")
+	eng, err := buildCodeLaneEngine(a, endpoint, key, log)
 	if err != nil {
-		return fmt.Errorf("selfext --run: load reject set: %w", err)
-	}
-
-	eng := &engine.Engine{
-		Session: sess,
-		Jail:    &sandbox.Jail{TargetRepo: repo, BaseRef: a.baseRef},
-		Adapter: &opencode.Adapter{
-			Bin:             a.opencodeBin,
-			Lane:            a.lane,
-			Model:           a.codeModel, // BYOK: empty sends the bare lane; the customer opts into a literal id
-			Provider:        sandbox.ProviderName,
-			ForgeBaseURL:    endpoint,
-			Confine:         !a.noJail, // Landlock jail ON by default; --no-jail escapes
-			MaxOutputTokens: a.maxOutputTokens,
-			Logger:          log,
-		},
-		Fingerprints:         rejects,
-		ValidateBin:          a.validateBin,
-		ExamRepo:             a.examRepo,
-		ArtifactDir:          a.artifactDir,
-		Class:                selfextAuthorClass,
-		AuthoringLane:        a.lane,
-		Sovereignty:          a.sovereignty,
-		BudgetUSD:            a.budgetUSD,
-		MaxAuthoringAttempts: a.maxAuthoringAttempts,
-		Autonomy:             a.autonomy,
-		Logger:               log,
+		return fmt.Errorf("selfext --run: %w", err)
 	}
 
 	gap := opencode.TrustedGap{
@@ -317,6 +301,52 @@ func runSelfextRun(a runArgs) error {
 	}
 	printSelfextOutcome(out)
 	return nil
+}
+
+// buildCodeLaneEngine assembles the CODE-lane authoring engine.Engine exactly
+// as --run's hand-typed flags do (jail, adapter, reject set, gate, and the
+// Autonomy dial). It is the ONE construction path both cli entry points
+// share: --run builds its opencode.TrustedGap from flags; --propose's
+// reported_miss route (mallcoppro-0e9, design §Gap B) builds the SAME
+// opencode.TrustedGap shape from a collector GapCandidate via
+// gapCandidateToTrustedGap and feeds it through this identical engine, so the
+// dial-gated GREEN/no-novel-gap merge-automation rule is never
+// re-implemented — a seed's origin (hand-typed vs. operator-reported) cannot
+// change how it is gated.
+func buildCodeLaneEngine(a runArgs, endpoint, key string, log *slog.Logger) (*engine.Engine, error) {
+	// BYOISession: authorizes with no cap, records $0, no ledger, no run key.
+	sess := &session.BYOISession{BaseURL: endpoint, Key: key, Logger: log}
+
+	rejects, err := engine.LoadRejectSet("")
+	if err != nil {
+		return nil, fmt.Errorf("load reject set: %w", err)
+	}
+
+	return &engine.Engine{
+		Session: sess,
+		Jail:    &sandbox.Jail{TargetRepo: a.targetRepo, BaseRef: a.baseRef},
+		Adapter: &opencode.Adapter{
+			Bin:             a.opencodeBin,
+			Lane:            a.lane,
+			Model:           a.codeModel, // BYOK: empty sends the bare lane; the customer opts into a literal id
+			Provider:        sandbox.ProviderName,
+			ForgeBaseURL:    endpoint,
+			Confine:         !a.noJail, // Landlock jail ON by default; --no-jail escapes
+			MaxOutputTokens: a.maxOutputTokens,
+			Logger:          log,
+		},
+		Fingerprints:         rejects,
+		ValidateBin:          a.validateBin,
+		ExamRepo:             a.examRepo,
+		ArtifactDir:          a.artifactDir,
+		Class:                selfextAuthorClass,
+		AuthoringLane:        a.lane,
+		Sovereignty:          a.sovereignty,
+		BudgetUSD:            a.budgetUSD,
+		MaxAuthoringAttempts: a.maxAuthoringAttempts,
+		Autonomy:             a.autonomy,
+		Logger:               log,
+	}, nil
 }
 
 // printSelfextOutcome renders the terminal engine Outcome for the operator.
@@ -377,6 +407,20 @@ type proposeArgs struct {
 	examRepo        string
 	budgetUSD       float64
 	autonomy        autonomy.Dial
+
+	// CODE-lane bridge config (mallcoppro-0e9, design §Gap B) — the SAME
+	// authoring knobs runArgs carries for --run's hand-typed path, forwarded
+	// here so a reported_miss GapCandidate seeds an IDENTICAL engine build
+	// (see buildCodeLaneEngine). Optional: a reported_miss gap with
+	// targetRepo unset simply cannot author (see runSelfextPropose) — every
+	// other field defaults harmlessly (empty opencodeBin -> PATH lookup,
+	// empty codeModel -> bare lane, etc.), exactly as --run's flag defaults do.
+	opencodeBin          string
+	codeModel            string
+	sovereignty          string
+	noJail               bool
+	maxOutputTokens      int
+	maxAuthoringAttempts int
 }
 
 // runSelfextPropose runs the K8 self-extension DATA lane end to end on the BYOK
@@ -412,8 +456,9 @@ func runSelfextPropose(a proposeArgs) error {
 		return err
 	}
 	tuningGaps := filterTuningGapCandidates(env.GapCandidates)
-	if len(env.MappingGaps) == 0 && len(tuningGaps) == 0 {
-		fmt.Println("selfext --propose: no mapping gaps or override/dissent gap candidates in the envelope — nothing to propose.")
+	reportedMissGaps := filterReportedMissGapCandidates(env.GapCandidates)
+	if len(env.MappingGaps) == 0 && len(tuningGaps) == 0 && len(reportedMissGaps) == 0 {
+		fmt.Println("selfext --propose: no mapping gaps, override/dissent gap candidates, or reported-miss gap candidates in the envelope — nothing to propose.")
 		return nil
 	}
 
@@ -479,7 +524,8 @@ func runSelfextPropose(a proposeArgs) error {
 	// route into the SAME DATA-lane proposal → gate → route pipeline as a
 	// mapping gap, just tuning-shaped instead of mapping-shaped. detect_miss has
 	// no finding to tune against; reported_miss is the CODE-lane's own seed
-	// (mallcoppro-0e9, a separate item) and is deliberately left untouched here.
+	// (mallcoppro-0e9, below) and is deliberately excluded here — see
+	// filterReportedMissGapCandidates.
 	for _, gc := range tuningGaps {
 		out, err := p.ProposeGap(ctx, gc)
 		if err != nil {
@@ -503,7 +549,66 @@ func runSelfextPropose(a proposeArgs) error {
 		printRouteDecision(dec)
 	}
 
-	fmt.Fprintf(os.Stderr, "selfext --propose: done — %d proposed, %d routed.\n", proposed, routed)
+	// reported_miss GapCandidates (mallcoppro-0e9, design §Gap B): the
+	// CODE-lane's own seed — an operator's `mallcop feedback report-miss`
+	// asserted the loop missed a (source, event_type[, actor]) it should
+	// have flagged. This is an AUTHORING signal (a net-new/widened
+	// detector), never a tuning-widen of an existing detector (that is the
+	// override_fp/dissent DATA lane above, mallcoppro-b42) — the two filters
+	// are disjoint by Kind, so a gap is never double-consumed on both lanes.
+	// The CODE lane needs a target repo to author into; when --target-repo
+	// is unset there is nothing to do but say so and continue (never a fatal
+	// error — the DATA lane above may still have proposed/routed something).
+	var codeProposed, codeApplied int
+	if len(reportedMissGaps) > 0 {
+		if a.targetRepo == "" {
+			fmt.Printf("SKIPPED  %d reported-miss gap candidate(s) — CODE lane needs --target-repo to author into (spent $0)\n", len(reportedMissGaps))
+		} else {
+			runA := runArgs{
+				inferenceURL:         a.inferenceURL,
+				inferenceKeyEnv:      a.inferenceKeyEnv,
+				targetRepo:           a.targetRepo,
+				baseRef:              a.baseRef,
+				lane:                 a.lane,
+				codeModel:            a.codeModel,
+				sovereignty:          a.sovereignty,
+				artifactDir:          a.artifactDir,
+				opencodeBin:          a.opencodeBin,
+				maxOutputTokens:      a.maxOutputTokens,
+				maxAuthoringAttempts: a.maxAuthoringAttempts,
+				validateBin:          a.validateBin,
+				examRepo:             a.examRepo,
+				budgetUSD:            a.budgetUSD,
+				autonomy:             a.autonomy,
+				noJail:               a.noJail,
+			}
+			// buildCodeLaneEngine is the EXACT construction --run uses (see
+			// its doc comment) — the dial-gated GREEN/no-novel-gap
+			// merge-automation rule is the engine's, unchanged, never
+			// re-implemented here.
+			codeEng, cerr := buildCodeLaneEngine(runA, endpoint, key, log)
+			if cerr != nil {
+				return fmt.Errorf("selfext --propose: code lane: %w", cerr)
+			}
+			for _, gc := range reportedMissGaps {
+				gap := gapCandidateToTrustedGap(gc)
+				fmt.Fprintf(os.Stderr, "selfext --propose: reported_miss %s/%s — seeding CODE-lane authoring run (detector-id %s)...\n", gc.Source, gc.EventType, gap.DetectorID)
+				out, rerr := codeEng.Run(ctx, gap)
+				if rerr != nil {
+					return fmt.Errorf("selfext --propose: code lane run for reported_miss %s/%s: %w", gc.Source, gc.EventType, rerr)
+				}
+				printSelfextOutcome(out)
+				if out.Proposed {
+					codeProposed++
+				}
+				if out.Applied {
+					codeApplied++
+				}
+			}
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "selfext --propose: done — %d proposed, %d routed, %d code-lane proposed (%d merge-automated).\n", proposed, routed, codeProposed, codeApplied)
 	return nil
 }
 
@@ -523,6 +628,82 @@ func filterTuningGapCandidates(gaps []proposer.GapCandidate) []proposer.GapCandi
 		}
 	}
 	return out
+}
+
+// filterReportedMissGapCandidates selects the GapCandidates that seed the
+// CODE lane's own authoring run: an operator-reported miss
+// (`mallcop feedback report-miss`) is a recall-red the loop already knows it
+// missed (core/collect.GapCandidate.IsRecallRed) — an AUTHORING signal (a
+// net-new/widened detector), never a tuning-widen of an existing detector's
+// keyword list (that's the override_fp/dissent DATA lane,
+// filterTuningGapCandidates above; mallcoppro-b42). Sibling filter, disjoint
+// by Kind: a GapCandidate is selected by exactly one of the two filters, so
+// the same operator signal is never double-consumed on both lanes
+// (mallcoppro-0e9, design §Gap B).
+func filterReportedMissGapCandidates(gaps []proposer.GapCandidate) []proposer.GapCandidate {
+	var out []proposer.GapCandidate
+	for _, g := range gaps {
+		if g.Kind == "reported_miss" {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// reportedMissSlugPattern collapses anything outside [a-z0-9] to a single "-"
+// when deriving a stable detector id from a reported_miss gap's family.
+var reportedMissSlugPattern = regexp.MustCompile(`[^a-z0-9]+`)
+
+// reportedMissDetectorID derives a stable, DetectorID-legal detector id from a
+// reported_miss gap's family string. Never hand-typed: the CODE lane's own
+// seed has no operator-supplied --detector-id (mallcop feedback report-miss
+// takes no such flag), so the id must be reproducibly derived from the SAME
+// structured fields the gap already carries — two reports of the same family
+// derive the same id, which is what lets Engine.Fingerprints/anti-thrash
+// (opencode.TrustedGap.Fingerprint) skip a known-reject without re-spending
+// inference.
+func reportedMissDetectorID(family string) string {
+	slug := reportedMissSlugPattern.ReplaceAllString(strings.ToLower(strings.TrimSpace(family)), "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		slug = "gap"
+	}
+	return "authored-" + slug
+}
+
+// gapCandidateToTrustedGap seeds a CODE-lane opencode.TrustedGap from a
+// reported_miss GapCandidate (mallcoppro-0e9, design §Gap B) — the bridge
+// that lets runSelfextPropose's reported_miss route feed runSelfextRun's
+// existing CODE-lane engine (buildCodeLaneEngine) instead of the hand-typed
+// --detector-id/--event-type/... flags --run reads. Family falls back
+// Source -> EventType because `mallcop feedback report-miss` only requires
+// at least ONE of --source/--event-type (core/collect's GapReportedMiss
+// construction leaves DetectorFamily empty when the operator gave neither a
+// finding source nor scoped it via a family-bearing source), so a gap always
+// derives a stable, non-empty detector id. Only structured GapCandidate
+// fields cross this boundary — never raw operator free text: the collector
+// already drops --description before this GapCandidate exists (see
+// core/collect.GapEvidence's doc comment).
+func gapCandidateToTrustedGap(gc proposer.GapCandidate) opencode.TrustedGap {
+	family := strings.TrimSpace(gc.DetectorFamily)
+	if family == "" {
+		family = strings.TrimSpace(gc.Source)
+	}
+	if family == "" {
+		family = strings.TrimSpace(gc.EventType)
+	}
+	severity := strings.TrimSpace(gc.Severity)
+	if severity == "" {
+		severity = "medium" // reported_miss carries no finding, so no finding severity; matches --run's own --severity default
+	}
+	return opencode.TrustedGap{
+		DetectorID:   reportedMissDetectorID(family),
+		EventType:    gc.EventType,
+		TargetFamily: family,
+		Severity:     severity,
+		Actor:        gc.Evidence.ExpectedActor,
+		Source:       gc.Source,
+	}
 }
 
 // resolveProposeGate obtains the GateResult for a proposal. Preference order:
