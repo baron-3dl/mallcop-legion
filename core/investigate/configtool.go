@@ -34,7 +34,10 @@
 //
 // LOWERING the dial (a de-escalation) and DISABLING contribute-back are the safe
 // direction and need no confirm. Adding a connector expands data sources, not the
-// loop's authority, and is likewise not part of the R3 hard line.
+// loop's authority, and is likewise not part of the R3 hard line — but it is
+// still a tenant-local write, so it follows the SAME standard (non-hard-line)
+// dial gate as record_decision/record_owned/dispatch_selfext: propose-only
+// commits nothing without confirm, auto dials (semi/fully) commit.
 package investigate
 
 import (
@@ -221,6 +224,22 @@ func setConfigTool(opts Options, in SetConfigInput) (any, error) {
 			Args:   in.Connector.Args,
 			Env:    in.Connector.Env,
 		}
+
+		// Dial gate: adding a connector is a tenant-local config write, NOT an
+		// R3 hard line (unlike autonomy-raise/contribute-back above) — so it
+		// follows the SAME standard dial gate as record_decision's steering
+		// directives. At propose-only (config.AutonomyNon) commit nothing
+		// unless the operator's Apply re-issues with confirm=true; semi/fully
+		// commit immediately.
+		if cfg.Learning.Autonomy == config.AutonomyNon && !in.Confirm {
+			return SetConfigOutput{
+				Applied:         false,
+				RequiresConfirm: true,
+				Setting:         setting,
+				Summary: fmt.Sprintf("mallcop is at the propose-only autonomy dial — nothing was written. Adding connector %q (kind=%s) is proposed; re-issue with confirm=true only after the operator approves it in this conversation.", conn.ID, conn.Kind),
+			}, nil
+		}
+
 		next, err := config.AddConnector(cfg, conn)
 		if err != nil {
 			return nil, fmt.Errorf("set_config: %w", err)

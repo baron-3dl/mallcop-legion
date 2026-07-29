@@ -207,11 +207,15 @@ func TestSetConfig_ContributeBackDisable_NoConfirmNeeded(t *testing.T) {
 
 // TestSetConfig_AddConnector_Applies proves the connector path routes through
 // config.AddConnector + WriteConfigAtomic (not a parallel mutation) and lands on
-// disk. Adding a connector is not an R3 hard-line change, so no confirm is
-// required.
+// disk. Adding a connector is not an R3 hard-line change, so no CONFIRM is
+// required — but (mallcoppro-bc1e) it IS still gated by the standard
+// propose-only autonomy dial, same as record_decision/record_owned/
+// dispatch_selfext. This test proves the "auto dial commits" half; the
+// propose-only half is TestSetConfig_AddConnector_ProposeOnly_RequiresConfirm
+// below.
 func TestSetConfig_AddConnector_Applies(t *testing.T) {
 	dir := t.TempDir()
-	path := writeConfigAt(t, dir, config.AutonomyNon, false)
+	path := writeConfigAt(t, dir, config.AutonomySemi, false)
 
 	res, err := ExecuteTool(Options{RepoRoot: dir}, "set_config", map[string]any{
 		"setting": "connector",
@@ -226,7 +230,7 @@ func TestSetConfig_AddConnector_Applies(t *testing.T) {
 	}
 	out := res.(SetConfigOutput)
 	if !out.Applied || out.RequiresConfirm {
-		t.Fatalf("connector add should apply; got %+v", out)
+		t.Fatalf("connector add should apply at an auto dial; got %+v", out)
 	}
 	cfg := loadAutonomy(t, path)
 	found := false
@@ -237,6 +241,84 @@ func TestSetConfig_AddConnector_Applies(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("connector payments-audit not present on disk after add; connectors=%+v", cfg.Connectors)
+	}
+}
+
+// TestSetConfig_AddConnector_ProposeOnly_RequiresConfirm is the antipattern-sweep
+// enforcement test for mallcoppro-bc1e: at the propose-only autonomy dial
+// (config.AutonomyNon, the default) set_config's "connector" case must NOT
+// commit AddConnector unconditionally — it must follow the SAME dial gate as
+// the other non-hard-line settings (record_decision et al): commit NOTHING and
+// return a requires_confirm proposal.
+func TestSetConfig_AddConnector_ProposeOnly_RequiresConfirm(t *testing.T) {
+	dir := t.TempDir()
+	path := writeConfigAt(t, dir, config.AutonomyNon, false)
+
+	res, err := ExecuteTool(Options{RepoRoot: dir}, "set_config", map[string]any{
+		"setting": "connector",
+		"connector": map[string]any{
+			"kind": "github",
+			"id":   "payments-audit",
+			"org":  "acme-payments",
+		},
+		// no confirm — propose-only must refuse to write.
+	})
+	if err != nil {
+		t.Fatalf("ExecuteTool: %v", err)
+	}
+	out, ok := res.(SetConfigOutput)
+	if !ok {
+		t.Fatalf("result type = %T, want SetConfigOutput", res)
+	}
+	if out.Applied {
+		t.Fatalf("connector add at propose-only reported Applied=true — dial gate breached")
+	}
+	if !out.RequiresConfirm {
+		t.Fatalf("connector add at propose-only did not set RequiresConfirm; got %+v", out)
+	}
+	// Ground truth: the file on disk is untouched — the proposed connector was
+	// NOT written (defaults may already carry an unrelated connector, so check
+	// for absence of this specific one rather than an empty list).
+	cfg := loadAutonomy(t, path)
+	for _, c := range cfg.Connectors {
+		if c.ID == "payments-audit" {
+			t.Fatalf("connector payments-audit present on disk after an unconfirmed propose-only add, want it UNWRITTEN; connectors=%+v", cfg.Connectors)
+		}
+	}
+}
+
+// TestSetConfig_AddConnector_ProposeOnly_ConfirmCommits proves the operator's
+// confirmed re-issue at propose-only DOES commit — mirroring record_decision's
+// confirm-overrides-propose-only behavior for a non-hard-line setting.
+func TestSetConfig_AddConnector_ProposeOnly_ConfirmCommits(t *testing.T) {
+	dir := t.TempDir()
+	path := writeConfigAt(t, dir, config.AutonomyNon, false)
+
+	res, err := ExecuteTool(Options{RepoRoot: dir}, "set_config", map[string]any{
+		"setting": "connector",
+		"connector": map[string]any{
+			"kind": "github",
+			"id":   "payments-audit",
+			"org":  "acme-payments",
+		},
+		"confirm": true,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteTool: %v", err)
+	}
+	out := res.(SetConfigOutput)
+	if !out.Applied || out.RequiresConfirm {
+		t.Fatalf("confirmed connector add at propose-only should apply; got %+v", out)
+	}
+	cfg := loadAutonomy(t, path)
+	found := false
+	for _, c := range cfg.Connectors {
+		if c.ID == "payments-audit" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("connector payments-audit not present on disk after confirmed add; connectors=%+v", cfg.Connectors)
 	}
 }
 
