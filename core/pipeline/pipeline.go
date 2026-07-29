@@ -353,6 +353,12 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 	}
 	findings = applyDirectives(findings, directives)
 
+	// Gap C (mallcoppro-4da): apply any "severity" directive's label override
+	// AFTER suppress/unsuppress has already decided which findings survive —
+	// this only renames finding.Severity on the kept set, it never feeds back
+	// into which findings were dropped (R9: annotation only).
+	findings = defaultDirectiveDispatcher.ApplySeverityOverrides(findings, directives)
+
 	// VOLUME CIRCUIT BREAKER (L4 resource floor, ports src/mallcop/budget.py
 	// check_circuit_breaker). A flood of findings — e.g. an attacker generating
 	// noise to drown a single real boundary violation — must NOT be quietly
@@ -461,14 +467,28 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 		allEvents := make([]event.Event, 0, len(priorEvents)+len(events))
 		allEvents = append(allEvents, priorEvents...)
 		allEvents = append(allEvents, events...)
+		// Gap C (mallcoppro-4da): focus/watch-closer directives raise a
+		// finding's attention weight, which RunAll consumes to spend its
+		// (budget-limited) investigation calls on higher-attention findings
+		// FIRST — the "watch-closer" half of the attention consumer. Built
+		// from the SAME directive stream applyDirectives/ApplySeverityOverrides
+		// already loaded above; a finding with no matching directive gets
+		// weight 0 and keeps the pre-existing ID-only tiebreak order.
+		escalatedFindings := make([]finding.Finding, len(escalated))
+		for i, ef := range escalated {
+			escalatedFindings[i] = ef.Finding
+		}
+		attentionWeights := defaultDirectiveDispatcher.AttentionWeights(escalatedFindings, directives)
+
 		outcome := inquest.RunAll(ctx, inquest.Input{
-			Store:          cfg.Store,
-			Client:         cfg.Client,
-			Findings:       escalated,
-			AllEvents:      allEvents,
-			Baseline:       bl,
-			MallcopVersion: cfg.MallcopVersion,
-			Config:         cfg.Investigate,
+			Store:            cfg.Store,
+			Client:           cfg.Client,
+			Findings:         escalated,
+			AllEvents:        allEvents,
+			Baseline:         bl,
+			MallcopVersion:   cfg.MallcopVersion,
+			Config:           cfg.Investigate,
+			AttentionWeights: attentionWeights,
 		})
 		summary.Investigated = outcome.Investigated
 		summary.InvestigationsDegraded = outcome.Degraded
@@ -639,7 +659,7 @@ func runLowConfidenceRevotes(ctx context.Context, cfg Config, escalated []inques
 			if err := inquest.AttachRevote(cfg.Store, ef.Finding.ID, inquest.RevoteOutcome{
 				Triggered:      false,
 				DeepPassFailed: true,
-				Reason: "Deeper investigation pass did not produce a fresh trusted verdict (deep budget exhausted, model error, or invalid output); NO committee re-vote ran — re-deciding on the first-pass evidence relabeled as a deeper investigation would misrepresent provenance. The escalation stands at its first-pass confidence.",
+				Reason:         "Deeper investigation pass did not produce a fresh trusted verdict (deep budget exhausted, model error, or invalid output); NO committee re-vote ran — re-deciding on the first-pass evidence relabeled as a deeper investigation would misrepresent provenance. The escalation stands at its first-pass confidence.",
 			}); err != nil {
 				warnings = append(warnings, fmt.Sprintf("revote: attach deep_pass_failed for %s: %v", ef.Finding.ID, err))
 			}

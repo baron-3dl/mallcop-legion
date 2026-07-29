@@ -73,6 +73,21 @@ type FindingVerdict struct {
 	// byte-for-byte: suppress sets it, unsuppress clears it, replay order
 	// decides the last word.
 	Suppressed bool
+
+	// Weight accumulates the attention bump from every matching focus/
+	// watch-closer directive (Gap C, mallcoppro-4da; see
+	// core/pipeline/consumer_attention.go). It feeds finding RANKING and
+	// core/inquest's investigation-depth budget ONLY — it is never read by
+	// Apply's drop decision and never touches a committee escalate/quiet
+	// vote (R9: naming/weighting/annotation only, never a verdict override).
+	Weight float64
+
+	// SeverityOverride is the label a matching "severity" directive assigns,
+	// or "" if none matched. A consumer applies this to finding.Severity
+	// AFTER the committee has already resolved escalate/quiet — it renames
+	// the finding's displayed severity, it does not re-run or reverse the
+	// consensus decision (R9; Gap C, mallcoppro-4da).
+	SeverityOverride string
 }
 
 // DirectiveConsumer mutates a finding's verdict for ONE directive that

@@ -157,6 +157,17 @@ type Input struct {
 	MallcopVersion string
 	// Config is the resolved investigate: settings for this run.
 	Config Config
+	// AttentionWeights maps finding.ID to the attention weight accumulated
+	// from any matching focus/watch-closer directive (Gap C, mallcoppro-4da;
+	// core/pipeline.DirectiveDispatcher.AttentionWeights). nil/absent is the
+	// safe default: every finding weighs 0, and RunAll's budget-consumption
+	// order falls back to the pre-Gap-C pure finding-ID sort. A finding
+	// present in Findings but absent from this map ALSO weighs 0 — it is
+	// never an error to omit an entry. This ONLY reorders which findings a
+	// budget-limited scan spends its metered calls on FIRST; it never grants
+	// extra calls, never bypasses the idempotency skip, and never touches a
+	// committee verdict (R9: naming/weighting/annotation only).
+	AttentionWeights map[string]float64
 	// Force, when true, bypasses the idempotency skip (processOne's
 	// found+ok+current-schema short-circuit) UNCONDITIONALLY for every finding
 	// in this call — the caller has already decided this specific subset needs a
@@ -264,9 +275,22 @@ func RunAll(ctx context.Context, in Input) (out Outcome) {
 	}
 
 	// Deterministic order: a re-run of the same scan budgets identically
-	// regardless of upstream map/slice iteration order.
+	// regardless of upstream map/slice iteration order. Gap C (mallcoppro-4da):
+	// a finding with a HIGHER attention weight (focus/watch-closer directives,
+	// via in.AttentionWeights) is budgeted FIRST, so a budget-limited scan
+	// spends its metered calls on what the operator asked to watch closer
+	// before it spends them on everything else; ties (including the common
+	// case of two 0-weight findings, or nil AttentionWeights) fall back to the
+	// pre-Gap-C finding-ID order, so this is a strict superset of the old
+	// behavior, not a replacement for it.
 	findings := append([]EscalatedFinding(nil), in.Findings...)
-	sort.Slice(findings, func(i, j int) bool { return findings[i].Finding.ID < findings[j].Finding.ID })
+	sort.SliceStable(findings, func(i, j int) bool {
+		wi, wj := in.AttentionWeights[findings[i].Finding.ID], in.AttentionWeights[findings[j].Finding.ID]
+		if wi != wj {
+			return wi > wj
+		}
+		return findings[i].Finding.ID < findings[j].Finding.ID
+	})
 
 	// Gap E2: an operator prioritize/criticality directive re-sorts (never
 	// filters) this finding-ID order — a source the operator called out
