@@ -426,23 +426,37 @@ func runScan(args []string) error {
 
 	// (4.6) UNCONDITIONAL case collapse (mallcoppro-554): recurring escalated
 	// findings — same (type, actor, entity) — collapse into store/cases.json,
-	// a durable cross-scan projection. Always runs when this scan escalated
-	// anything; no env gate (unlike Discord) — mirrors findings.json's
-	// "written every scan" precedent. Reads ONLY already-committed
-	// resolutions (Action=="escalate") and their paired findings; never
-	// writes to resolutions.jsonl and cannot alter a disposition — the
-	// consensus invariant (any-escalate-wins committee decides; this block
-	// only PROJECTS a decision already made) is structurally preserved by
-	// cases.Escalation carrying no Action/Reason/Confidence field to act on.
-	if sum.FindingsDetected > 0 {
-		if err := collapseCases(st, sum.FindingsDetected); err != nil {
-			// A case-collapse failure must not fail the scan (the findings
-			// and their resolutions are already durably stored — cases.json
-			// is a best-effort side projection, not a required output);
-			// surface it on stderr and continue. Mirrors the Discord-emit
-			// non-fatal precedent above.
-			fmt.Fprintf(os.Stderr, "scan: case collapse: %v\n", err)
-		}
+	// a durable cross-scan projection. No env gate (unlike Discord) — mirrors
+	// findings.json's "written every scan" precedent. Reads ONLY
+	// already-committed resolutions (Action=="escalate") and their paired
+	// findings; never writes to resolutions.jsonl and cannot alter a
+	// disposition — the consensus invariant (any-escalate-wins committee
+	// decides; this block only PROJECTS a decision already made) is
+	// structurally preserved by cases.Escalation carrying no
+	// Action/Reason/Confidence field to act on.
+	//
+	// mallcoppro-a1c: this call is UNCONDITIONAL — it must run even when
+	// sum.FindingsDetected == 0. Gating it on FindingsDetected>0 (the
+	// original mallcoppro-554 shape) made the close/age directive replay
+	// documented on collapseCases ("replay runs EVERY call... a case that
+	// never recurs must still end up closed") false in production: the exact
+	// scenario a close-case directive exists for — "issue close, case never
+	// recurs again" — is precisely a scan that detects zero findings, which
+	// under the old guard never called collapseCases at all, leaving the
+	// directive permanently inert. collapseCases itself is the cheap guard:
+	// loadThisRunFindings/loadThisRunResolutions short-circuit to nil on
+	// thisRun<=0, and the function no-ops (no snapshot write) when there are
+	// no new escalations AND no existing cases.json to replay a directive
+	// against. So calling it every scan costs nothing observable on a
+	// store that has never had a case, and costs one directive-replay pass
+	// (idempotent, see collapseCases' doc comment) on a store that has.
+	if err := collapseCases(st, sum.FindingsDetected); err != nil {
+		// A case-collapse failure must not fail the scan (the findings
+		// and their resolutions are already durably stored — cases.json
+		// is a best-effort side projection, not a required output);
+		// surface it on stderr and continue. Mirrors the Discord-emit
+		// non-fatal precedent above.
+		fmt.Fprintf(os.Stderr, "scan: case collapse: %v\n", err)
 	}
 
 	out := ScanSummary{

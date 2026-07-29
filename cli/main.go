@@ -28,6 +28,7 @@
 //	mallcop config set org.owned --match=<id|arn|role-segment> [--name=] [--relationship=]
 //	mallcop feedback    <finding_id> approve|dismiss --store <dir> [--reason <text>] [--by <name>]
 //	mallcop feedback    report-miss --store <dir> --source <src> --event-type <type> [--actor <a>] [--window <w>] [--description <text>]
+//	mallcop case        close|age <case_id> --store <dir> [--reason <text>] [--by <name>]
 //	mallcop scenario    capture --store <dir> [--event-ids <ids>] [--actor <a> --window <dur>] --must-fire <family>|--must-not-fire <family> [--reserved] [--scenarios-dir <dir>]
 //	mallcop scenario    lint [--scenarios-dir <dir>] [--json]
 //	mallcop scenario    contribute [--yes] [--dry-run] [--allow-authored] [--repo owner/name] [--reference-repo <path>] <scenarios/file.yaml>
@@ -93,6 +94,8 @@ func Main() {
 		}
 	case "feedback":
 		err = runFeedback(args)
+	case "case":
+		err = runCase(args)
 	case "scenario":
 		err = runScenario(args)
 	case "improve":
