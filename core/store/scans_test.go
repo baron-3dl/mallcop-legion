@@ -79,6 +79,58 @@ func TestKindScansAppendAndLoadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestKindSelfextDispatchesAppendAndLoadRoundTrip proves the eighth stream
+// (mallcoppro-0d95) round-trips exactly like KindScans did for the seventh:
+// Append + Load recovers the typed records in commit order, and
+// LoadSelfextDispatches decodes them onto SelfextDispatchRecord.
+func TestKindSelfextDispatchesAppendAndLoadRoundTrip(t *testing.T) {
+	repo := initRepo(t)
+	s, err := Open(repo)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	t1 := time.Date(2026, 7, 29, 9, 0, 0, 0, time.UTC)
+	recs := []SelfextDispatchRecord{
+		{RequestedAt: t1, Lane: "heal", DetectorID: "authored-deploy-burst", EventType: "github.deployment", Severity: "medium", Reason: "operator asked to cover this gap", Autonomy: "fully"},
+		{RequestedAt: t1.Add(time.Hour), Lane: "investigate", DetectorID: "authored-payments-scope", EventType: "cloud.iam", Actor: "svc-payments", Source: "aws", Autonomy: "semi"},
+	}
+	for _, r := range recs {
+		if _, err := s.Append(KindSelfextDispatches, r); err != nil {
+			t.Fatalf("Append(KindSelfextDispatches): %v", err)
+		}
+	}
+
+	got, err := s.LoadSelfextDispatches()
+	if err != nil {
+		t.Fatalf("LoadSelfextDispatches: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("LoadSelfextDispatches returned %d records, want 2", len(got))
+	}
+	if got[0].DetectorID != "authored-deploy-burst" || got[0].Autonomy != "fully" {
+		t.Errorf("first dispatch record = %+v, want DetectorID=authored-deploy-burst Autonomy=fully", got[0])
+	}
+	if got[1].Actor != "svc-payments" || got[1].Autonomy != "semi" {
+		t.Errorf("second dispatch record = %+v, want Actor=svc-payments Autonomy=semi", got[1])
+	}
+
+	// A store that has never appended a selfext dispatch record returns an
+	// empty slice, not an error — mirrors LoadScans/LoadDirectives' contract.
+	freshRepo := initRepo(t)
+	fresh, err := Open(freshRepo)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	none, err := fresh.LoadSelfextDispatches()
+	if err != nil {
+		t.Fatalf("LoadSelfextDispatches on empty stream: %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("LoadSelfextDispatches on a store with no dispatches = %d records, want 0", len(none))
+	}
+}
+
 // TestReadSnapshotRoundTrip proves ReadSnapshot recovers exactly what
 // WriteSnapshot committed, including a NESTED path (investigations/<id>.json)
 // — the shape core/inquest depends on to write beside findings.json without a
