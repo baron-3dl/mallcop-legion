@@ -29,8 +29,10 @@ func runConfigSet(args []string) error {
 		return runConfigSetAutonomy(rest)
 	case "contribute_back":
 		return runConfigSetContributeBack(rest)
+	case "org.owned":
+		return runConfigSetOrgOwned(rest)
 	default:
-		return fmt.Errorf("config set: unknown target %q (want \"connector\", \"autonomy\", or \"contribute_back\")", target)
+		return fmt.Errorf("config set: unknown target %q (want \"connector\", \"autonomy\", \"contribute_back\", or \"org.owned\")", target)
 	}
 }
 
@@ -160,6 +162,53 @@ func runConfigSetContributeBack(args []string) error {
 	}
 
 	fmt.Printf("mallcop config set contribute_back: learning.contribute_back=%t in %s\n", enabled, resolvedPath)
+	return nil
+}
+
+// runConfigSetOrgOwned implements `mallcop config set org.owned --match ...
+// --name ... --relationship ...` — the linux-mode surface over the SHARED
+// mutation primitive (core/config.AddOwned + WriteConfigAtomic), the WRITE
+// last-mile for org-ownership (rd mallcoppro-e07). It appends one OwnedEntity
+// to the org: block so a recurring, baseline-known actor resolves as an OWNED
+// entity by name/relationship at investigation time (mallcoppro-995's READ
+// side), instead of narrating as an unknown external actor. All semantic
+// validation (non-empty, minimum match length) is config.AddOwned's own,
+// duplicated nowhere here. Parity by construction with the record_owned chat
+// tool: both call the identical primitive (R4 dual-audience). org-context stays
+// NAMING-ONLY — this write never overrides a committee verdict.
+func runConfigSetOrgOwned(args []string) error {
+	fs := flag.NewFlagSet("config set org.owned", flag.ContinueOnError)
+	configPath := fs.String("config", "", "Path to mallcop.yaml (overrides $"+config.EnvConfigPath+" and walk-up discovery)")
+	match := fs.String("match", "", "Account id, ARN, or role-name segment to substring-match against a finding's identity fields (required)")
+	name := fs.String("name", "", "Short label for the owned entity, e.g. \"forge-proxy\"")
+	relationship := fs.String("relationship", "", "Plain-language relationship phrase, e.g. \"operator's own hourly inference relay\"")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	owned := config.OwnedEntity{
+		Match:        *match,
+		Name:         *name,
+		Relationship: *relationship,
+	}
+
+	cfg, resolvedPath, err := config.LoadEffective(*configPath)
+	if err != nil {
+		return fmt.Errorf("config set org.owned: %w", err)
+	}
+	if resolvedPath == "" {
+		return fmt.Errorf("config set org.owned: no %s found (run `mallcop init` first, or pass --config)", config.ConfigFileName)
+	}
+
+	next, err := config.AddOwned(cfg, owned)
+	if err != nil {
+		return fmt.Errorf("config set org.owned: %w", err)
+	}
+	if err := config.WriteConfigAtomic(resolvedPath, next); err != nil {
+		return fmt.Errorf("config set org.owned: %w", err)
+	}
+
+	fmt.Printf("mallcop config set org.owned: added owned entity match=%q name=%q to %s — takes effect on the next `mallcop scan`\n", owned.Match, owned.Name, resolvedPath)
 	return nil
 }
 

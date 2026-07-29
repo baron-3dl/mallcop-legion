@@ -150,6 +150,111 @@ func TestSetContributeBack_TogglesAndPreservesOtherFields(t *testing.T) {
 	}
 }
 
+// ---- AddOwned ----
+
+func TestAddOwned_ValidAppendsAndPreservesExisting(t *testing.T) {
+	cfg := Defaults() // Org.Owned is nil by default
+	cfg.Org.Owned = []OwnedEntity{{Match: "111111111111", Name: "existing", Relationship: "prior owned acct"}}
+	before := len(cfg.Org.Owned)
+
+	next, err := AddOwned(cfg, OwnedEntity{Match: "225635015146", Name: "forge-proxy", Relationship: "operator's own hourly inference relay"})
+	if err != nil {
+		t.Fatalf("AddOwned: unexpected error: %v", err)
+	}
+	if len(next.Org.Owned) != before+1 {
+		t.Fatalf("expected %d owned entities, got %d", before+1, len(next.Org.Owned))
+	}
+	if next.Org.Owned[0] != cfg.Org.Owned[0] {
+		t.Fatalf("existing owned entity was not preserved: got %+v", next.Org.Owned[0])
+	}
+	last := next.Org.Owned[len(next.Org.Owned)-1]
+	want := OwnedEntity{Match: "225635015146", Name: "forge-proxy", Relationship: "operator's own hourly inference relay"}
+	if last != want {
+		t.Fatalf("new owned entity not appended correctly: got %+v want %+v", last, want)
+	}
+
+	// cfg itself must be untouched (no in-place mutation / no shared backing array).
+	if len(cfg.Org.Owned) != before {
+		t.Fatalf("AddOwned mutated its input cfg in place: len=%d want %d", len(cfg.Org.Owned), before)
+	}
+}
+
+func TestAddOwned_AppendsToNilOwned(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Org.Owned != nil {
+		t.Fatalf("Defaults().Org.Owned = %+v, want nil", cfg.Org.Owned)
+	}
+	next, err := AddOwned(cfg, OwnedEntity{Match: "225635015146", Name: "forge-proxy"})
+	if err != nil {
+		t.Fatalf("AddOwned onto nil: %v", err)
+	}
+	if len(next.Org.Owned) != 1 || next.Org.Owned[0].Name != "forge-proxy" {
+		t.Fatalf("AddOwned onto nil produced %+v", next.Org.Owned)
+	}
+}
+
+func TestAddOwned_EmptyMatchRejected(t *testing.T) {
+	cfg := Defaults()
+	_, err := AddOwned(cfg, OwnedEntity{Match: "   ", Name: "blank"})
+	if err == nil {
+		t.Fatal("expected error for empty/blank org.owned.match, got nil")
+	}
+	if !strings.Contains(err.Error(), "non-empty") {
+		t.Fatalf("error should explain the non-empty rule, got: %v", err)
+	}
+}
+
+func TestAddOwned_TooShortMatchRejected(t *testing.T) {
+	cfg := Defaults()
+	// Under minOrgMatchLen (8) — a short generic fragment that would substring-
+	// match broadly. This is the SAME floor validate() enforces on load.
+	_, err := AddOwned(cfg, OwnedEntity{Match: "aws", Name: "too-short"})
+	if err == nil {
+		t.Fatal("expected error for too-short org.owned.match, got nil")
+	}
+	if !strings.Contains(err.Error(), "characters") {
+		t.Fatalf("error should explain the minimum-length rule, got: %v", err)
+	}
+	// And the input cfg is untouched on the reject path.
+	if cfg.Org.Owned != nil {
+		t.Fatalf("AddOwned mutated cfg on a reject: %+v", cfg.Org.Owned)
+	}
+}
+
+func TestAddOwned_RoundTripThroughWriteAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigFileName)
+
+	cfg := Defaults()
+	if err := WriteConfig(path, cfg); err != nil {
+		t.Fatalf("seed WriteConfig: %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load seed: %v", err)
+	}
+
+	mutated, err := AddOwned(loaded, OwnedEntity{Match: "225635015146", Name: "forge-proxy", Relationship: "operator's own hourly inference relay"})
+	if err != nil {
+		t.Fatalf("AddOwned: %v", err)
+	}
+	if err := WriteConfigAtomic(path, mutated); err != nil {
+		t.Fatalf("WriteConfigAtomic: %v", err)
+	}
+
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload after mutation: %v", err)
+	}
+	if len(reloaded.Org.Owned) != 1 {
+		t.Fatalf("Org.Owned len = %d, want 1 after reload: %+v", len(reloaded.Org.Owned), reloaded.Org.Owned)
+	}
+	want := OwnedEntity{Match: "225635015146", Name: "forge-proxy", Relationship: "operator's own hourly inference relay"}
+	if reloaded.Org.Owned[0] != want {
+		t.Fatalf("owned entity not persisted verbatim: got %+v want %+v", reloaded.Org.Owned[0], want)
+	}
+}
+
 // ---- Round trip: AddConnector + SetAutonomy -> WriteConfigAtomic -> Load ----
 
 func TestMutate_RoundTripThroughWriteAndLoad(t *testing.T) {

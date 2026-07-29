@@ -25,6 +25,7 @@
 //	mallcop config
 //	mallcop config set connector --kind=file|github|cloud --id=<id> [...]
 //	mallcop config set autonomy <non|semi|fully>
+//	mallcop config set org.owned --match=<id|arn|role-segment> [--name=] [--relationship=]
 //	mallcop feedback    <finding_id> approve|dismiss --store <dir> [--reason <text>] [--by <name>]
 //	mallcop feedback    report-miss --store <dir> --source <src> --event-type <type> [--actor <a>] [--window <w>] [--description <text>]
 //	mallcop scenario    capture --store <dir> [--event-ids <ids>] [--actor <a> --window <dur>] --must-fire <family>|--must-not-fire <family> [--reserved] [--scenarios-dir <dir>]
@@ -248,6 +249,13 @@ Commands:
   config set autonomy <non|semi|fully>
                 Set learning.autonomy in mallcop.yaml (strict enum, atomic write).
                 THE SHARED PRIMITIVE — see core/config.SetAutonomy.
+  config set org.owned --match=<id|arn|role-segment> [--name=][--relationship=]
+                Name one of YOUR OWN accounts/roles/relays in mallcop.yaml's org.owned
+                block so the next scan resolves a recurring, baseline-known actor as
+                owned (by name/relationship) instead of an unknown external actor —
+                naming only, never a verdict override. Strict-validated, atomic write.
+                THE SHARED PRIMITIVE the record_owned chat tool also calls — see
+                core/config.AddOwned.
 
   feedback  Record an operator decision on a finding; the next scan honors it
     <finding_id> approve|dismiss   approve = activity known-good; dismiss = not actionable
