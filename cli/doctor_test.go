@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/mallcop-app/mallcop/core/config"
 	"github.com/mallcop-app/mallcop/core/connect"
 	"github.com/mallcop-app/mallcop/core/store"
 	"github.com/mallcop-app/mallcop/pkg/event"
@@ -47,6 +49,32 @@ if [ "$1" = "--doctor" ]; then
 fi
 printf '%s\n' '{"id":"e1","source":"fake","type":"login"}'
 `
+
+// captureStdoutStderr is captureStdout (cli/status_test.go) plus a second
+// redirect for os.Stderr into stderrBuf -- needed here because diagnoseAll's
+// honest-omission warning (cli/doctor.go) is written to os.Stderr, not
+// returned as part of the captured stdout JSON.
+func captureStdoutStderr(t *testing.T, stderrBuf *bytes.Buffer, fn func()) string {
+	t.Helper()
+	oldOut, oldErr := os.Stdout, os.Stderr
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe (stdout): %v", err)
+	}
+	rErr, wErr, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe (stderr): %v", err)
+	}
+	os.Stdout, os.Stderr = wOut, wErr
+	fn()
+	wOut.Close()
+	wErr.Close()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	var outBuf bytes.Buffer
+	io.Copy(&outBuf, rOut)
+	io.Copy(stderrBuf, rErr)
+	return outBuf.String()
+}
 
 func writeFakeSibling(t *testing.T, dir, name, body string) string {
 	t.Helper()
@@ -257,6 +285,115 @@ func TestRunDoctorAll_NoConnectorsSupportDiagnosis_EmptyArrayNotFailure(t *testi
 	}
 	if strings.TrimSpace(out) != "[]" {
 		t.Fatalf("output = %q, want a bare empty JSON array", out)
+	}
+}
+
+// TestRunDoctorAll_UnconfiguredCloudConnector_OmittedAndReported_RealPath is
+// the veracity-required real-path proof: a real mallcop.yaml naming a
+// kind:cloud connector that is ID-ONLY -- neither `binary:` nor `source:` set
+// -- alongside a healthy sibling. core/config's validate() does not require
+// either field, so this config passes LoadEffective, and buildConnectors
+// (cli/scan.go) constructs the ExecConnector for it unconditionally. Its real
+// Diagnose call (connect/exec/exec.go's binaryName()) therefore returns a
+// genuine non-nil error ("connector %q has neither binary nor source set"),
+// driving the SAME runDoctorAll/diagnoseAll/doctor.json path
+// TestRunDoctorAll_MixedConnectors_RealConfigRealSubprocess exercises for the
+// mixed deficient/healthy case above -- no diagnoseAllFake double anywhere in
+// this test. This is the case the veracity adversary demonstrated reachable
+// from an ordinary config and the prior version of this file only proved via
+// a hand-rolled Diagnosable fake (diagnoseAllFake, below), never through
+// runDoctorAll/CLI/doctor.json itself.
+//
+// Asserts, at the doctor.json/CLI level:
+//  1. the healthy sibling appears in the array;
+//  2. the broken connector does NOT appear -- neither fabricated nor
+//     present with a healthy-looking Known:true/no-remediation entry;
+//  3. the omission is REPORTED on stderr (naming the connector and the real
+//     "neither binary nor source set" error), not silently dropped;
+//  4. runDoctor's process-level exit code reflects anyError via errFindings,
+//     matching the single-error-path convention diagnoseAll already defines.
+func TestRunDoctorAll_UnconfiguredCloudConnector_OmittedAndReported_RealPath(t *testing.T) {
+	dir := t.TempDir()
+	healthyBin := writeFakeSibling(t, dir, "healthy-sibling", doctorHealthySibling)
+	storePath := filepath.Join(dir, "store")
+	cfgPath := filepath.Join(dir, "mallcop.yaml")
+
+	// Hand-written (not writeDoctorConfigMulti, which always sets `binary:`):
+	// "broken-conn" deliberately sets neither binary nor source.
+	writeFile(t, cfgPath, `version: 1
+inference:
+  mode: offline
+  endpoint: ""
+  key_env: MALLCOP_API_KEY
+  model: mallcop-default
+store:
+  path: `+storePath+`
+  baseline: ""
+connectors:
+  - kind: cloud
+    id: broken-conn
+  - kind: cloud
+    id: healthy-conn
+    binary: `+healthyBin+`
+detectors:
+  builtin:
+    enabled: true
+    disable: []
+learning:
+  dir: detectors
+  autonomy: non
+`)
+
+	// Confirm this config actually passes validation/loading -- the whole
+	// point of the finding is that this is an ORDINARY reachable config, not
+	// a hand-crafted invalid one.
+	if _, _, cerr := config.LoadEffective(cfgPath); cerr != nil {
+		t.Fatalf("config.LoadEffective on an id-only kind:cloud connector: %v, want nil (validate() does not require binary/source)", cerr)
+	}
+
+	var stderr bytes.Buffer
+	var out string
+	var err error
+	out = captureStdoutStderr(t, &stderr, func() {
+		err = runDoctor([]string{"--all", "--config", cfgPath, "--json"})
+	})
+	if !isFindingsError(err) {
+		t.Fatalf("runDoctor --all with one connector whose Diagnose call errors: err = %v, want the errFindings sentinel", err)
+	}
+
+	var reports []connect.DiagnosisReport
+	if jerr := json.Unmarshal([]byte(out), &reports); jerr != nil {
+		t.Fatalf("--all --json output did not parse as []DiagnosisReport: %v\noutput: %s", jerr, out)
+	}
+	if len(reports) != 1 {
+		t.Fatalf("got %d reports, want exactly 1 (only healthy-conn; broken-conn's real Diagnose error must omit it, not fabricate an entry): %+v", len(reports), reports)
+	}
+	if reports[0].ConnectorID != "healthy-conn" {
+		t.Fatalf("reports[0].ConnectorID = %q, want %q", reports[0].ConnectorID, "healthy-conn")
+	}
+	for _, r := range reports {
+		if r.ConnectorID == "broken-conn" {
+			t.Fatalf("broken-conn must NOT appear in doctor.json at all -- fabricated or healthy-looking -- got: %+v", reports)
+		}
+	}
+
+	// The omission must be REPORTED, not silent: stderr names the connector
+	// and carries the real config-shape error, not a synthetic message.
+	stderrOut := stderr.String()
+	if !strings.Contains(stderrOut, "broken-conn") {
+		t.Fatalf("stderr = %q, want it to name broken-conn as the omitted connector", stderrOut)
+	}
+	if !strings.Contains(stderrOut, "neither binary nor source set") {
+		t.Fatalf("stderr = %q, want it to carry the real binaryName() error explaining WHY broken-conn was never diagnosed", stderrOut)
+	}
+
+	// Confirm a reader of doctor.json genuinely cannot mistake "never
+	// diagnosed" for "healthy": broken-conn is absent from the array entirely
+	// (proven above), and the ONLY entry present (healthy-conn) is the real
+	// classified healthy diagnosis, not a placeholder standing in for
+	// broken-conn.
+	if !reports[0].Diagnosis.Known || len(reports[0].Remediation) != 0 {
+		t.Fatalf("reports[0] = %+v, want the real healthy classified diagnosis for healthy-conn", reports[0])
 	}
 }
 
