@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -236,4 +237,113 @@ func (s *Store) LoadSelfextDispatches() ([]SelfextDispatchRecord, error) {
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+// GrantOutcome is one entry on the grants stream (mallcoppro-62b, Design §4
+// corpus mechanics): a permission-diagnosis row for the customer-operable
+// onboarding loop's "connector can't read this source, here's the exact
+// remediate command" flow.
+//
+// A row is EITHER a GRANT-MISS (the diagnosis of a failed access attempt:
+// Connector/Cloud/AccessMode/FailureClass/GrantCommand populated, Resolved
+// false, ResolvedRef empty) OR a RESOLUTION of a prior miss (Resolved true,
+// ResolvedRef set to identify the original miss row). A resolution is ALWAYS
+// a SECOND appended row — never a mutation of the first. This is the same
+// append-only discipline KindFindings/its resolutions stream already uses:
+// the miss and its resolution are two facts in history, not one fact edited
+// in place, so `git log` shows exactly what was diagnosed and when it was
+// fixed rather than overwriting the diagnosis.
+//
+// This stream is the in-product accretion loop's memory, not a system of
+// record for remediation scripts: a `grants/<connector>.sh` helper is only
+// ever a DERIVED artifact rendered from this stream, never itself the
+// source of truth (two-writers is rejected — see the design ruling this
+// item cites, R5). It is PRIVATE per-tenant history: it lives solely in the
+// customer's own git repo, with no R8 shared-corpus contribute-back
+// machinery attached.
+type GrantOutcome struct {
+	// Connector, Cloud, AccessMode identify what was being diagnosed: which
+	// connector, which cloud/provider, and which access mode (e.g.
+	// "read-only", "list-buckets") it attempted.
+	Connector  string `json:"connector"`
+	Cloud      string `json:"cloud"`
+	AccessMode string `json:"access_mode"`
+	// FailureClass categorizes why the access attempt failed (e.g.
+	// "missing-scope", "expired-credential", "denied-policy"). Empty on a
+	// resolution row — the failure was already classified on the original
+	// miss row this one resolves.
+	FailureClass string `json:"failure_class,omitempty"`
+	// GrantCommand is the exact remediate command the operator was told to
+	// run to close this gap (e.g. an `aws iam ...` or `gh auth ...`
+	// invocation). Empty on a resolution row.
+	GrantCommand string `json:"grant_command,omitempty"`
+	// DetectedAt is when this row's diagnosis (miss or resolution) was made.
+	DetectedAt time.Time `json:"detected_at"`
+	// Resolved is false on a GRANT-MISS row and true on a RESOLUTION row.
+	Resolved bool `json:"resolved"`
+	// ResolvedRef identifies the original GRANT-MISS row this resolution
+	// closes. Empty on a miss row; set on a resolution row to the commit SHA
+	// that Store.Append returned when the miss row was appended — NOT a
+	// synthetic/free-form key. That SHA is a genuinely resolvable identity:
+	// pass it to Store.ResolveGrantMiss to read the exact original miss row
+	// back (see that function's doc comment for why this works). A caller
+	// closing a GRANT-MISS therefore must capture the sha Append returned for
+	// the miss and carry it forward into the resolution row's ResolvedRef.
+	ResolvedRef string `json:"resolved_ref,omitempty"`
+}
+
+// LoadGrantOutcomes replays the grants stream into typed GrantOutcome
+// records, oldest first — mirroring LoadScans' contract exactly. A store
+// that predates KindGrants, or has never had a grant diagnosis appended,
+// returns an empty slice, not an error.
+func (s *Store) LoadGrantOutcomes() ([]GrantOutcome, error) {
+	raws, err := s.Load(KindGrants)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GrantOutcome, 0, len(raws))
+	for i, raw := range raws {
+		var r GrantOutcome
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return nil, fmt.Errorf("store: decode grant outcome record %d: %w", i, err)
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// ResolveGrantMiss looks up the original GRANT-MISS row a resolution's
+// ResolvedRef points at. ref is the commit SHA Store.Append returned when the
+// miss row was appended (see GrantOutcome.ResolvedRef).
+//
+// This works because of how commitAppend (store.go) is built: every Append
+// call lands as its OWN commit whose stream blob is exactly
+// prev-content + this-call's-chunk — it only ever concatenates, never
+// rewrites earlier bytes. So at the EXACT commit an Append call returned, the
+// last line of the grants stream blob is, byte-for-byte, the record that
+// specific call appended — regardless of how many further records land on
+// the stream afterward, because blobAt reads the historical tree at ref, not
+// current HEAD. That makes ref a genuinely resolvable identity for the row:
+// any Store handle open on the same repo can hand a resolution's ResolvedRef
+// to this function and read back the exact original miss row, not merely
+// round-trip an opaque string a consumer has to trust.
+//
+// An error is returned if ref does not name a commit in this repo, or if the
+// grants stream has no record at that commit (e.g. ref points at some other
+// stream's commit).
+func (s *Store) ResolveGrantMiss(ref string) (GrantOutcome, error) {
+	raw, err := s.blobAt(ref, KindGrants.file())
+	if err != nil {
+		return GrantOutcome{}, fmt.Errorf("store: resolve grant miss %s: %w", ref, err)
+	}
+	lines := bytes.Split(bytes.TrimRight(raw, "\n"), []byte("\n"))
+	last := bytes.TrimSpace(lines[len(lines)-1])
+	if len(last) == 0 {
+		return GrantOutcome{}, fmt.Errorf("store: resolve grant miss %s: no grants record at that commit", ref)
+	}
+	var r GrantOutcome
+	if err := json.Unmarshal(last, &r); err != nil {
+		return GrantOutcome{}, fmt.Errorf("store: decode grant miss at %s: %w", ref, err)
+	}
+	return r, nil
 }
