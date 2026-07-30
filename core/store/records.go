@@ -124,11 +124,23 @@ func (s *Store) LoadConversation() ([]Turn, error) {
 }
 
 // ScanRecord is one entry on the scans stream (mallcoppro-e3c): a durable,
-// rotation-surviving register of every completed `mallcop scan` run — appended
-// by core/pipeline.Run at the end of EVERY run, findings or not. It is the
-// authoritative source detection-time investigation's scan-schedule
-// correlation reads first (CommitTimesFor is the historical fallback for scan
-// times that predate this stream).
+// rotation-surviving register of every `mallcop scan` run — appended by
+// core/pipeline.Run at the end of EVERY run, success or failure, findings or
+// not (mallcoppro-24e: previously a failed run returned before ever reaching
+// the append, so a connector 403-on-connect left NO record at all — the exact
+// silence the liveness watchdog (design §5) depends on this stream NOT
+// having). It is the authoritative source detection-time investigation's
+// scan-schedule correlation reads first (CommitTimesFor is the historical
+// fallback for scan times that predate this stream).
+//
+// Success/FailedStage/Error are ADDITIVE (mallcoppro-24e) — a store written by
+// an older binary omits them entirely, which decodes as Success=false,
+// FailedStage="", Error="" under Go's zero-value JSON unmarshal. Every record
+// written before this field existed represents a run that reached the tail
+// recordScan call, i.e. a COMPLETED scan — a consumer that filters on Success
+// must treat a pre-existing record (FailedStage=="" AND Error=="" AND
+// Success==false) as a legacy-completed scan, not a failure, or it will
+// misread the entire history that predates this change as failed.
 type ScanRecord struct {
 	StartedAt        time.Time `json:"started_at"`
 	FinishedAt       time.Time `json:"finished_at"`
@@ -136,6 +148,18 @@ type ScanRecord struct {
 	FindingsDetected int       `json:"findings_detected"`
 	Escalated        int       `json:"escalated"`
 	MallcopVersion   string    `json:"mallcop_version,omitempty"`
+	// Success is true when Run completed every stage without error. False
+	// means Run returned an error — see FailedStage and Error for where and
+	// why. See the type doc comment above for the legacy-record caveat.
+	Success bool `json:"success,omitempty"`
+	// FailedStage names the pipeline stage in flight when Run's error fired
+	// (e.g. "connect", "resolve", "store_findings") — empty when Success is
+	// true. Vocabulary is whatever core/pipeline.Run's internal stage labels
+	// are; this package does not interpret it, only persists and replays it.
+	FailedStage string `json:"failed_stage,omitempty"`
+	// Error is Run's error, rendered via Error() — empty when Success is
+	// true. Human-readable diagnostic text, not a machine-parsed code.
+	Error string `json:"error,omitempty"`
 }
 
 // LoadScans replays the scans stream into typed ScanRecord records, oldest
