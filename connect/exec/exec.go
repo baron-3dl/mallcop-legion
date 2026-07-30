@@ -28,6 +28,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	osexec "os/exec"
@@ -38,6 +39,11 @@ import (
 	"github.com/mallcop-app/mallcop/core/connect"
 	"github.com/mallcop-app/mallcop/pkg/event"
 )
+
+// doctorFlag is the flag ExecConnector execs the sibling with in place of scan
+// args to ask it to self-diagnose (design §11: the doctor needs a LIVE NETWORK
+// CALL, so it ships in the native sibling binary, never as a WASM sidecar).
+const doctorFlag = "--doctor"
 
 // cursorPrefix is the token a sibling binary writes on stderr to hand back its
 // next incremental cursor: "cursor: <value>". Matches aws/main.go:247.
@@ -95,8 +101,13 @@ type ExecConnector struct {
 	spec Spec
 }
 
-// compile-time proof ExecConnector satisfies the input seam.
-var _ connect.Connector = (*ExecConnector)(nil)
+// compile-time proof ExecConnector satisfies the input seam, and its optional
+// self-diagnosis extension. FileConnector does NOT implement Diagnosable — a
+// local file either opens or it doesn't; there is nothing to diagnose.
+var (
+	_ connect.Connector   = (*ExecConnector)(nil)
+	_ connect.Diagnosable = (*ExecConnector)(nil)
+)
 
 // New returns an ExecConnector for spec. Construction touches neither the
 // filesystem nor the process table — resolution and exec happen at Pull time.
@@ -208,6 +219,81 @@ func (c *ExecConnector) Pull(ctx context.Context) ([]event.Event, error) {
 	}
 
 	return events, nil
+}
+
+// Diagnose asks the sibling binary to self-check by execing it with --doctor
+// instead of the scan args, and parses its stdout as a single JSON
+// connect.DiagnosisReport (design §3/§11). It reuses the same binary
+// resolution, scoped env, and process/timeout scaffolding as Pull.
+//
+// Diagnose never returns a raw, uninterpreted error for an EXPECTED degraded
+// case — a missing sibling binary, a sibling that doesn't understand
+// --doctor, or one that prints something that isn't a valid DiagnosisReport —
+// each of those becomes a DiagnosisReport with Diagnosis.Known == false and a
+// nil error, so a caller (mallcop doctor, chat) always has a structured report
+// to show instead of a crash. A non-nil error is reserved for something the
+// caller truly cannot recover a report from: ctx cancellation before the child
+// could even be started.
+func (c *ExecConnector) Diagnose(ctx context.Context) (connect.DiagnosisReport, error) {
+	if err := ctx.Err(); err != nil {
+		return connect.DiagnosisReport{}, fmt.Errorf("connect/exec: connector %q: diagnose: %w", c.spec.ID, err)
+	}
+
+	name, err := c.binaryName()
+	if err != nil {
+		return connect.DiagnosisReport{}, err
+	}
+
+	bin, err := osexec.LookPath(name)
+	if err != nil {
+		return degradedReport(c.spec.ID, fmt.Sprintf(
+			"sibling binary %q not found on PATH (install it, or this connector cannot self-diagnose)", name)), nil
+	}
+
+	// Honor the per-connector timeout on top of the caller's ctx, same as Pull.
+	runCtx := ctx
+	if c.spec.Timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, c.spec.Timeout)
+		defer cancel()
+	}
+
+	cmd := osexec.CommandContext(runCtx, bin, doctorFlag)
+	cmd.Env = c.childEnv()
+	setProcessGroup(cmd)
+	cmd.WaitDelay = 2 * time.Second
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return degradedReport(c.spec.ID, fmt.Sprintf(
+			"sibling %s does not support %s: %v (stderr: %s)", bin, doctorFlag, err, stderrTail(&stderr))), nil
+	}
+
+	var report connect.DiagnosisReport
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &report); err != nil {
+		return degradedReport(c.spec.ID, fmt.Sprintf(
+			"sibling %s printed a non-JSON %s report: %v", bin, doctorFlag, err)), nil
+	}
+	if report.ConnectorID == "" {
+		report.ConnectorID = c.spec.ID
+	}
+	return report, nil
+}
+
+// degradedReport builds the graceful-degradation DiagnosisReport Diagnose
+// returns (with a nil error) when the sibling cannot be asked to self-diagnose
+// at all — Known:false is itself a valid, structured answer, never a crash.
+func degradedReport(connectorID, summary string) connect.DiagnosisReport {
+	return connect.DiagnosisReport{
+		ConnectorID: connectorID,
+		Diagnosis: connect.Diagnosis{
+			Known:   false,
+			Summary: summary,
+		},
+	}
 }
 
 // buildArgs computes the incremental window flags then appends the caller Args.

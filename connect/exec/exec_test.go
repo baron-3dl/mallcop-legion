@@ -29,6 +29,31 @@ sleep 5
 printf '%s\n' '{"id":"late"}'
 `
 
+// doctorSibling supports --doctor: it prints a single JSON DiagnosisReport on
+// stdout and exits 0. Scan args (no --doctor) fall through to the plain event
+// behavior so the same fake can double as a Pull fixture if needed.
+const doctorSibling = `#!/bin/sh
+if [ "$1" = "--doctor" ]; then
+  printf '%s\n' '{"diagnosis":{"known":true,"summary":"credentials valid","confidence":0.95},"remediation":[]}'
+  exit 0
+fi
+printf '%s\n' '{"id":"e1","source":"fake","type":"login"}'
+`
+
+// noDoctorSibling has no idea what --doctor means: it exits non-zero with a
+// usage error on stderr, exactly like an old sibling built before self-
+// diagnosis existed.
+const noDoctorSibling = `#!/bin/sh
+echo "unknown flag: --doctor" 1>&2
+exit 2
+`
+
+// garbageDoctorSibling "supports" --doctor but prints something that is not a
+// valid DiagnosisReport — the malformed-output degrade path.
+const garbageDoctorSibling = `#!/bin/sh
+printf 'not json\n'
+`
+
 // makeFake writes an executable script at dir/name and returns its full path.
 func makeFake(t *testing.T, dir, name, body string) string {
 	t.Helper()
@@ -170,5 +195,101 @@ func TestPull_TimeoutHonored(t *testing.T) {
 	}
 	if elapsed > 3*time.Second {
 		t.Fatalf("timeout not honored: Pull took %s (sibling sleeps 5s, timeout was 200ms)", elapsed)
+	}
+}
+
+func TestDiagnose_ParsesJSONReport(t *testing.T) {
+	dir := t.TempDir()
+	bin := makeFake(t, dir, "mallcop-connector-fake", doctorSibling)
+
+	c := New(Spec{ID: "fake-1", Binary: bin})
+	report, err := c.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if !report.Diagnosis.Known {
+		t.Fatalf("report.Diagnosis.Known = false, want true: %+v", report)
+	}
+	if report.Diagnosis.Summary != "credentials valid" {
+		t.Fatalf("report.Diagnosis.Summary = %q, want %q", report.Diagnosis.Summary, "credentials valid")
+	}
+	if report.Diagnosis.Confidence != 0.95 {
+		t.Fatalf("report.Diagnosis.Confidence = %v, want 0.95", report.Diagnosis.Confidence)
+	}
+	if report.ConnectorID != "fake-1" {
+		t.Fatalf("report.ConnectorID = %q, want %q (defaulted from Spec.ID)", report.ConnectorID, "fake-1")
+	}
+}
+
+func TestDiagnose_PassesDoctorFlagNotScanArgs(t *testing.T) {
+	dir := t.TempDir()
+	bin := makeFake(t, dir, "mallcop-connector-fake", fakeSibling)
+	argsOut := filepath.Join(dir, "args.txt")
+	t.Setenv("FAKE_ARGS_OUT", argsOut)
+
+	// fakeSibling doesn't understand --doctor and will exit non-zero parsing it
+	// as an event line — that's fine, Diagnose degrades gracefully. What this
+	// test proves is the invocation: --doctor, not --since/--cursor scan args.
+	c := New(Spec{ID: "fake-1", Binary: bin, Env: []string{"FAKE_ARGS_OUT"}})
+	if _, err := c.Diagnose(context.Background()); err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	got, err := os.ReadFile(argsOut)
+	if err != nil {
+		t.Fatalf("sibling never recorded argv: %v", err)
+	}
+	if strings.TrimSpace(string(got)) != "--doctor" {
+		t.Fatalf("sibling argv = %q, want exactly %q", strings.TrimSpace(string(got)), "--doctor")
+	}
+}
+
+func TestDiagnose_NoDoctorSupportDegradesGracefully(t *testing.T) {
+	dir := t.TempDir()
+	bin := makeFake(t, dir, "mallcop-connector-fake", noDoctorSibling)
+
+	c := New(Spec{ID: "fake-1", Binary: bin})
+	report, err := c.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose must degrade gracefully, not return an error: %v", err)
+	}
+	if report.Diagnosis.Known {
+		t.Fatalf("report.Diagnosis.Known = true, want false (sibling has no --doctor support): %+v", report)
+	}
+	if report.Diagnosis.Summary == "" {
+		t.Fatal("degraded report must carry a human-readable Summary, not an empty string")
+	}
+	if report.ConnectorID != "fake-1" {
+		t.Fatalf("report.ConnectorID = %q, want %q even in the degraded case", report.ConnectorID, "fake-1")
+	}
+}
+
+func TestDiagnose_MalformedOutputDegradesGracefully(t *testing.T) {
+	dir := t.TempDir()
+	bin := makeFake(t, dir, "mallcop-connector-fake", garbageDoctorSibling)
+
+	c := New(Spec{ID: "fake-1", Binary: bin})
+	report, err := c.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose must degrade gracefully on non-JSON output, not return an error: %v", err)
+	}
+	if report.Diagnosis.Known {
+		t.Fatalf("report.Diagnosis.Known = true, want false (sibling printed non-JSON): %+v", report)
+	}
+}
+
+func TestDiagnose_MissingBinaryDegradesGracefully(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir) // empty dir → nothing to resolve
+
+	c := New(Spec{ID: "aws-prod", Source: "nonexistent-xyz"})
+	report, err := c.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose must degrade gracefully on a missing binary, not return an error: %v", err)
+	}
+	if report.Diagnosis.Known {
+		t.Fatalf("report.Diagnosis.Known = true, want false (binary missing): %+v", report)
+	}
+	if !strings.Contains(report.Diagnosis.Summary, "mallcop-connector-nonexistent-xyz") {
+		t.Fatalf("degraded summary should name the missing binary: %q", report.Diagnosis.Summary)
 	}
 }
