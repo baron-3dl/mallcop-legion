@@ -451,3 +451,69 @@ func TestRecordConfirmOutcome_StillFailing_AppendsFreshMissNotResolution(t *test
 		t.Errorf("fresh row DecisionKind = %q, want %q — still-failing-and-unclassified is a fresh E1 ask too", fresh.DecisionKind, "grant")
 	}
 }
+
+// TestRecordConfirmOutcome_IdentityMismatch_RefusesToAttach proves the safety
+// property RecordConfirmOutcome's own doc comment claims: a caller whose
+// connector/cloud/access_mode does not match the miss row it names must be
+// refused, not silently attached to the wrong row. Mutation-proven dead
+// before this test (mallcoppro-d3f veracity rework) — grepping
+// "identity mismatch"/"refusing to attach" across *_test.go returned zero
+// hits and `if false {` around the guard left ./cli, ./core/pipeline and
+// ./core/store fully green.
+func TestRecordConfirmOutcome_IdentityMismatch_RefusesToAttach(t *testing.T) {
+	result := connect.ConfirmResult{Resolved: true, CheckedAt: time.Now().UTC(), Diagnosis: connect.Diagnosis{Known: true, Summary: "resolved"}}
+
+	cases := []struct {
+		name       string
+		connector  string
+		cloud      string
+		accessMode string
+	}{
+		{name: "wrong connector", connector: "gcp-sa-prod", cloud: "azure", accessMode: "read-only"},
+		{name: "wrong cloud", connector: "azure-sp-prod", cloud: "gcp", accessMode: "read-only"},
+		{name: "wrong access_mode", connector: "azure-sp-prod", cloud: "azure", accessMode: "read-write"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newGitStore(t)
+			missSHA, err := st.Append(store.KindGrants, missRow())
+			if err != nil {
+				t.Fatalf("Append(KindGrants) seed miss: %v", err)
+			}
+
+			sha, appended, err := pipeline.RecordConfirmOutcome(st, missSHA, tc.connector, tc.cloud, tc.accessMode, result)
+			if err == nil {
+				t.Fatalf("RecordConfirmOutcome with mismatched identity (%+v) returned nil error, want a refusal", tc)
+			}
+			if appended || sha != "" {
+				t.Fatalf("RecordConfirmOutcome with mismatched identity: appended=%v sha=%q, want appended=false sha=\"\" — a guard that errors but still writes is not a guard", appended, sha)
+			}
+
+			grants, lerr := st.LoadGrantOutcomes()
+			if lerr != nil {
+				t.Fatalf("LoadGrantOutcomes: %v", lerr)
+			}
+			if len(grants) != 1 {
+				t.Fatalf("LoadGrantOutcomes returned %d records after a rejected mismatched confirm, want exactly 1 (only the original seed miss, nothing appended)", len(grants))
+			}
+		})
+	}
+
+	// Positive control: a correctly-matched identity for the SAME seed row
+	// still succeeds, so this test cannot pass by rejecting everything.
+	t.Run("matched identity still succeeds", func(t *testing.T) {
+		st := newGitStore(t)
+		missSHA, err := st.Append(store.KindGrants, missRow())
+		if err != nil {
+			t.Fatalf("Append(KindGrants) seed miss: %v", err)
+		}
+
+		sha, appended, err := pipeline.RecordConfirmOutcome(st, missSHA, "azure-sp-prod", "azure", "read-only", result)
+		if err != nil {
+			t.Fatalf("RecordConfirmOutcome with matched identity: %v", err)
+		}
+		if !appended || sha == "" {
+			t.Fatalf("RecordConfirmOutcome with matched identity: appended=%v sha=%q, want a resolution row appended", appended, sha)
+		}
+	})
+}
