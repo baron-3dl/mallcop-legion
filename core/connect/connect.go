@@ -45,6 +45,23 @@ type Connector interface {
 	Pull(ctx context.Context) ([]event.Event, error)
 }
 
+// Diagnosable is an OPTIONAL extension a Connector may implement to support
+// self-diagnosis: instead of a caller having to parse a raw Pull error, a
+// Diagnosable connector can be asked directly why it cannot pull and returns a
+// structured DiagnosisReport (see diagnose.go). FileConnector does not
+// implement this — a local file either opens or it doesn't, there is nothing
+// to diagnose. ExecConnector does — the sibling binary is where a live
+// network/credential probe can run (see connect/exec).
+type Diagnosable interface {
+	// Diagnose asks the connector to self-check and report structured
+	// findings. It MUST NOT surface an expected degraded case (e.g. a sibling
+	// binary with no --doctor support) as a raw, uninterpreted error — that
+	// case is itself a DiagnosisReport with Diagnosis.Known == false. Diagnose
+	// returns a non-nil error only when it cannot produce a report at all
+	// (e.g. ctx cancellation).
+	Diagnose(ctx context.Context) (DiagnosisReport, error)
+}
+
 // FileConnector reads events as JSON-Lines from a file path, or from stdin when
 // Path is "-" or empty and Stdin is supplied. It is the credential-free default
 // connector: a scan over an exported events.jsonl needs no cloud access.
