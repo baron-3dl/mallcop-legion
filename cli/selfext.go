@@ -10,9 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
+	"github.com/mallcop-app/mallcop/core/store"
 	"github.com/mallcop-app/mallcop/selfext/autonomy"
+	"github.com/mallcop-app/mallcop/selfext/contribback"
 	"github.com/mallcop-app/mallcop/selfext/engine"
 	"github.com/mallcop-app/mallcop/selfext/gharuntime"
 	"github.com/mallcop-app/mallcop/selfext/opencode"
@@ -70,12 +73,19 @@ import (
 //
 //	mallcop selfext --scaffold-gha --out ~/checkouts/mallcop
 //	   # write the CODE-lane GitHub Actions templates + the operator setup checklist
+//
+//	mallcop selfext --contribute --artifact-dir ./selfext-proposals \
+//	   --store-repo ~/checkouts/mallcop --oss-repo mallcop-app/mallcop
+//	   # open a shared-OSS PR (under YOUR OWN `gh auth` identity) for every
+//	   # contribute-back artifact --propose emitted; persists a ContribBackRecord
+//	   # a later `mallcop scan` polls for the merge/close outcome. Never merges.
 func runSelfext(args []string) error {
 	fs := flag.NewFlagSet("selfext", flag.ContinueOnError)
 
 	run := fs.Bool("run", false, "author ONE detector build for the gap described by the flags")
 	propose := fs.Bool("propose", false, "run the collect→propose→gate→route loop over a `mallcop collect --json` envelope")
 	scaffoldGHA := fs.Bool("scaffold-gha", false, "write the CODE-lane GitHub Actions templates + operator setup checklist into --out")
+	contribute := fs.Bool("contribute", false, "discover router-emitted contribute-back artifacts under --artifact-dir/oss and open each as a shared-OSS PR under YOUR OWN `gh auth` identity (REQUIRES --store-repo, --oss-repo; never auto-merges — see selfext/contribback)")
 
 	// BYOK (Bring-Your-Own-Key) inference — REQUIRED for --run/--propose. The key
 	// is read from the NAMED env var (never a literal flag) so it never appears in
@@ -114,6 +124,9 @@ func runSelfext(args []string) error {
 	contributeBack := fs.Bool("contribute-back", false, "alias for --consent (--propose)")
 	gateJSON := fs.String("gate-json", "", "optional path to a pre-computed `mallcop validate-proposal --json` GateResult (--propose)")
 
+	// --contribute.
+	ossRepo := fs.String("oss-repo", "", "shared OSS repo contribute-back PRs target, \"owner/name\" (REQUIRED for --contribute; e.g. mallcop-app/mallcop)")
+
 	// --scaffold-gha.
 	scaffoldOut := fs.String("out", "", "scaffold-gha: your mallcop fork checkout to write templates into (REQUIRED for --scaffold-gha)")
 
@@ -123,16 +136,16 @@ func runSelfext(args []string) error {
 
 	// Exactly one mode.
 	modes := 0
-	for _, on := range []bool{*run, *propose, *scaffoldGHA} {
+	for _, on := range []bool{*run, *propose, *scaffoldGHA, *contribute} {
 		if on {
 			modes++
 		}
 	}
 	if modes == 0 {
-		return errors.New("selfext: pass exactly one of --run, --propose, or --scaffold-gha (see -h)")
+		return errors.New("selfext: pass exactly one of --run, --propose, --scaffold-gha, or --contribute (see -h)")
 	}
 	if modes > 1 {
-		return errors.New("selfext: --run, --propose, and --scaffold-gha are mutually exclusive")
+		return errors.New("selfext: --run, --propose, --scaffold-gha, and --contribute are mutually exclusive")
 	}
 
 	// --scaffold-gha needs no inference at all.
@@ -143,6 +156,18 @@ func runSelfext(args []string) error {
 	autonomyDial, aerr := autonomy.Parse(*autonomyFlag)
 	if aerr != nil {
 		return fmt.Errorf("selfext: %w", aerr)
+	}
+
+	// --contribute needs no inference either — it opens PRs for artifacts an
+	// earlier --propose run already authored, under the operator's own `gh`
+	// identity (never a standing credential, design ruling R8).
+	if *contribute {
+		return runSelfextContribute(contributeArgs{
+			artifactDir: *artifactDir,
+			storeRepo:   *storeRepo,
+			ossRepo:     *ossRepo,
+			autonomy:    autonomyDial,
+		})
 	}
 
 	if *propose {
@@ -389,6 +414,191 @@ func runSelfextScaffold(outDir string) error {
 	}
 	fmt.Print(gharuntime.OperatorChecklist())
 	return nil
+}
+
+// contributeArgs bundles the resolved flags `mallcop selfext --contribute` needs.
+type contributeArgs struct {
+	artifactDir string
+	storeRepo   string
+	ossRepo     string
+	autonomy    autonomy.Dial
+}
+
+// contributeSummary tallies what one `mallcop selfext --contribute` run did, for
+// the CLI to report. Mirrors the shape of contribback.PollSummary (mallcoppro-003):
+// non-fatal per-artifact outcomes are tallied, not swallowed.
+type contributeSummary struct {
+	// Considered is how many *.json files were found under --artifact-dir/oss.
+	Considered int
+	// Opened is how many resulted in a NEWLY opened shared-OSS PR this run.
+	Opened int
+	// Skipped is how many were not opened: the store already held a
+	// ContribBackRecord for that fingerprint (fingerprint-keyed dedupe — a
+	// re-run over the same artifact directory must not attempt to reopen a PR
+	// that already has a record, open or otherwise), or Contribute itself
+	// declined (not consented / not universal — defense in depth; the router
+	// should never emit such a file, but Contribute re-checks anyway).
+	Skipped int
+	// Failed is how many could not be loaded/decoded, or whose OpenPR call
+	// errored. Each is reported, never silently dropped.
+	Failed int
+}
+
+// runSelfextContribute is `mallcop selfext --contribute`'s production entry
+// point — the missing caller that turns a router-emitted contribute-back
+// artifact into an actual pull request (mallcoppro-a6c). Until this command
+// existed, `selfext/contribback.Opener.Contribute` was fully built and tested
+// but never invoked outside its own test suite: the router emitted a
+// reviewable oss-pr-*.json and nothing ever read it back.
+//
+// It wires the PRODUCTION PROpener (contribback.NewGHOpener — shells out to
+// `gh pr create` under the operator's own ambient `gh auth` identity; NO
+// standing write credential is ever set into the child environment, design
+// ruling R8) and a REAL *store.Store opened on --store-repo (the SAME
+// git-backed store `mallcop scan`'s post-scan poll reads — mallcoppro-003),
+// then delegates to contributeArtifacts, the testable core.
+//
+// Invoking --contribute at all IS the operator's explicit opt-in for this run
+// (mirroring --run/--propose, which are likewise only reachable by explicit
+// invocation) — there is no additional hidden dial. Opener.Contribute itself
+// has NO merge path at any autonomy setting: every contributed PR is left OPEN
+// for the shared repo's own CI + CODEOWNERS review, always (R3/R8).
+func runSelfextContribute(a contributeArgs) error {
+	if strings.TrimSpace(a.storeRepo) == "" {
+		return errors.New("selfext --contribute: --store-repo is required (the git-backed store the opened PR's ContribBackRecord persists into; the same store `mallcop scan` polls)")
+	}
+	if strings.TrimSpace(a.ossRepo) == "" {
+		return errors.New("selfext --contribute: --oss-repo is required (the shared OSS repo, \"owner/name\", contribute-back PRs target)")
+	}
+	st, err := store.Open(a.storeRepo)
+	if err != nil {
+		return fmt.Errorf("selfext --contribute: open store %s: %w", a.storeRepo, err)
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	sum, cerr := contributeArtifacts(context.Background(), a, st, contribback.NewGHOpener(""), log)
+	fmt.Fprintf(os.Stderr, "selfext --contribute: %d artifact(s) considered, %d opened, %d skipped, %d failed\n",
+		sum.Considered, sum.Opened, sum.Skipped, sum.Failed)
+	return cerr
+}
+
+// contributeArtifacts is the testable core of `mallcop selfext --contribute`.
+// It discovers router-emitted contribute-back artifacts under
+// <artifact-dir>/oss (the exact directory selfext --propose's Router.ArtifactDir
+// writes into), loads each — DATA-lane oss-pr-*.json via contribback.LoadArtifact,
+// or a CODE-lane authored-detector promotion via contribback.LoadCodeArtifact,
+// disambiguated by sniffing the file's own top-level "kind" field — and calls
+// Opener.Contribute for every one the store has not already recorded a
+// ContribBackRecord for.
+//
+// pr is injected so a test can assert against a fake without shelling out to a
+// real `gh`; the only production caller (runSelfextContribute) always passes
+// contribback.NewGHOpener("").
+func contributeArtifacts(ctx context.Context, a contributeArgs, st *store.Store, pr contribback.PROpener, log *slog.Logger) (contributeSummary, error) {
+	var sum contributeSummary
+
+	paths, derr := discoverContribArtifacts(a.artifactDir)
+	if derr != nil {
+		return sum, fmt.Errorf("selfext --contribute: discover artifacts under %s: %w", a.artifactDir, derr)
+	}
+	sum.Considered = len(paths)
+	if sum.Considered == 0 {
+		return sum, nil
+	}
+
+	existing, lerr := st.LoadContribBackRecords()
+	if lerr != nil {
+		return sum, fmt.Errorf("selfext --contribute: load existing contribback records: %w", lerr)
+	}
+	seen := make(map[string]bool, len(existing))
+	for _, rec := range existing {
+		seen[rec.Fingerprint] = true
+	}
+
+	opener := &contribback.Opener{
+		Config: contribback.Config{Enabled: true, Repo: a.ossRepo},
+		PR:     pr,
+		Store:  st,
+		Logger: log,
+	}
+
+	var errs []error
+	for _, path := range paths {
+		art, aerr := loadContribArtifact(path)
+		if aerr != nil {
+			sum.Failed++
+			errs = append(errs, fmt.Errorf("%s: %w", path, aerr))
+			continue
+		}
+		if seen[art.Fingerprint] {
+			sum.Skipped++
+			log.Info("selfext --contribute: already recorded, skipping", "path", path, "fingerprint", art.Fingerprint)
+			continue
+		}
+		out, cerr := opener.Contribute(ctx, a.autonomy, art)
+		if cerr != nil {
+			sum.Failed++
+			errs = append(errs, fmt.Errorf("%s: %w", path, cerr))
+			continue
+		}
+		seen[art.Fingerprint] = true
+		if out.Opened {
+			sum.Opened++
+			log.Info("selfext --contribute: opened shared-OSS PR", "path", path, "url", out.PRURL)
+		} else {
+			sum.Skipped++
+			log.Info("selfext --contribute: not opened", "path", path, "reason", out.SkipReason)
+		}
+	}
+	if len(errs) > 0 {
+		return sum, fmt.Errorf("selfext --contribute: %d of %d artifact(s) failed: %w", len(errs), sum.Considered, errors.Join(errs...))
+	}
+	return sum, nil
+}
+
+// discoverContribArtifacts lists the *.json files under <artifactDir>/oss,
+// sorted for determinism. A missing directory (nothing has been --propose'd
+// with --consent yet) is not an error — zero artifacts.
+func discoverContribArtifacts(artifactDir string) ([]string, error) {
+	dir := filepath.Join(artifactDir, "oss")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var paths []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		paths = append(paths, filepath.Join(dir, e.Name()))
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// loadContribArtifact loads path as a contribback.Artifact, dispatching to the
+// DATA lane (contribback.LoadArtifact) or the CODE lane
+// (contribback.LoadCodeArtifact) by sniffing the file's own top-level "kind"
+// field: LoadCodeArtifact's codeArtifactFile has kind=="authored_detector" at
+// the top level, while LoadArtifact's ossArtifactFile only nests a (different)
+// "kind" under "proposal" — the two shapes are unambiguous from this one field.
+func loadContribArtifact(path string) (contribback.Artifact, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return contribback.Artifact{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	var probe struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return contribback.Artifact{}, fmt.Errorf("sniff kind of %s: %w", path, err)
+	}
+	if probe.Kind == "authored_detector" {
+		return contribback.LoadCodeArtifact(path)
+	}
+	return contribback.LoadArtifact(path)
 }
 
 // proposeArgs bundles the resolved flags the BYOK K8 propose loop needs.
