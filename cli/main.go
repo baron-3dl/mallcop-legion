@@ -383,6 +383,11 @@ Commands:
                    --consent/--contribute-back, --gate-json, --target-repo)
     --scaffold-gha Write the CODE-lane GitHub Actions templates + operator setup
                    checklist into --out (no inference key needed)
+    --contribute   Create+commit+push the PR's head branch, then open a
+                   shared-OSS PR (under YOUR OWN 'gh auth' identity) for
+                   every contribute-back artifact --propose emitted under
+                   --artifact-dir/oss (--store-repo, --oss-repo; no inference
+                   key needed; never auto-merges)
     --inference-url      BYOK inference endpoint base URL (REQUIRED for --run/--propose)
     --inference-key-env  NAME of the env var holding your inference key (REQUIRED;
                          the key is read by name so it never appears in argv)

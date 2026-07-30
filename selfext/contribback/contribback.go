@@ -68,6 +68,16 @@ func (c Config) baseBranch() string {
 	return c.BaseBranch
 }
 
+// ResolvedBaseBranch returns c.BaseBranch, defaulting to "main" when unset.
+// Exported so a caller OUTSIDE this package (mallcoppro-a6c: the CLI's
+// push-before-open step, which must create the PR's head branch off the SAME
+// base Contribute itself later builds into the PRRequest) can resolve the
+// identical default this package uses internally, rather than duplicating —
+// and risking drifting from — the "main" fallback.
+func (c Config) ResolvedBaseBranch() string {
+	return c.baseBranch()
+}
+
 // Lane discriminates the two contribute-back lanes an Artifact can carry.
 //
 //   - LaneData: a mapping/tuning WIDEN of an existing detector/connector (the
