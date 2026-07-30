@@ -859,6 +859,107 @@ func TestRunDoctor_Confirm_StillDeficient_HumanReadableAndFreshMissRow(t *testin
 	}
 }
 
+// TestRunDoctor_Confirm_KnownTrueWithRemediation_NotResolved_RealStoreGitPath
+// is the mallcoppro-3fd9 regression proof: the re-probe --confirm drives
+// lands on Known:true WITH a non-empty Remediation ladder still ranked — the
+// EXACT shape the Azure doctor's defWrongPrincipal/defTokenExpired/
+// defARMAuthorizationFailed/defResourceContextMode/defMissingWorkspaceGrant
+// branches all produce, and this file's own diagnosisDeficient defines as
+// STILL DEFICIENT (Known:true does not by itself mean healthy). The
+// fixture's default/"deficient" state (doctorFakeSibling's else branch)
+// already returns exactly that report shape, so this test simply leaves the
+// state file UNCHANGED across the diagnose -> confirm calls (no operator fix
+// simulated at all) and re-probes: the connector is REPORTING the identical
+// still-deficient diagnosis it started with.
+//
+// runDoctorConfirm must:
+//  1. NOT report Resolved (result.Resolved == false / "STILL DEFICIENT",
+//     never "RESOLVED");
+//  2. exit non-nil (the errFindings sentinel), never 0;
+//  3. append a FRESH miss row to the real grants stream (Resolved=false),
+//     never a resolution row (Resolved=true referencing the original
+//     grant_ref) — a false resolution would corrupt the durable security
+//     record and end the investigation the operator still needs to run.
+//
+// This test BITES: reverting runDoctorConfirm's Resolved computation from
+// `!diagnosisDeficient(report)` back to the original `report.Diagnosis.Known`
+// turns it red — confirmed by hand before restoring the fix (see
+// test_decisions in this item's result).
+func TestRunDoctor_Confirm_KnownTrueWithRemediation_NotResolved_RealStoreGitPath(t *testing.T) {
+	dir := t.TempDir()
+	stateFile := filepath.Join(dir, "state")
+	writeFile(t, stateFile, "deficient")
+	t.Setenv("DOCTOR_STATE_FILE", stateFile)
+
+	bin := writeFakeSibling(t, dir, "doctor-sibling", doctorFakeSibling)
+	storePath := filepath.Join(dir, "store")
+	cfgPath := filepath.Join(dir, "mallcop.yaml")
+	writeDoctorConfig(t, cfgPath, storePath, "azure-prod", bin)
+
+	var jsonErr error
+	jsonOut := captureStdout(t, func() {
+		jsonErr = runDoctor([]string{"azure-prod", "--config", cfgPath, "--json"})
+	})
+	if !isFindingsError(jsonErr) {
+		t.Fatalf("runDoctor initial diagnose: err = %v, want errFindings", jsonErr)
+	}
+	var report doctorReport
+	if jerr := json.Unmarshal([]byte(jsonOut), &report); jerr != nil {
+		t.Fatalf("--json output did not parse: %v\noutput: %s", jerr, jsonOut)
+	}
+	if !report.Diagnosis.Known || len(report.Remediation) == 0 {
+		t.Fatalf("initial report = %+v, want Known:true with a non-empty Remediation ladder (the shape this regression covers)", report.DiagnosisReport)
+	}
+	grantRef := report.GrantRef
+	if grantRef == "" {
+		t.Fatal("report.GrantRef is empty")
+	}
+
+	// NO operator fix simulated: the state file is left exactly as it was.
+	// The re-probe --confirm drives will land on the IDENTICAL Known:true +
+	// non-empty-Remediation report as the initial diagnose.
+	var confirmErr error
+	confirmOut := captureStdout(t, func() {
+		confirmErr = runDoctor([]string{"azure-prod", "--config", cfgPath, "--json", "--confirm", grantRef})
+	})
+	if !isFindingsError(confirmErr) {
+		t.Fatalf("runDoctor --confirm over a re-probe still carrying a ranked Remediation: err = %v, want the errFindings sentinel (never nil/exit-0)", confirmErr)
+	}
+
+	var confirmReport doctorConfirmReport
+	if jerr := json.Unmarshal([]byte(confirmOut), &confirmReport); jerr != nil {
+		t.Fatalf("--confirm --json output did not parse: %v\noutput: %s", jerr, confirmOut)
+	}
+	if confirmReport.Resolved {
+		t.Fatalf("confirmReport.Resolved = true, want false — Known:true with a non-empty Remediation ladder is STILL DEFICIENT, not resolved (mallcoppro-3fd9: this is the false-resolution defect)")
+	}
+	if len(confirmReport.Remediation) == 0 {
+		t.Fatalf("confirmReport.Remediation = %+v, want the re-probe's ladder still present (proving this is genuinely the Known:true+remediation branch, not Known:false)", confirmReport.Remediation)
+	}
+
+	st, serr := store.Open(storePath)
+	if serr != nil {
+		t.Fatalf("store.Open: %v", serr)
+	}
+	grants, gerr := st.LoadGrantOutcomes()
+	if gerr != nil {
+		t.Fatalf("LoadGrantOutcomes: %v", gerr)
+	}
+	if len(grants) != 2 {
+		t.Fatalf("LoadGrantOutcomes after this confirm returned %d records, want 2 (original miss + a FRESH miss)", len(grants))
+	}
+	row := grants[1]
+	if row.Resolved {
+		t.Fatalf("second grants row = %+v, want Resolved=false — recording Resolved=true here is exactly the false-resolution bug mallcoppro-3fd9 fixes: it would tell the operator the grant problem is fixed when the connector still has a ranked remediation to apply", row)
+	}
+	if row.ResolvedRef != "" {
+		t.Fatalf("second grants row = %+v, want ResolvedRef empty — a fresh miss carries no resolved-ref, only an actual resolution row does", row)
+	}
+	if row.Connector != "azure-prod" {
+		t.Errorf("second grants row Connector = %q, want %q", row.Connector, "azure-prod")
+	}
+}
+
 func TestDiagnosisDeficient(t *testing.T) {
 	cases := []struct {
 		name string
