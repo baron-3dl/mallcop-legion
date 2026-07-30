@@ -16,10 +16,14 @@ import (
 // Op is the verb the consumer dispatches on. The store does not interpret it —
 // it only persists and replays — but the canonical vocabulary is:
 //
-//	suppress  — drop findings matching Pattern
-//	focus     — prioritize findings matching Pattern
-//	mute       — silence notifications for Pattern
-//	unsuppress — cancel a prior suppress for Pattern
+//	suppress      — drop findings matching Pattern ("<source>/<type>/<actor>")
+//	suppress-case — drop findings whose case (core/cases.CaseID) equals
+//	                Pattern; narrower than suppress because it is scoped to
+//	                the case's entity too, not just source/type/actor
+//	                (mallcoppro-419; core/pipeline/consumer_suppress_case.go)
+//	focus         — prioritize findings matching Pattern
+//	mute          — silence notifications for Pattern
+//	unsuppress    — cancel a prior suppress for Pattern
 //
 // Pattern is the target the op applies to (a finding type, source, actor glob,
 // or substring — the consumer decides matching semantics). Reason is the

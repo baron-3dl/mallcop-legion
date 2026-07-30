@@ -429,6 +429,18 @@ func Run(ctx context.Context, cfg Config) (summary Summary, err error) {
 	}
 	findings = applyDirectives(findings, directives)
 
+	// CASE-SCOPED SUPPRESSION (mallcoppro-419): applyDirectives above matches
+	// on the coarser "<source>/<type>/<actor>" finding key (Entity dropped),
+	// so a 'suppress' directive silences every sibling case sharing
+	// type/actor regardless of entity. A 'suppress-case' directive names a
+	// CaseID instead — exactly as narrow as the case the operator was shown
+	// (core/pipeline/consumer_suppress_case.go) — and is applied here as a
+	// SEPARATE filter, never folded into applyDirectives/matchPattern's
+	// segment-glob contract. Order relative to applyDirectives does not
+	// matter: each filter only removes findings, so applying both
+	// (regardless of order) yields the same surviving set.
+	findings = ApplySuppressCase(findings, directives)
+
 	// VOLUME CIRCUIT BREAKER (L4 resource floor, ports src/mallcop/budget.py
 	// check_circuit_breaker). A flood of findings — e.g. an attacker generating
 	// noise to drown a single real boundary violation — must NOT be quietly
