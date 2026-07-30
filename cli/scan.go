@@ -27,6 +27,7 @@ import (
 	"github.com/mallcop-app/mallcop/pkg/finding"
 	"github.com/mallcop-app/mallcop/pkg/notify"
 	"github.com/mallcop-app/mallcop/pkg/resolution"
+	"github.com/mallcop-app/mallcop/selfext/contribback"
 )
 
 const (
@@ -61,6 +62,13 @@ const (
 	// investigation records and the KindScans register — set by the deploy
 	// workflow when re-pinning the release tag; empty when unknown.
 	envMallcopVersion = "MALLCOP_VERSION"
+	// envGitHubAPIBase overrides the contribute-back PR-outcome poll's GitHub
+	// REST API base URL (mallcoppro-003). Empty — the production default —
+	// uses the real https://api.github.com; a test points this at a local
+	// httptest.Server so the poll's real HTTP round trip never touches the
+	// network. This is a URL override, never a credential: the poll reads a
+	// PUBLIC repo, unauthenticated, at every setting.
+	envGitHubAPIBase = "MALLCOP_GITHUB_API_BASE"
 )
 
 // ScanSummary holds the results of a completed scan cycle.
@@ -457,6 +465,26 @@ func runScan(args []string) error {
 		// surface it on stderr and continue. Mirrors the Discord-emit
 		// non-fatal precedent above.
 		fmt.Fprintf(os.Stderr, "scan: case collapse: %v\n", err)
+	}
+
+	// (4.7) contribute-back PR-outcome POLL (mallcoppro-003 — THIS IS A POLL,
+	// NOT A WEBHOOK; an earlier inbound-webhook design was WITHDRAWN
+	// 2026-07-30). selfext/contribback opens a contribute-back PR under the
+	// OPERATOR's own `gh` identity against the SHARED OSS repo (design ruling
+	// R8 — mallcop holds no standing write credential there), so it is NOT in
+	// this customer's own repo and this scan's own GHA run has no native
+	// event to receive for it merging or closing days later. Instead: ask
+	// GitHub's PUBLIC REST API (no auth, no secret, no inbound endpoint —
+	// envGitHubAPIBase only ever overrides the URL, in tests) whether each
+	// still-open contribute-back record's PR merged or closed. A fetch
+	// failure degrades honestly — the record is left exactly as it was,
+	// never a fabricated outcome — and must NEVER fail an otherwise-
+	// successful scan; mirrors the Discord-emit/case-collapse non-fatal
+	// precedent above.
+	if psum, perr := contribback.PollOutcomes(ctx, st, contribback.NewGitHubFetcher(os.Getenv(envGitHubAPIBase))); perr != nil {
+		fmt.Fprintf(os.Stderr, "scan: contribute-back poll: %v\n", perr)
+	} else if psum.Failed > 0 {
+		fmt.Fprintf(os.Stderr, "scan: contribute-back poll: %d of %d open PR(s) unreachable this scan (left unchanged)\n", psum.Failed, psum.Considered)
 	}
 
 	out := ScanSummary{
