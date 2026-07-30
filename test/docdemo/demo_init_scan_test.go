@@ -86,6 +86,9 @@ func TestDemo_Scan(t *testing.T) {
 	const statusShown = "Store:      store\n" +
 		"Findings:   2 recorded\n" +
 		"Decisions:  2 recorded\n" +
+		"Cases:      2 open (0 recurring)\n" +
+		"  injection-probe  entity=(no entity)  count=1  cadence=no established cadence  status=open\n" +
+		"  new-actor  entity=(no entity)  count=1  cadence=no established cadence  status=open\n" +
 		"Coverage gaps:   0 (0 reported miss)\n" +
 		"State:      idle\n"
 	mustContain(t, "README.md", doc, statusShown, "`mallcop status --store store` output")
