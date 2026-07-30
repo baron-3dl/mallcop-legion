@@ -65,6 +65,10 @@ func (d diagnosableConnector) Pull(_ context.Context) ([]event.Event, error) {
 	return nil, d.pullErr
 }
 
+func (d diagnosableConnector) ID() string {
+	return d.report.ConnectorID
+}
+
 func (d diagnosableConnector) Diagnose(_ context.Context) (connect.DiagnosisReport, error) {
 	return d.report, nil
 }
@@ -193,6 +197,126 @@ func TestPipeline_DiagnoseKnown_RecordsMissWithoutE1Ask(t *testing.T) {
 	}
 	if row.DecisionKind != "" || row.BlastRadius != "" || row.Question != "" {
 		t.Errorf("row = %+v, want NO E1 fields set for a Known:true diagnosis (it has a ranked remediation, not an operator ask)", row)
+	}
+}
+
+// TestPipeline_MultiConnectorWrapped_DiagnosisStillReachesSubConnector is the
+// pipeline-level proof for the veracity rework's Route 1 finding: in
+// PRODUCTION cfg.Connector is never a bare Diagnosable — cli/scan.go's
+// buildConnectors ALWAYS wraps every configured source in connect.Multi(...),
+// even a single one (cli/scan.go:558) — so asserting connector.(Diagnosable)
+// directly (the ORIGINAL, rejected implementation) silently finds nothing for
+// exactly the connectors that have a doctor. This test drives pipeline.Run
+// with the connector wrapped in the REAL production connect.Multi (not a
+// second hand-rolled type) and proves the diagnosis still lands.
+func TestPipeline_MultiConnectorWrapped_DiagnosisStillReachesSubConnector(t *testing.T) {
+	st := newGitStore(t)
+
+	sub := diagnosableConnector{
+		pullErr: errors.New("azuresp: AADSTS700082: refresh token expired"),
+		report: connect.DiagnosisReport{
+			ConnectorID: "azure-sp-prod",
+			Diagnosis: connect.Diagnosis{
+				Known:      false,
+				Summary:    "refresh token rejected by AAD for an unrecognized reason",
+				Confidence: 0.3,
+			},
+		},
+	}
+
+	cfg := pipeline.Config{
+		// The load-bearing difference from TestPipeline_DiagnoseUnknown_RaisesE1SecurityDecision:
+		// the connector cfg.Connector actually holds is the composed
+		// *connect.MultiConnector production shape, not the bare Diagnosable.
+		Connector: connect.Multi(sub),
+		Client:    &inference.DirectClient{BaseURL: "http://unused.invalid", Model: "test-model"},
+		Store:     st,
+		Baseline:  knownActorsBaseline(),
+	}
+
+	if _, err := pipeline.Run(context.Background(), cfg); err == nil {
+		t.Fatalf("pipeline.Run over a Pull-failing Multi-wrapped connector returned nil error")
+	}
+
+	grants, lerr := st.LoadGrantOutcomes()
+	if lerr != nil {
+		t.Fatalf("LoadGrantOutcomes: %v", lerr)
+	}
+	if len(grants) != 1 {
+		t.Fatalf("LoadGrantOutcomes returned %d records, want exactly 1 — the Multi wrapper must not swallow the sub-connector's diagnosis", len(grants))
+	}
+	if grants[0].Connector != "azure-sp-prod" {
+		t.Errorf("row.Connector = %q, want %q", grants[0].Connector, "azure-sp-prod")
+	}
+	if grants[0].DecisionKind != "grant" {
+		t.Errorf("row.DecisionKind = %q, want %q", grants[0].DecisionKind, "grant")
+	}
+}
+
+// TestPipeline_SuccessfulPullConfirmsPriorGrantMiss is the pipeline-level
+// proof for Route 2's write+read wiring: pipeline.Run itself — not a test
+// calling RecordConfirmOutcome directly — is the real caller. A prior
+// unresolved GRANT-MISS is seeded on the store for connector "azure-sp-prod";
+// pipeline.Run is then driven with a Diagnosable connector whose Pull now
+// SUCCEEDS and whose Diagnose comes back Known:true. Run must (a) read the
+// grants stream (pendingGrantMiss) to discover the outstanding miss for this
+// exact connector ID, (b) re-probe it, and (c) record a resolution row a
+// subsequent scan (or pendingGrantMiss call) reads back as closed.
+func TestPipeline_SuccessfulPullConfirmsPriorGrantMiss(t *testing.T) {
+	st := newGitStore(t)
+
+	missSHA, err := st.Append(store.KindGrants, missRow())
+	if err != nil {
+		t.Fatalf("Append(KindGrants) seed miss: %v", err)
+	}
+
+	connector := diagnosableConnector{
+		// pullErr is nil: Pull succeeds this scan (the operator's fix worked).
+		report: connect.DiagnosisReport{
+			ConnectorID: "azure-sp-prod",
+			Diagnosis:   connect.Diagnosis{Known: true, Summary: "credentials valid", Confidence: 0.95},
+		},
+	}
+
+	cfg := pipeline.Config{
+		Connector: connect.Multi(connector),
+		Client:    &inference.DirectClient{BaseURL: "http://unused.invalid", Model: "test-model"},
+		Store:     st,
+		Baseline:  knownActorsBaseline(),
+	}
+
+	if _, err := pipeline.Run(context.Background(), cfg); err != nil {
+		t.Fatalf("pipeline.Run over a now-healthy connector: %v", err)
+	}
+
+	grants, lerr := st.LoadGrantOutcomes()
+	if lerr != nil {
+		t.Fatalf("LoadGrantOutcomes: %v", lerr)
+	}
+	if len(grants) != 2 {
+		t.Fatalf("LoadGrantOutcomes returned %d records, want 2 (seed miss + the resolution pipeline.Run itself must have written)", len(grants))
+	}
+	resolution := grants[1]
+	if !resolution.Resolved || resolution.ResolvedRef != missSHA {
+		t.Fatalf("resolution row = %+v, want Resolved=true ResolvedRef=%q — pipeline.Run must call RecordConfirmOutcome, not merely proceed silently", resolution, missSHA)
+	}
+	if resolution.Connector != "azure-sp-prod" || resolution.Cloud != "azure" || resolution.AccessMode != "read-only" {
+		t.Fatalf("resolution row = %+v, want it to carry the ORIGINAL miss row's connector/cloud/access_mode", resolution)
+	}
+
+	// A subsequent scan's own pendingGrantMiss check (exercised indirectly:
+	// running Run a SECOND time) must see the miss as already closed and
+	// write nothing further — the idempotency the acceptance criterion
+	// requires ("the next scan reads it").
+	if _, err := pipeline.Run(context.Background(), cfg); err != nil {
+		t.Fatalf("second pipeline.Run: %v", err)
+	}
+	grantsAfterSecondScan, lerr := st.LoadGrantOutcomes()
+	if lerr != nil {
+		t.Fatalf("LoadGrantOutcomes after second scan: %v", lerr)
+	}
+	if len(grantsAfterSecondScan) != 2 {
+		t.Fatalf("LoadGrantOutcomes after a SECOND scan over an already-resolved connector = %d records, want still 2 (idempotent, no duplicate resolution)", len(grantsAfterSecondScan))
 	}
 }
 

@@ -382,6 +382,49 @@ func (s *Store) ResolveGrantMiss(ref string) (GrantOutcome, error) {
 	return r, nil
 }
 
+// GrantOutcomeRecord pairs a GrantOutcome with the commit SHA Store.Append
+// returned when THIS EXACT row was written — the same identity
+// ResolveGrantMiss resolves back. GrantOutcome carries no such field on
+// itself (see ResolveGrantMiss's doc comment: a resolution row only learns
+// its original miss's SHA because the CALLER captured Append's return value
+// at write time and threaded it into ResolvedRef), so a reader that was NOT
+// the process that originally appended a row — e.g. a later `mallcop scan`
+// checking whether an earlier miss is still outstanding, mallcoppro-d3f's
+// Route 2 — has no way to recover that row's own SHA from the JSON alone.
+// LoadGrantOutcomesWithRefs is that recovery path.
+type GrantOutcomeRecord struct {
+	GrantOutcome
+	SHA string
+}
+
+// LoadGrantOutcomesWithRefs replays the grants stream exactly like
+// LoadGrantOutcomes, additionally recovering each row's own commit SHA by
+// walking the commits that touched the grants file (oldest first,
+// Store.commitsTouching) and reading the LAST line of the blob AT each such
+// commit via ResolveGrantMiss — valid because commitAppend guarantees exactly
+// one Append call produces exactly one commit whose blob is
+// prev-content + this-call's-chunk, so the blob's last line at the commit an
+// Append call produced is byte-for-byte the record that call wrote, regardless
+// of what lands on the stream afterward (see ResolveGrantMiss's own doc for
+// the full argument — this reuses that exact mechanism rather than
+// re-deriving it). A store that has never appended to KindGrants returns an
+// empty slice, not an error.
+func (s *Store) LoadGrantOutcomesWithRefs() ([]GrantOutcomeRecord, error) {
+	shas, err := s.commitsTouching(KindGrants.file())
+	if err != nil {
+		return nil, fmt.Errorf("store: list grants stream commits: %w", err)
+	}
+	out := make([]GrantOutcomeRecord, 0, len(shas))
+	for _, sha := range shas {
+		r, err := s.ResolveGrantMiss(sha)
+		if err != nil {
+			return nil, fmt.Errorf("store: read grants record at %s: %w", sha, err)
+		}
+		out = append(out, GrantOutcomeRecord{GrantOutcome: r, SHA: sha})
+	}
+	return out, nil
+}
+
 // ContribBack lifecycle states (mallcoppro-003). Exported so no caller
 // hand-types the strings.
 const (

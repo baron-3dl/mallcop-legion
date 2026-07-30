@@ -24,10 +24,33 @@ import (
 	"github.com/mallcop-app/mallcop/core/store"
 )
 
+// diagnosables returns every connect.Diagnosable reachable from connector:
+// itself, if it directly implements the interface, or — for the shape
+// cli/scan.go's buildConnectors ALWAYS returns in production
+// (connect.Multi(subs...), even for a single configured source, cfg/scan.go:558)
+// — each of its wrapped sub-connectors that does (mallcoppro-d3f veracity
+// rework, Route 1). *connect.MultiConnector never itself implements
+// Diagnosable (core/connect/multi.go), so a caller that only ever asserts
+// directly on cfg.Connector silently finds nothing for exactly the
+// connectors — kind:cloud's ExecConnector — that actually HAVE a doctor. This
+// helper is the one place both recordConnectorDiagnosis (the failure path)
+// and confirmResolvedGrants (the success path, Route 2) reach the real leaf
+// connectors from, so the walk is defined once, not duplicated.
+func diagnosables(connector connect.Connector) []connect.Diagnosable {
+	if d, ok := connector.(connect.Diagnosable); ok {
+		return []connect.Diagnosable{d}
+	}
+	if m, ok := connector.(interface{ Diagnosables() []connect.Diagnosable }); ok {
+		return m.Diagnosables()
+	}
+	return nil
+}
+
 // recordConnectorDiagnosis is called from Run when cfg.Connector.Pull fails.
-// If the connector implements connect.Diagnosable, it asks it to self-check
-// and appends exactly one GrantOutcome MISS row to KindGrants carrying what
-// it found — and, when the diagnosis came back Known:false, the E1
+// It walks every connect.Diagnosable reachable from connector (diagnosables,
+// above — direct or wrapped in a production connect.Multi) and appends
+// exactly one GrantOutcome MISS row per Diagnosable to KindGrants carrying
+// what it found — and, when a given diagnosis came back Known:false, the E1
 // SecurityDecision-request fields (connect.RaiseUnknownDiagnosis) on that
 // SAME row, so mallcop-pro's Gap-E1 consumer (mallcoppro-a7b4, the privileged
 // side that actually holds a session and can email/raise the decision — see
@@ -37,38 +60,130 @@ import (
 // (Connector), what mallcop could tell about the failure (FailureClass), and
 // a ready-to-send kind/blast_radius/question.
 //
-// A connector that does not implement Diagnosable is a no-op (nil error) —
-// most connectors (e.g. FileConnector) have nothing to self-diagnose.
-// Diagnose's own contract (core/connect/connect.go) never returns a raw,
-// uninterpreted error for an expected degraded case, so a non-nil error here
-// is reserved for something genuinely unrecoverable (e.g. ctx cancellation) —
-// it is returned, not swallowed, so a caller can fold it into a wrapped
-// error instead of silently losing it; it must never mask or replace the
-// connect failure that is already the reason Run is returning an error.
+// A connector with no reachable Diagnosable is a no-op (nil error) — most
+// connectors (e.g. FileConnector) have nothing to self-diagnose. Diagnose's
+// own contract (core/connect/connect.go) never returns a raw, uninterpreted
+// error for an expected degraded case, so a non-nil error here is reserved
+// for something genuinely unrecoverable (e.g. ctx cancellation) — it is
+// returned, not swallowed, so a caller can fold it into a wrapped error
+// instead of silently losing it; it must never mask or replace the connect
+// failure that is already the reason Run is returning an error.
+//
+// Attribution: a MultiConnector's own Pull halts and returns on the FIRST
+// sub-connector error (core/connect/multi.go), so which specific sub
+// actually failed is not recoverable from the returned error alone. Rather
+// than guess, every reachable Diagnosable is asked to self-check, and each
+// row is attributed to the sub-connector that PRODUCED it
+// (report.ConnectorID) — a healthy sub-connector's own Diagnose call still
+// reports its (healthy) status, which is itself useful history, not noise:
+// it is the same "Probe on every scheduled run" cadence the GrantClaim kernel
+// documents (core/connect/diagnose.go).
 func recordConnectorDiagnosis(ctx context.Context, st *store.Store, connector connect.Connector) error {
-	diag, ok := connector.(connect.Diagnosable)
-	if !ok {
+	diags := diagnosables(connector)
+	if len(diags) == 0 {
 		return nil
 	}
-	report, err := diag.Diagnose(ctx)
+	for _, diag := range diags {
+		report, err := diag.Diagnose(ctx)
+		if err != nil {
+			return fmt.Errorf("pipeline: diagnose connect failure: %w", err)
+		}
+
+		row := store.GrantOutcome{
+			Connector:    report.ConnectorID,
+			FailureClass: report.Diagnosis.Summary,
+			DetectedAt:   time.Now().UTC(),
+			Resolved:     false,
+		}
+		if req, ok := connect.RaiseUnknownDiagnosis(report); ok {
+			row.DecisionKind = req.Kind
+			row.BlastRadius = req.BlastRadius
+			row.Question = req.Question
+		}
+
+		if _, err := st.Append(store.KindGrants, row); err != nil {
+			return fmt.Errorf("pipeline: record grant-miss diagnosis: %w", err)
+		}
+	}
+	return nil
+}
+
+// pendingGrantMiss returns the most recent UNRESOLVED GrantOutcome row for
+// connectorID on the grants stream, and the commit SHA needed to resolve it
+// (RecordConfirmOutcome's missSHA) — the READ half of Route 2's loop-closing
+// wiring (mallcoppro-d3f veracity rework): the scan path must actually
+// consult this stream before deciding a freshly-successful Pull is closing a
+// PRIOR grant miss, not merely assume it. It walks the stream oldest-first
+// (Store.LoadGrantOutcomesWithRefs), tracks every ResolvedRef a resolution
+// row points at, then scans backward for the latest miss row belonging to
+// connectorID that no resolution row has claimed. found is false when
+// connectorID has never had a miss, or its most recent one is already
+// resolved — the common steady-state case, so a healthy connector costs
+// nothing beyond this one cheap store read (no live Diagnose call follows).
+func pendingGrantMiss(st *store.Store, connectorID string) (missSHA string, miss store.GrantOutcome, found bool, err error) {
+	records, err := st.LoadGrantOutcomesWithRefs()
 	if err != nil {
-		return fmt.Errorf("pipeline: diagnose connect failure: %w", err)
+		return "", store.GrantOutcome{}, false, fmt.Errorf("pipeline: load grant outcomes for pending-miss check: %w", err)
 	}
+	resolvedRefs := make(map[string]bool, len(records))
+	for _, r := range records {
+		if r.Resolved && r.ResolvedRef != "" {
+			resolvedRefs[r.ResolvedRef] = true
+		}
+	}
+	for i := len(records) - 1; i >= 0; i-- {
+		r := records[i]
+		if r.Resolved || r.Connector != connectorID {
+			continue
+		}
+		if resolvedRefs[r.SHA] {
+			continue
+		}
+		return r.SHA, r.GrantOutcome, true, nil
+	}
+	return "", store.GrantOutcome{}, false, nil
+}
 
-	row := store.GrantOutcome{
-		Connector:    report.ConnectorID,
-		FailureClass: report.Diagnosis.Summary,
-		DetectedAt:   time.Now().UTC(),
-		Resolved:     false,
-	}
-	if req, ok := connect.RaiseUnknownDiagnosis(report); ok {
-		row.DecisionKind = req.Kind
-		row.BlastRadius = req.BlastRadius
-		row.Question = req.Question
-	}
+// confirmResolvedGrants is called from Run AFTER a SUCCESSFUL Pull
+// (mallcoppro-d3f veracity rework, Route 2 — the WRITE half's real caller).
+// For every connect.Diagnosable reachable from connector (diagnosables,
+// above — direct or wrapped in the production connect.Multi shape), it reads
+// the grants stream (pendingGrantMiss, above) for an outstanding, unresolved
+// GRANT-MISS attributed to that connector's ID. Only when one is found does it
+// pay for a live re-probe (diag.Diagnose) — a healthy connector with nothing
+// outstanding costs one cheap store read, never a network call. The fresh
+// diagnosis is recorded through RecordConfirmOutcome exactly like an
+// operator-driven Confirm call would be: Known:true closes the loop with a
+// resolution row the NEXT scan's own pendingGrantMiss check (or any
+// operator-facing reader of the grants stream) sees; Known:false (still
+// broken) appends a fresh miss row (RecordConfirmOutcome's NEW-A19 branch) —
+// never silently drops the still-outstanding ask.
+func confirmResolvedGrants(ctx context.Context, st *store.Store, connector connect.Connector) error {
+	for _, diag := range diagnosables(connector) {
+		id := diag.ID()
+		if id == "" {
+			continue
+		}
+		missSHA, miss, found, err := pendingGrantMiss(st, id)
+		if err != nil {
+			return err
+		}
+		if !found {
+			continue
+		}
 
-	if _, err := st.Append(store.KindGrants, row); err != nil {
-		return fmt.Errorf("pipeline: record grant-miss diagnosis: %w", err)
+		report, err := diag.Diagnose(ctx)
+		if err != nil {
+			return fmt.Errorf("pipeline: re-diagnose connector %q to confirm grant resolution: %w", id, err)
+		}
+		result := connect.ConfirmResult{
+			Resolved:  report.Diagnosis.Known,
+			Diagnosis: report.Diagnosis,
+			CheckedAt: time.Now().UTC(),
+		}
+		if _, _, err := RecordConfirmOutcome(st, missSHA, id, miss.Cloud, miss.AccessMode, result); err != nil {
+			return fmt.Errorf("pipeline: record confirm outcome for connector %q: %w", id, err)
+		}
 	}
 	return nil
 }
@@ -103,6 +218,18 @@ func RecordConfirmOutcome(st *store.Store, missSHA, connectorID, cloud, accessMo
 	}
 	if miss.Resolved {
 		return "", false, fmt.Errorf("pipeline: grant miss %s is itself a resolution row, not a miss", missSHA)
+	}
+	// Cross-check the caller's identity against the resolved miss row itself
+	// — the safety property this function's own doc comment claims (a caller
+	// cannot accidentally attach a resolution to the wrong row). Without
+	// this, a missSHA typo'd or copy-pasted from a DIFFERENT connector's miss
+	// would silently attach that connector's resolution/re-miss to this one's
+	// history.
+	if miss.Connector != connectorID || miss.Cloud != cloud || miss.AccessMode != accessMode {
+		return "", false, fmt.Errorf(
+			"pipeline: confirm outcome identity mismatch: grant miss %s is connector=%q cloud=%q access_mode=%q, "+
+				"but this call is for connector=%q cloud=%q access_mode=%q — refusing to attach a resolution to the wrong row",
+			missSHA, miss.Connector, miss.Cloud, miss.AccessMode, connectorID, cloud, accessMode)
 	}
 
 	if !result.Resolved {

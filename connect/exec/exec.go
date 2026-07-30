@@ -221,6 +221,14 @@ func (c *ExecConnector) Pull(ctx context.Context) ([]event.Event, error) {
 	return events, nil
 }
 
+// ID returns the connector's stable identifier (Spec.ID) — satisfies
+// connect.Diagnosable so a caller holding only the composed Connector can
+// look up this connector's grants-stream history without a live call. No I/O,
+// never fails.
+func (c *ExecConnector) ID() string {
+	return c.spec.ID
+}
+
 // Diagnose asks the sibling binary to self-check by execing it with --doctor
 // instead of the scan args, and parses its stdout as a single JSON
 // connect.DiagnosisReport (design §3/§11). It reuses the same binary

@@ -288,6 +288,21 @@ func Run(ctx context.Context, cfg Config) (summary Summary, err error) {
 		}
 		return Summary{}, err
 	}
+
+	// mallcoppro-d3f (veracity rework, Route 2): a SUCCESSFUL Pull is the
+	// scan's own signal that whatever the connector was diagnosed as missing
+	// last time might now be fixed — this is the REAL production caller of
+	// RecordConfirmOutcome (route 2's write half) and the REAL reader of the
+	// grants stream (route 2's read half, pendingGrantMiss), so the loop this
+	// item exists to close is provably driven from cli/scan.go's actual
+	// path, not only exercised by a test calling RecordConfirmOutcome
+	// directly. confirmResolvedGrants costs nothing beyond one cheap store
+	// read per Diagnosable connector unless that connector genuinely has an
+	// outstanding, unresolved miss to re-probe.
+	stage = "confirm_grants"
+	if err := confirmResolvedGrants(ctx, cfg.Store, cfg.Connector); err != nil {
+		return Summary{}, fmt.Errorf("pipeline: confirm grant resolution: %w", err)
+	}
 	stage = "baseline"
 
 	// (1a) DERIVE THE BASELINE FROM PRIOR HISTORY — the idempotency keystone.
