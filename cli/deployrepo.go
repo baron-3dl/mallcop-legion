@@ -712,6 +712,33 @@ jobs:
         run: |
           set -euo pipefail
           mallcop collect --gate --store ./store
+
+      - name: Liveness watchdog (whole-pipeline dead-man's switch)
+        # PRIMITIVE 1 (design §5, mallcoppro-1e0): the 6-day silent failure —
+        # a pipeline that stops running, or keeps 403ing on connect — becomes
+        # a first-class DATED failing job on this cron instead of quiet, stale
+        # confidence. 'mallcop status --gate' fails when the newest recorded
+        # scan either did not complete successfully (mallcoppro-24e ensures
+        # EVERY run, success or failure, appends exactly one ScanRecord to
+        # ./store, even a 403-on-connect) or is older than --max-age.
+        #
+        # if: always() is load-bearing: GitHub Actions skips every later step
+        # without an explicit condition once an earlier step in this job has
+        # already failed (e.g. 'Run mallcop scan' exiting nonzero on a real
+        # failure) — without always() this watchdog would never fire on
+        # exactly the runs it exists to catch. It reads the SAME local
+        # ./store checkout 'mallcop scan' already committed its ScanRecord
+        # to (that commit is local and unconditional, independent of whether
+        # the 'Push findings store' step above ran), so it still sees the
+        # failure even when this job's remaining steps were skipped.
+        #
+        # Zero new standing credential: this runs entirely on the customer's
+        # OWN existing cron, reading only the local store checkout already
+        # restored earlier in this same job — mallcop holds nothing.
+        if: always()
+        run: |
+          set -euo pipefail
+          mallcop status --gate --store ./store --max-age 48h
 `
 
 // investigateWorkflowTemplate is the mallcop-investigate.yml SKELETON

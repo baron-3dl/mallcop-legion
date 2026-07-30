@@ -21,7 +21,7 @@
 //	mallcop collect     --store <dir> [--fidelity <json>] [--json]
 //	mallcop init        [--dir <path>] [--pro] [--create-repo owner/name] [--mallcop-version <tag>] [--github-token-env <VAR>]
 //	mallcop migrate     [--dir <path>] [--mallcop-version <tag>] [--config-only] [--dry-run]
-//	mallcop status      --store <dir>
+//	mallcop status      --store <dir> [--gate --max-age <dur>]
 //	mallcop config
 //	mallcop config set connector --kind=file|github|cloud --id=<id> [...]
 //	mallcop config set autonomy <non|semi|fully>
