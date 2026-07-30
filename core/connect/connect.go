@@ -53,6 +53,16 @@ type Connector interface {
 // to diagnose. ExecConnector does — the sibling binary is where a live
 // network/credential probe can run (see connect/exec).
 type Diagnosable interface {
+	// ID returns the connector's stable identifier — the SAME value Diagnose
+	// defaults DiagnosisReport.ConnectorID to when a report leaves it empty.
+	// It does no I/O and never fails: a caller holding only the composed
+	// Connector (core/pipeline's grantwiring, wiring mallcoppro-d3f's Route 2)
+	// uses it to look up whether THIS connector has a pending GRANT-MISS on
+	// the grants stream before paying for a live Diagnose call — a healthy
+	// connector with nothing outstanding costs one cheap store read, not a
+	// re-probe.
+	ID() string
+
 	// Diagnose asks the connector to self-check and report structured
 	// findings. It MUST NOT surface an expected degraded case (e.g. a sibling
 	// binary with no --doctor support) as a raw, uninterpreted error — that

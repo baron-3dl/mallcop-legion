@@ -290,6 +290,40 @@ type GrantOutcome struct {
 	// closing a GRANT-MISS therefore must capture the sha Append returned for
 	// the miss and carry it forward into the resolution row's ResolvedRef.
 	ResolvedRef string `json:"resolved_ref,omitempty"`
+
+	// DecisionKind/BlastRadius/Question (mallcoppro-d3f, Design §Gap D wiring)
+	// are ADDITIVE fields — omitted entirely by a store written before this
+	// change, which decodes as all three empty, exactly like ScanRecord's
+	// Success/FailedStage/Error precedent above. They are populated on a MISS
+	// row ONLY when the Diagnose call that produced it came back
+	// Diagnosis.Known == false: an unclassified failure has no ranked
+	// RemediationOption to try (Remediate has nothing to rank), so instead of
+	// dead-ending it becomes an E1 async SecurityDecision ask (mallcop-pro
+	// mallcoppro-44bc, POST /api/security/decisions) the operator can judge.
+	// core/investigate is net/http-banned and that endpoint requires an
+	// authenticated browser session mallcop's own headless process never
+	// holds (internal/server/session.go: cookie-only, no bearer fallback) —
+	// so this row IS mallcop's half of the E1 wire, mirroring the same
+	// "mallcop enqueues, mallcop-pro's privileged side later consumes" shape
+	// KindSelfextDispatches already established, never a direct HTTP call
+	// this process cannot authenticate. See connect.RaiseUnknownDiagnosis,
+	// which computes these three values from a DiagnosisReport.
+	//
+	// DecisionKind mirrors mallcop-pro's decisionKind vocabulary
+	// (grant|authorize|approve|confirm) — always "grant" for an unknown
+	// GrantClaim diagnosis, since mallcop is asking the operator to review or
+	// supply the credential/scope it could not classify on its own. Empty on
+	// a Known==true miss row (a classified failure already has, or will have,
+	// a ranked remediation to try) and always empty on a resolution row.
+	DecisionKind string `json:"decision_kind,omitempty"`
+	// BlastRadius is the operator-facing "what does approving this allow"
+	// text — mirrors mallcop-pro's securityDecisionRaiseRequest.BlastRadius
+	// field-for-field, populated whenever DecisionKind is set.
+	BlastRadius string `json:"blast_radius,omitempty"`
+	// Question is the operator-facing question — mirrors mallcop-pro's
+	// securityDecisionRaiseRequest.Question field-for-field, populated
+	// whenever DecisionKind is set.
+	Question string `json:"question,omitempty"`
 }
 
 // LoadGrantOutcomes replays the grants stream into typed GrantOutcome
@@ -346,6 +380,49 @@ func (s *Store) ResolveGrantMiss(ref string) (GrantOutcome, error) {
 		return GrantOutcome{}, fmt.Errorf("store: decode grant miss at %s: %w", ref, err)
 	}
 	return r, nil
+}
+
+// GrantOutcomeRecord pairs a GrantOutcome with the commit SHA Store.Append
+// returned when THIS EXACT row was written — the same identity
+// ResolveGrantMiss resolves back. GrantOutcome carries no such field on
+// itself (see ResolveGrantMiss's doc comment: a resolution row only learns
+// its original miss's SHA because the CALLER captured Append's return value
+// at write time and threaded it into ResolvedRef), so a reader that was NOT
+// the process that originally appended a row — e.g. a later `mallcop scan`
+// checking whether an earlier miss is still outstanding, mallcoppro-d3f's
+// Route 2 — has no way to recover that row's own SHA from the JSON alone.
+// LoadGrantOutcomesWithRefs is that recovery path.
+type GrantOutcomeRecord struct {
+	GrantOutcome
+	SHA string
+}
+
+// LoadGrantOutcomesWithRefs replays the grants stream exactly like
+// LoadGrantOutcomes, additionally recovering each row's own commit SHA by
+// walking the commits that touched the grants file (oldest first,
+// Store.commitsTouching) and reading the LAST line of the blob AT each such
+// commit via ResolveGrantMiss — valid because commitAppend guarantees exactly
+// one Append call produces exactly one commit whose blob is
+// prev-content + this-call's-chunk, so the blob's last line at the commit an
+// Append call produced is byte-for-byte the record that call wrote, regardless
+// of what lands on the stream afterward (see ResolveGrantMiss's own doc for
+// the full argument — this reuses that exact mechanism rather than
+// re-deriving it). A store that has never appended to KindGrants returns an
+// empty slice, not an error.
+func (s *Store) LoadGrantOutcomesWithRefs() ([]GrantOutcomeRecord, error) {
+	shas, err := s.commitsTouching(KindGrants.file())
+	if err != nil {
+		return nil, fmt.Errorf("store: list grants stream commits: %w", err)
+	}
+	out := make([]GrantOutcomeRecord, 0, len(shas))
+	for _, sha := range shas {
+		r, err := s.ResolveGrantMiss(sha)
+		if err != nil {
+			return nil, fmt.Errorf("store: read grants record at %s: %w", sha, err)
+		}
+		out = append(out, GrantOutcomeRecord{GrantOutcome: r, SHA: sha})
+	}
+	return out, nil
 }
 
 // ContribBack lifecycle states (mallcoppro-003). Exported so no caller

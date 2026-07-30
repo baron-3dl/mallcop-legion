@@ -272,9 +272,36 @@ func Run(ctx context.Context, cfg Config) (summary Summary, err error) {
 	}()
 
 	// (1) CONNECT.
-	events, err := cfg.Connector.Pull(ctx)
-	if err != nil {
-		return Summary{}, fmt.Errorf("pipeline: connect: %w", err)
+	events, connErr := cfg.Connector.Pull(ctx)
+	if connErr != nil {
+		// mallcoppro-d3f (Design §Gap D wiring): a Pull failure used to dead-end
+		// here as a raw, uninterpreted error — nothing durable recorded WHY, and
+		// no path for the operator to act on an unclassified failure short of
+		// reading logs. If the connector can self-diagnose, record what it found
+		// onto the SAME spine the rest of the store already steers from,
+		// instead — never replacing or masking connErr, which remains Run's
+		// error either way (a diagnosis, known or not, never turns a genuine
+		// connect failure into a successful scan).
+		err = fmt.Errorf("pipeline: connect: %w", connErr)
+		if derr := recordConnectorDiagnosis(ctx, cfg.Store, cfg.Connector); derr != nil {
+			err = fmt.Errorf("%w (additionally failed to record connector diagnosis: %v)", err, derr)
+		}
+		return Summary{}, err
+	}
+
+	// mallcoppro-d3f (veracity rework, Route 2): a SUCCESSFUL Pull is the
+	// scan's own signal that whatever the connector was diagnosed as missing
+	// last time might now be fixed — this is the REAL production caller of
+	// RecordConfirmOutcome (route 2's write half) and the REAL reader of the
+	// grants stream (route 2's read half, pendingGrantMiss), so the loop this
+	// item exists to close is provably driven from cli/scan.go's actual
+	// path, not only exercised by a test calling RecordConfirmOutcome
+	// directly. confirmResolvedGrants costs nothing beyond one cheap store
+	// read per Diagnosable connector unless that connector genuinely has an
+	// outstanding, unresolved miss to re-probe.
+	stage = "confirm_grants"
+	if err := confirmResolvedGrants(ctx, cfg.Store, cfg.Connector); err != nil {
+		return Summary{}, fmt.Errorf("pipeline: confirm grant resolution: %w", err)
 	}
 	stage = "baseline"
 

@@ -785,6 +785,30 @@ func (s *Store) blobAt(commit, file string) ([]byte, error) {
 	return out, nil
 }
 
+// commitsTouching returns the SHAs of every commit that changed file, oldest
+// first — the git-history walk LoadGrantOutcomesWithRefs (records.go) needs to
+// recover a stream row's own commit SHA after the fact (mallcoppro-d3f
+// veracity rework, Route 2): a row's SHA is never embedded in its own JSON (see
+// ResolveGrantMiss's doc comment for why that's the design), so a reader that
+// was not the process that originally called Append has no way to know it
+// without walking history. A repo with zero commits, or a file no commit has
+// ever touched, returns an empty slice, not an error.
+func (s *Store) commitsTouching(file string) ([]string, error) {
+	if _, err := s.head(); err != nil {
+		// No HEAD yet (repo with zero commits) → nothing has touched anything.
+		return nil, nil
+	}
+	out, err := s.git("log", "--reverse", "--format=%H", "--", file)
+	if err != nil {
+		return nil, fmt.Errorf("store: log commits touching %s: %w", file, err)
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 // hashObject writes content as a blob into the object store and returns its sha.
 func (s *Store) hashObject(content []byte) (string, error) {
 	out, err := s.gitStdin(content, "hash-object", "-w", "--stdin")

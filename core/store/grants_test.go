@@ -125,6 +125,84 @@ func TestKindGrantsAppendAndLoadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLoadGrantOutcomesWithRefs_RecoversEachRowsOwnSHA proves the recovery
+// path mallcoppro-d3f's Route 2 wiring needs: a reader that was NOT the
+// process that originally called Append (a later `mallcop scan`, or the same
+// process re-reading the stream a scan later) can still recover each row's
+// own commit SHA — the exact same value Append itself returned when that row
+// was written — purely by replaying the grants stream's commit history.
+// Three real Append calls against a real git temp repo; no fake/in-memory
+// store or synthetic SHA anywhere in this test.
+func TestLoadGrantOutcomesWithRefs_RecoversEachRowsOwnSHA(t *testing.T) {
+	repo := initRepo(t)
+	s, err := Open(repo)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	sha1, err := s.Append(KindGrants, GrantOutcome{Connector: "aws-prod", FailureClass: "missing-scope", DetectedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatalf("Append 1: %v", err)
+	}
+	sha2, err := s.Append(KindGrants, GrantOutcome{Connector: "aws-prod", Resolved: true, ResolvedRef: sha1, DetectedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatalf("Append 2: %v", err)
+	}
+	sha3, err := s.Append(KindGrants, GrantOutcome{Connector: "github-audit", FailureClass: "missing read:audit_log scope", DetectedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatalf("Append 3: %v", err)
+	}
+
+	recs, err := s.LoadGrantOutcomesWithRefs()
+	if err != nil {
+		t.Fatalf("LoadGrantOutcomesWithRefs: %v", err)
+	}
+	if len(recs) != 3 {
+		t.Fatalf("LoadGrantOutcomesWithRefs returned %d records, want 3", len(recs))
+	}
+	wantSHAs := []string{sha1, sha2, sha3}
+	for i, want := range wantSHAs {
+		if recs[i].SHA != want {
+			t.Errorf("record %d SHA = %q, want %q (Append's own return value for that row)", i, recs[i].SHA, want)
+		}
+	}
+	if recs[0].Connector != "aws-prod" || recs[0].Resolved {
+		t.Errorf("record 0 = %+v, want the aws-prod MISS row", recs[0])
+	}
+	if !recs[1].Resolved || recs[1].ResolvedRef != sha1 {
+		t.Errorf("record 1 = %+v, want the resolution row pointing at sha1", recs[1])
+	}
+	if recs[2].Connector != "github-audit" {
+		t.Errorf("record 2 = %+v, want the github-audit MISS row", recs[2])
+	}
+
+	// Prove the recovered SHA is genuinely resolvable, not merely a
+	// plausible-looking string: hand it back through ResolveGrantMiss and
+	// confirm it reads the SAME row LoadGrantOutcomesWithRefs already decoded.
+	back, err := s.ResolveGrantMiss(recs[2].SHA)
+	if err != nil {
+		t.Fatalf("ResolveGrantMiss(%q): %v", recs[2].SHA, err)
+	}
+	if back.Connector != "github-audit" {
+		t.Fatalf("ResolveGrantMiss(recovered SHA) = %+v, want the github-audit row", back)
+	}
+
+	// A store that has never appended to KindGrants returns an empty slice,
+	// not an error — mirrors LoadGrantOutcomes' own contract.
+	freshRepo := initRepo(t)
+	fresh, err := Open(freshRepo)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	none, err := fresh.LoadGrantOutcomesWithRefs()
+	if err != nil {
+		t.Fatalf("LoadGrantOutcomesWithRefs on empty stream: %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("LoadGrantOutcomesWithRefs on a store with no grant records = %d records, want 0", len(none))
+	}
+}
+
 // TestKindGrantsForwardCompat_UnknownStreamInertAndPreserved proves the
 // ACTUAL forward-compatibility property the acceptance criterion needs: an
 // older binary that has never heard of KindGrants (or ANY future stream)

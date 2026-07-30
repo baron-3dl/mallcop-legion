@@ -41,6 +41,26 @@ func Multi(subs ...Connector) *MultiConnector {
 // compile-time proof MultiConnector satisfies the seam.
 var _ Connector = (*MultiConnector)(nil)
 
+// Diagnosables returns every sub-connector that implements Diagnosable, in
+// declaration order (mallcoppro-d3f veracity rework, Route 1). MultiConnector
+// itself deliberately does NOT implement Diagnosable — it is a pure
+// composition with no diagnosis of its own to offer — so a caller asserting
+// directly on the composed Connector (as cli/scan.go's buildConnectors ALWAYS
+// returns: connect.Multi(subs...), even for a single configured source) finds
+// nothing. This method is the escape hatch: it reaches into the actual leaf
+// connectors — the kind:cloud ExecConnector, the one production Diagnosable —
+// so a Pull failure's self-diagnosis is never silently dropped just because
+// the top-level Connector is a MultiConnector.
+func (m *MultiConnector) Diagnosables() []Diagnosable {
+	var out []Diagnosable
+	for _, sub := range m.subs {
+		if d, ok := sub.(Diagnosable); ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // Pull calls each sub-connector's Pull in declaration order and concatenates the
 // returned batches. It honors ctx: cancellation/deadline is checked before each
 // sub-connector, and ctx is threaded into every sub-connector's Pull so a
