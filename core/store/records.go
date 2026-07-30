@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -257,7 +258,13 @@ type GrantOutcome struct {
 	// Resolved is false on a GRANT-MISS row and true on a RESOLUTION row.
 	Resolved bool `json:"resolved"`
 	// ResolvedRef identifies the original GRANT-MISS row this resolution
-	// closes. Empty on a miss row; set on a resolution row.
+	// closes. Empty on a miss row; set on a resolution row to the commit SHA
+	// that Store.Append returned when the miss row was appended — NOT a
+	// synthetic/free-form key. That SHA is a genuinely resolvable identity:
+	// pass it to Store.ResolveGrantMiss to read the exact original miss row
+	// back (see that function's doc comment for why this works). A caller
+	// closing a GRANT-MISS therefore must capture the sha Append returned for
+	// the miss and carry it forward into the resolution row's ResolvedRef.
 	ResolvedRef string `json:"resolved_ref,omitempty"`
 }
 
@@ -279,4 +286,40 @@ func (s *Store) LoadGrantOutcomes() ([]GrantOutcome, error) {
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+// ResolveGrantMiss looks up the original GRANT-MISS row a resolution's
+// ResolvedRef points at. ref is the commit SHA Store.Append returned when the
+// miss row was appended (see GrantOutcome.ResolvedRef).
+//
+// This works because of how commitAppend (store.go) is built: every Append
+// call lands as its OWN commit whose stream blob is exactly
+// prev-content + this-call's-chunk — it only ever concatenates, never
+// rewrites earlier bytes. So at the EXACT commit an Append call returned, the
+// last line of the grants stream blob is, byte-for-byte, the record that
+// specific call appended — regardless of how many further records land on
+// the stream afterward, because blobAt reads the historical tree at ref, not
+// current HEAD. That makes ref a genuinely resolvable identity for the row:
+// any Store handle open on the same repo can hand a resolution's ResolvedRef
+// to this function and read back the exact original miss row, not merely
+// round-trip an opaque string a consumer has to trust.
+//
+// An error is returned if ref does not name a commit in this repo, or if the
+// grants stream has no record at that commit (e.g. ref points at some other
+// stream's commit).
+func (s *Store) ResolveGrantMiss(ref string) (GrantOutcome, error) {
+	raw, err := s.blobAt(ref, KindGrants.file())
+	if err != nil {
+		return GrantOutcome{}, fmt.Errorf("store: resolve grant miss %s: %w", ref, err)
+	}
+	lines := bytes.Split(bytes.TrimRight(raw, "\n"), []byte("\n"))
+	last := bytes.TrimSpace(lines[len(lines)-1])
+	if len(last) == 0 {
+		return GrantOutcome{}, fmt.Errorf("store: resolve grant miss %s: no grants record at that commit", ref)
+	}
+	var r GrantOutcome
+	if err := json.Unmarshal(last, &r); err != nil {
+		return GrantOutcome{}, fmt.Errorf("store: decode grant miss at %s: %w", ref, err)
+	}
+	return r, nil
 }
