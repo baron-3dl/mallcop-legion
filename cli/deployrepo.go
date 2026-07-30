@@ -44,12 +44,15 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -232,38 +235,337 @@ func scaffoldDeployAssets(dir, moduleName, mallcopVersion string) error {
 	return nil
 }
 
-// renderScanWorkflow fills scanWorkflowTemplate's version+branch placeholders.
+// stampPlaceholder stands in for {{STAMP}} while computing the content hash
+// a rendered file embeds (see renderStampedWorkflow): the hash cannot include
+// its own value, so it is computed over a canonical form with the stamp held
+// at this fixed, well-known placeholder. Verification recovers the SAME
+// canonical form straight from a file already on disk by substituting its
+// extracted stamp value back out for this same placeholder (see
+// stampCanonicalForm) — so the hash never depends on re-rendering any
+// template, historical or current.
+const stampPlaceholder = "PENDING"
+
+// stampMarkerLine renders the single-line comment a generated workflow embeds
+// to carry its content-hash provenance stamp (mallcoppro-f19). Kept as one
+// function so generation (renderStampedWorkflow) and verification
+// (stampCanonicalForm) agree byte-for-byte on the line's exact shape.
+func stampMarkerLine(stamp string) string {
+	return fmt.Sprintf(`# MALLCOP_STAMP: "%s"`, stamp)
+}
+
+// computeWorkflowStamp hashes a canonical (stamp-placeholder-substituted)
+// rendered body, producing the provenance value renderStampedWorkflow embeds
+// and planWorkflowRefresh later re-derives from disk.
+func computeWorkflowStamp(canonical string) string {
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:])
+}
+
+// renderStampedWorkflow fills tmpl's {{VERSION}} and any extra placeholders,
+// then stamps the result with a content hash of its own generated body
+// (mallcoppro-f19 fix): a later refresh recomputes this SAME hash directly
+// from the file's own on-disk bytes (see planWorkflowRefresh) and compares it
+// to the recorded stamp — proving "untouched since generation" intrinsically,
+// with no dependency on re-rendering any template (historical or current).
+// This replaces the earlier (broken) approach of re-rendering the file's own
+// extracted MALLCOP_VERSION against HEAD's template and comparing bytes: the
+// template is UNVERSIONED (one Go string constant), so that comparison
+// silently assumed HEAD's template equals what actually generated the file
+// historically — false the moment the template gains or loses a step (see the
+// item's veracity finding: a real v0.19.0 scan.yml has zero "doctor"
+// occurrences vs. 19 at HEAD).
+func renderStampedWorkflow(tmpl, mallcopVersion string, extra map[string]string) string {
+	fill := func(stamp string) string {
+		w := strings.ReplaceAll(tmpl, "{{VERSION}}", mallcopVersion)
+		w = strings.ReplaceAll(w, "{{STAMP}}", stamp)
+		for k, v := range extra {
+			w = strings.ReplaceAll(w, k, v)
+		}
+		return w
+	}
+	canonical := fill(stampPlaceholder)
+	return fill(computeWorkflowStamp(canonical))
+}
+
+// renderScanWorkflow fills scanWorkflowTemplate's version+branch placeholders
+// and embeds its content-hash provenance stamp.
 func renderScanWorkflow(mallcopVersion string) string {
-	w := strings.ReplaceAll(scanWorkflowTemplate, "{{VERSION}}", mallcopVersion)
-	return strings.ReplaceAll(w, "{{FINDINGS_BRANCH}}", mallcopFindingsBranch)
+	return renderStampedWorkflow(scanWorkflowTemplate, mallcopVersion, map[string]string{
+		"{{FINDINGS_BRANCH}}": mallcopFindingsBranch,
+	})
 }
 
-// renderInvestigateWorkflow fills investigateWorkflowTemplate's placeholders.
+// renderInvestigateWorkflow fills investigateWorkflowTemplate's placeholders
+// and embeds its content-hash provenance stamp.
 func renderInvestigateWorkflow(mallcopVersion string) string {
-	w := strings.ReplaceAll(investigateWorkflowTemplate, "{{VERSION}}", mallcopVersion)
-	w = strings.ReplaceAll(w, "{{FINDINGS_BRANCH}}", mallcopFindingsBranch)
-	return strings.ReplaceAll(w, "{{CHAT_BRANCH}}", mallcopChatBranch)
+	return renderStampedWorkflow(investigateWorkflowTemplate, mallcopVersion, map[string]string{
+		"{{FINDINGS_BRANCH}}": mallcopFindingsBranch,
+		"{{CHAT_BRANCH}}":     mallcopChatBranch,
+	})
 }
 
-// refreshDeployWorkflows re-writes BOTH generated CI workflows to the pinned
-// mallcopVersion, ALWAYS overwriting whatever is there (unlike
-// scaffoldDeployAssets' skip-if-exists). This is the `mallcop migrate` seam:
-// an existing customer deploy repo may carry a stale scan.yml and be missing
+// mallcopVersionMarkerRe pulls the MALLCOP_VERSION env value a rendered
+// scan.yml/mallcop-investigate.yml embeds (see the `MALLCOP_VERSION:
+// "{{VERSION}}"` line in both templates below) back out of a file already on
+// disk, so a refresh can tell what version IT was generated at.
+var mallcopVersionMarkerRe = regexp.MustCompile(`(?m)^\s*MALLCOP_VERSION:\s*"([^"]*)"\s*$`)
+
+// mallcopStampMarkerRe pulls the content-hash provenance stamp (see
+// stampMarkerLine) a rendered workflow embeds back out of a file already on
+// disk. A file with NO match predates this marker entirely (mallcoppro-f19
+// migration path — see planWorkflowRefresh's Unstamped handling).
+var mallcopStampMarkerRe = regexp.MustCompile(`(?m)^#\s*MALLCOP_STAMP:\s*"([^"]*)"\s*$`)
+
+// extractPinnedVersion reads the MALLCOP_VERSION marker out of a rendered
+// workflow file's content. ok is false when no marker is found (e.g. the
+// file predates the marker, or isn't a mallcop-generated file at all).
+func extractPinnedVersion(content string) (version string, ok bool) {
+	m := mallcopVersionMarkerRe.FindStringSubmatch(content)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// extractStamp reads the content-hash provenance stamp out of a rendered
+// workflow file's content. ok is false when no marker is found — every file
+// mallcop generated before mallcoppro-f19 landed, including the live
+// 3dl-dev/mallcop-deploy case this item exists for.
+func extractStamp(content string) (stamp string, ok bool) {
+	m := mallcopStampMarkerRe.FindStringSubmatch(content)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// stampCanonicalForm recovers, from a file already on disk, the SAME
+// canonical (stamp-placeholder-substituted) form renderStampedWorkflow
+// hashed at generation time — by substituting the file's own stamp marker
+// line back out for the fixed placeholder. Everything else in the file is
+// left byte-for-byte as-is, so this is a pure intrinsic check: it never reads
+// or re-renders any template.
+func stampCanonicalForm(content string) string {
+	return mallcopStampMarkerRe.ReplaceAllString(content, stampMarkerLine(stampPlaceholder))
+}
+
+// managedWorkflowFile pairs a generated workflow's filename with its render
+// function, so plan/refresh can walk both files identically.
+type managedWorkflowFile struct {
+	name   string // relative to .github/workflows/
+	render func(mallcopVersion string) string
+}
+
+var managedWorkflowFiles = []managedWorkflowFile{
+	{"scan.yml", renderScanWorkflow},
+	{"mallcop-investigate.yml", renderInvestigateWorkflow},
+}
+
+// WorkflowFileStatus is the per-file outcome of inspecting (planWorkflowRefresh)
+// or applying (refreshDeployWorkflows) a version-bump refresh against one
+// managed workflow file.
+type WorkflowFileStatus struct {
+	Name        string // e.g. "scan.yml"
+	Path        string // absolute path
+	Existed     bool   // false if the file didn't exist before this refresh
+	Diverged    bool   // hand-edited since generation (stamp mismatch, or no recognizable shape at all) -- left untouched
+	Unstamped   bool   // has a version marker but NO content-hash stamp -- predates mallcoppro-f19 provenance tracking; divergence cannot be verified (see planWorkflowRefresh)
+	// AdoptedUnverified is true iff this file was Unstamped AND the caller
+	// opted in with adoptUnstamped=true (mallcop migrate --adopt-unstamped).
+	// It exists to make one fact impossible to miss: an unstamped file is
+	// UNVERIFIABLE BY CONSTRUCTION (see planWorkflowRefresh's doc) -- mallcop
+	// has NO way to tell "genuinely stale, never touched" apart from
+	// "genuinely stale AND hand-edited" by looking at the file alone. Setting
+	// this flag is the honest admission that adopting it anyway (advancing
+	// and overwriting it) carries a real, unverified risk of silently
+	// discarding an operator's customisation -- the caller (runMigrate) must
+	// surface it plainly, not fold it into an ordinary success message. See
+	// the field's own doc + TestRefreshDeployWorkflowsAdoptUnstampedIsHonestAboutHandEditedFile
+	// for why re-deriving verification from a historical render was rejected
+	// instead of warning.
+	AdoptedUnverified bool
+	FromVersion       string // version extracted from the file's own marker; "" if absent/unrecognized
+	Changed           bool   // true if refreshDeployWorkflows actually wrote new content
+}
+
+// planWorkflowRefresh inspects dir's managed workflow files against
+// targetVersion WITHOUT writing anything. For each file it reports whether
+// the file is missing (safe to create), untouched since generation (safe to
+// advance), already at targetVersion (no-op), UNSTAMPED (generated before
+// content-hash provenance tracking existed — see below), or DIVERGED (an
+// operator hand-edit, or a shape mallcop never generated at all) — must not
+// be silently clobbered.
+//
+// PROVENANCE, NOT TEMPLATE RE-RENDER (mallcoppro-f19 fix): divergence is
+// detected by comparing a stamped file against ITS OWN recorded content-hash
+// stamp (see stampCanonicalForm/computeWorkflowStamp) — never by re-rendering
+// any template at the file's extracted version. The template is UNVERSIONED
+// (one Go string constant per workflow), so re-rendering it at an OLD version
+// only ever reproduces "the current template with an old version number
+// spliced in", not what actually generated the file historically. That
+// mismatch misclassified every genuinely-stale real-world file as an operator
+// hand-edit (proven against a real historical rendering: a v0.19.0 scan.yml
+// has zero "doctor" occurrences vs. 19 at HEAD). The content-hash stamp holds
+// regardless of how far the template has since evolved, because it never
+// depends on the template at all — only on the file's own bytes.
+//
+// UNSTAMPED FILES (the migration path, not an edge case): every workflow
+// mallcop generated before this stamp existed — including the live
+// 3dl-dev/mallcop-deploy case this item exists for — has a MALLCOP_VERSION
+// marker but no MALLCOP_STAMP marker. There is no honest way to tell whether
+// such a file was hand-edited (the same unversioned-template problem above
+// applies), so by default it is left untouched and reported Unstamped=true,
+// distinct from Diverged=true (a positive detection of a hand-edit) — an
+// operator seeing "unstamped" knows mallcop couldn't verify, not that it
+// found evidence of an edit. Passing adoptUnstamped=true (mallcop migrate
+// --adopt-unstamped) is the explicit, non-silent opt-in that says "I have not
+// hand-edited my workflows — advance them anyway and stamp them going
+// forward."
+//
+// AN UNSTAMPED FILE THAT *HAS* BEEN HAND-EDITED IS INDISTINGUISHABLE, BY
+// CONSTRUCTION, FROM ONE THAT HASN'T: both have a MALLCOP_VERSION marker and
+// no MALLCOP_STAMP marker, and there is nothing else in the file's bytes
+// that tells them apart. adoptUnstamped=true therefore overwrites BOTH cases
+// identically — a real risk this safety opt-in must never let ride silently.
+// Two ways to close that were weighed:
+//
+//  1. Diff the file against a historical re-render of its own pinned
+//     version before adopting, and refuse on mismatch.
+//  2. Warn plainly, at the point of adoption, that verification is
+//     impossible and the operator is accepting that specific risk.
+//
+// (1) was rejected: it requires re-deriving what mallcop's template looked
+// like at an arbitrary past version, which is EXACTLY the mechanism this
+// item's centerpiece fix retired (the template is one unversioned Go string
+// constant — re-rendering HEAD's copy of it at an old version reproduces
+// "today's template with an old version number spliced in", not what
+// actually generated the file; that is the bug that misclassified the real
+// v0.19.0 case as Diverged in the first place). The ONLY way to reconstruct
+// a genuine historical render is `git show <tag>:cli/deployrepo.go` against
+// mallcop's OWN source history (see renderWorkflowAtHistoricalTag in
+// deployrepo_test.go) — a mechanism available to a test running inside this
+// repo's git checkout, but not to `mallcop migrate` running as the pinned
+// release BINARY inside a customer's deploy repo (D2+2fd: the core binary is
+// always the downloaded release tarball, never built from source the runner
+// has checked out — see the package doc). Shipping (1) in production would
+// mean either embedding every past template version forever (unbounded,
+// exactly the "generic engine reads authored data" shape the project's
+// code-first invariant rejects) or silently degrading to a no-op check that
+// looks like verification but isn't.
+//
+// (2) is what AdoptedUnverified (on WorkflowFileStatus) and runMigrate's
+// output implement: the file is still adopted (the operator already opted
+// in via the flag), but every adoption of an unstamped file is reported with
+// language that states plainly "mallcop cannot verify whether this was
+// hand-edited" — never folded into an ordinary "refreshed" success line. See
+// TestRefreshDeployWorkflowsAdoptUnstampedIsHonestAboutHandEditedFile
+// (deployrepo_test.go) and TestRunMigrateAdoptUnstampedWarnsOfUnverifiedOverwrite
+// (migrate_test.go).
+func planWorkflowRefresh(dir, targetVersion string, adoptUnstamped bool) ([]WorkflowFileStatus, error) {
+	workflowDir := filepath.Join(dir, ".github", "workflows")
+	statuses := make([]WorkflowFileStatus, len(managedWorkflowFiles))
+	for i, wf := range managedWorkflowFiles {
+		path := filepath.Join(workflowDir, wf.name)
+		st := WorkflowFileStatus{Name: wf.name, Path: path}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				statuses[i] = st
+				continue
+			}
+			return nil, fmt.Errorf("deploy-repo: reading %s: %w", path, err)
+		}
+		st.Existed = true
+		current := string(data)
+
+		pinned, ok := extractPinnedVersion(current)
+		if !ok {
+			// No recognizable pin marker at all -- never seen this shape before
+			// (predates even the version marker, or isn't ours). Refuse to
+			// guess, surface it instead of overwriting.
+			st.Diverged = true
+			statuses[i] = st
+			continue
+		}
+		st.FromVersion = pinned
+
+		stamp, stampOK := extractStamp(current)
+		if !stampOK {
+			st.Unstamped = true
+			if !adoptUnstamped {
+				statuses[i] = st
+				continue
+			}
+			// Adopted: fall through and treat this file as safe to advance.
+			// AdoptedUnverified=true regardless of whether this particular
+			// file happens to have been hand-edited -- mallcop cannot tell
+			// the two cases apart (see the doc above), so every unstamped
+			// adoption is marked, not just the ones we'd wish were safe.
+			st.AdoptedUnverified = true
+		} else if computeWorkflowStamp(stampCanonicalForm(current)) != stamp {
+			// The file's own bytes no longer hash to its own recorded stamp --
+			// an operator edited it since mallcop generated it. This holds no
+			// matter how far the template has since evolved.
+			st.Diverged = true
+			statuses[i] = st
+			continue
+		}
+		statuses[i] = st
+	}
+	return statuses, nil
+}
+
+// refreshDeployWorkflows re-writes the generated CI workflows to the pinned
+// mallcopVersion. This is the `mallcop migrate` seam: an existing customer
+// deploy repo may carry a stale scan.yml and be missing
 // mallcop-investigate.yml entirely (added in v0.10) — a version bump must
-// force both to the current pinned release. The workflows are generated
-// assets, never hand-edited, so overwriting is safe.
-func refreshDeployWorkflows(dir, mallcopVersion string) error {
+// force both to the current pinned release.
+//
+// SAFETY: a file that has diverged from what mallcop itself generated (an
+// operator hand-edit, detected via its own content-hash stamp — see
+// planWorkflowRefresh) is left completely untouched; its status comes back
+// with Diverged=true and Changed=false so the caller can report it instead of
+// silently steamrolling the edit. A file with a version marker but no stamp
+// at all (Unstamped=true — predates mallcoppro-f19 provenance tracking) is
+// likewise left untouched UNLESS adoptUnstamped is true, in which case it is
+// treated as safe to advance (and gains a stamp on write, closing the
+// migration gap going forward). A file that already renders identically to
+// the target version is left alone too (Changed=false) so a repo that is
+// already current produces no git diff — the idempotent no-op the product's
+// git-is-the-spine model depends on.
+func refreshDeployWorkflows(dir, mallcopVersion string, adoptUnstamped bool) ([]WorkflowFileStatus, error) {
+	plan, err := planWorkflowRefresh(dir, mallcopVersion, adoptUnstamped)
+	if err != nil {
+		return nil, err
+	}
 	workflowDir := filepath.Join(dir, ".github", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		return fmt.Errorf("deploy-repo: creating .github/workflows/: %w", err)
+		return nil, fmt.Errorf("deploy-repo: creating .github/workflows/: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(workflowDir, "scan.yml"), []byte(renderScanWorkflow(mallcopVersion)), 0o644); err != nil {
-		return fmt.Errorf("deploy-repo: writing .github/workflows/scan.yml: %w", err)
+	for i, wf := range managedWorkflowFiles {
+		st := &plan[i]
+		if st.Diverged {
+			continue
+		}
+		if st.Unstamped && !adoptUnstamped {
+			continue
+		}
+		rendered := wf.render(mallcopVersion)
+		if st.Existed {
+			current, err := os.ReadFile(st.Path)
+			if err != nil {
+				return nil, fmt.Errorf("deploy-repo: reading %s: %w", st.Path, err)
+			}
+			if string(current) == rendered {
+				continue // already current -- no write, no spurious git diff
+			}
+		}
+		if err := os.WriteFile(st.Path, []byte(rendered), 0o644); err != nil {
+			return nil, fmt.Errorf("deploy-repo: writing %s: %w", st.Path, err)
+		}
+		st.Changed = true
 	}
-	if err := os.WriteFile(filepath.Join(workflowDir, "mallcop-investigate.yml"), []byte(renderInvestigateWorkflow(mallcopVersion)), 0o644); err != nil {
-		return fmt.Errorf("deploy-repo: writing .github/workflows/mallcop-investigate.yml: %w", err)
-	}
-	return nil
+	return plan, nil
 }
 
 // refreshGoMod bumps the pinned github.com/mallcop-app/mallcop require version
@@ -535,6 +837,13 @@ permissions:
 
 env:
   MALLCOP_VERSION: "{{VERSION}}"
+# MALLCOP_STAMP: "{{STAMP}}"
+# ^ content-hash provenance marker (mallcoppro-f19). Do not hand-edit the
+# line above: 'mallcop migrate' compares this file's own bytes against it to
+# tell whether the file has been touched since mallcop generated it,
+# independent of how the template has since evolved. A file with no line
+# like this predates the marker and is handled as a distinct, honestly
+# reported case -- see cli/deployrepo.go's planWorkflowRefresh.
 
 jobs:
   scan:
@@ -834,6 +1143,13 @@ concurrency:
 
 env:
   MALLCOP_VERSION: "{{VERSION}}"
+# MALLCOP_STAMP: "{{STAMP}}"
+# ^ content-hash provenance marker (mallcoppro-f19). Do not hand-edit the
+# line above: 'mallcop migrate' compares this file's own bytes against it to
+# tell whether the file has been touched since mallcop generated it,
+# independent of how the template has since evolved. A file with no line
+# like this predates the marker and is handled as a distinct, honestly
+# reported case -- see cli/deployrepo.go's planWorkflowRefresh.
 
 jobs:
   investigate:

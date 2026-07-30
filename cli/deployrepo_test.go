@@ -3,9 +3,11 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -153,7 +155,7 @@ func TestScanWorkflowPublishesGapsAndGatesOnMiss(t *testing.T) {
 	// Migrate force-refreshes generated workflows, so the same publish+gate must be
 	// present in the refresh path too (existing repos upgrade on 'mallcop migrate').
 	dir := t.TempDir()
-	if err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
+	if _, err := refreshDeployWorkflows(dir, "v0.9.0", false); err != nil {
 		t.Fatalf("refreshDeployWorkflows: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, ".github", "workflows", "scan.yml"))
@@ -233,7 +235,7 @@ func TestScanWorkflowPublishesDoctorReports(t *testing.T) {
 	// be present in the refresh path too (existing repos upgrade on 'mallcop
 	// migrate'), matching the sibling gaps.json/watchdog coverage above.
 	dir := t.TempDir()
-	if err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
+	if _, err := refreshDeployWorkflows(dir, "v0.9.0", false); err != nil {
 		t.Fatalf("refreshDeployWorkflows: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, ".github", "workflows", "scan.yml"))
@@ -300,7 +302,7 @@ func TestScanWorkflowHasLivenessWatchdog(t *testing.T) {
 	// present in the refresh path too (existing repos upgrade on 'mallcop
 	// migrate'), matching the sibling recall-red gate's own coverage above.
 	dir := t.TempDir()
-	if err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
+	if _, err := refreshDeployWorkflows(dir, "v0.9.0", false); err != nil {
 		t.Fatalf("refreshDeployWorkflows: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, ".github", "workflows", "scan.yml"))
@@ -739,4 +741,398 @@ func TestScaffoldWorkflowsPinActionsBySHA(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestRefreshDeployWorkflowsAdvancesGenuinelyStaleFile is the mallcoppro-f19
+// happy path: a scan.yml that is byte-identical to what mallcop generated at
+// an OLD pinned version (never hand-touched since) must advance cleanly to
+// the new version — this is the exact live-hit scenario the item names
+// (3dl-dev/mallcop-deploy pinned v0.19.0, scan.yml predating the
+// doctor-publish step added at sha 718c321).
+func TestRefreshDeployWorkflowsAdvancesGenuinelyStaleFile(t *testing.T) {
+	dir := t.TempDir()
+	workflowDir := filepath.Join(dir, ".github", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := renderScanWorkflow("v0.19.0")
+	if err := os.WriteFile(filepath.Join(workflowDir, "scan.yml"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := refreshDeployWorkflows(dir, "v0.20.0", false)
+	if err != nil {
+		t.Fatalf("refreshDeployWorkflows: %v", err)
+	}
+
+	var scanStatus *WorkflowFileStatus
+	for i := range plan {
+		if plan[i].Name == "scan.yml" {
+			scanStatus = &plan[i]
+		}
+	}
+	if scanStatus == nil {
+		t.Fatalf("no status returned for scan.yml: %+v", plan)
+	}
+	if scanStatus.Diverged {
+		t.Fatalf("a genuinely stale (never hand-edited) scan.yml must not be reported as diverged: %+v", scanStatus)
+	}
+	if scanStatus.FromVersion != "v0.19.0" {
+		t.Errorf("FromVersion = %q, want v0.19.0", scanStatus.FromVersion)
+	}
+	if !scanStatus.Changed {
+		t.Errorf("scan.yml should have been advanced (Changed=true): %+v", scanStatus)
+	}
+
+	raw := mustRead(t, filepath.Join(workflowDir, "scan.yml"))
+	if strings.Contains(raw, `MALLCOP_VERSION: "v0.19.0"`) {
+		t.Error("scan.yml still pinned to the old version after refresh")
+	}
+	if !strings.Contains(raw, `MALLCOP_VERSION: "v0.20.0"`) {
+		t.Error("scan.yml was not pinned to the new version")
+	}
+}
+
+// TestRefreshDeployWorkflowsReportsHandEditedFile is the mallcoppro-f19
+// CRITICAL SAFETY check: a managed workflow file that has been hand-edited
+// since it was generated (content no longer byte-identical to what mallcop
+// would render for its own pinned version) must be left COMPLETELY
+// untouched by refreshDeployWorkflows and reported as diverged — never
+// silently steamrolled. The sibling mallcop-investigate.yml, which was NOT
+// hand-edited, must still advance normally in the same call.
+func TestRefreshDeployWorkflowsReportsHandEditedFile(t *testing.T) {
+	dir := t.TempDir()
+	workflowDir := filepath.Join(dir, ".github", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	handEdited := renderScanWorkflow("v0.19.0") + "\n# operator: added a custom notification step here\n"
+	if err := os.WriteFile(filepath.Join(workflowDir, "scan.yml"), []byte(handEdited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	untouched := renderInvestigateWorkflow("v0.19.0")
+	if err := os.WriteFile(filepath.Join(workflowDir, "mallcop-investigate.yml"), []byte(untouched), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := refreshDeployWorkflows(dir, "v0.20.0", false)
+	if err != nil {
+		t.Fatalf("refreshDeployWorkflows: %v", err)
+	}
+
+	for _, st := range plan {
+		switch st.Name {
+		case "scan.yml":
+			if !st.Diverged {
+				t.Errorf("hand-edited scan.yml must be reported Diverged=true: %+v", st)
+			}
+			if st.Changed {
+				t.Errorf("hand-edited scan.yml must not be written (Changed must stay false): %+v", st)
+			}
+		case "mallcop-investigate.yml":
+			if st.Diverged {
+				t.Errorf("untouched mallcop-investigate.yml must not be reported diverged: %+v", st)
+			}
+			if !st.Changed {
+				t.Errorf("untouched mallcop-investigate.yml should have advanced: %+v", st)
+			}
+		}
+	}
+
+	// The hand-edited file on disk must be byte-for-byte UNTOUCHED.
+	raw := mustRead(t, filepath.Join(workflowDir, "scan.yml"))
+	if raw != handEdited {
+		t.Errorf("refreshDeployWorkflows clobbered a hand-edited file:\nwant (unchanged):\n%s\ngot:\n%s", handEdited, raw)
+	}
+
+	// The untouched sibling file DID advance.
+	rawInv := mustRead(t, filepath.Join(workflowDir, "mallcop-investigate.yml"))
+	if !strings.Contains(rawInv, `MALLCOP_VERSION: "v0.20.0"`) {
+		t.Error("mallcop-investigate.yml was not advanced to v0.20.0")
+	}
+}
+
+// TestRefreshDeployWorkflowsIsIdempotent proves that refreshing an
+// already-current repo writes nothing: re-running at the SAME version a
+// second file-write already applied produces byte-identical content and
+// Changed=false for every file, so a git-backed deploy repo shows zero diff
+// on a repeat run (no empty commit needed).
+func TestRefreshDeployWorkflowsIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := refreshDeployWorkflows(dir, "v0.20.0", false); err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+	scanBefore := mustRead(t, filepath.Join(dir, ".github", "workflows", "scan.yml"))
+	invBefore := mustRead(t, filepath.Join(dir, ".github", "workflows", "mallcop-investigate.yml"))
+
+	plan, err := refreshDeployWorkflows(dir, "v0.20.0", false)
+	if err != nil {
+		t.Fatalf("second refresh: %v", err)
+	}
+	for _, st := range plan {
+		if st.Changed {
+			t.Errorf("second refresh at the same version must be a no-op, but %s reported Changed=true", st.Name)
+		}
+		if st.Diverged {
+			t.Errorf("an untouched file must never be reported diverged: %s", st.Name)
+		}
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "workflows", "scan.yml")); got != scanBefore {
+		t.Error("scan.yml content changed on an idempotent re-run")
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "workflows", "mallcop-investigate.yml")); got != invBefore {
+		t.Error("mallcop-investigate.yml content changed on an idempotent re-run")
+	}
+}
+
+// renderWorkflowAtHistoricalTag renders a workflow ("scan" or "investigate")
+// EXACTLY as tag's own code would have: it extracts cli/deployrepo.go at that
+// tag with `git show`, compiles it as a standalone program (it depends on
+// nothing outside the Go standard library), and runs it. This proves
+// behavior against a REAL historical artifact instead of a fixture seeded
+// from HEAD's own template (the mistake the mallcoppro-f19 veracity finding
+// caught) -- the historical template is computed transiently in a scratch
+// temp dir here and is never vendored into the product.
+func renderWorkflowAtHistoricalTag(t *testing.T, tag, workflow, version string) string {
+	t.Helper()
+	repoRootOut, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel: %v", err)
+	}
+	root := strings.TrimSpace(string(repoRootOut))
+
+	src, err := exec.Command("git", "-C", root, "show", tag+":cli/deployrepo.go").Output()
+	if err != nil {
+		t.Fatalf("git show %s:cli/deployrepo.go (tag must exist locally): %v", tag, err)
+	}
+	code := strings.Replace(string(src), "package cli", "package main", 1)
+
+	var fn string
+	switch workflow {
+	case "scan":
+		fn = "renderScanWorkflow"
+	case "investigate":
+		fn = "renderInvestigateWorkflow"
+	default:
+		t.Fatalf("renderWorkflowAtHistoricalTag: unknown workflow %q", workflow)
+	}
+	// fmt and os are already imported by cli/deployrepo.go itself at every
+	// tag this item cares about, so appending a main() that calls them needs
+	// no new imports.
+	code += fmt.Sprintf("\nfunc main() { fmt.Print(%s(%q)) }\n", fn, version)
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(code), 0o644); err != nil {
+		t.Fatalf("writing extracted historical source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module historicalrender\n\ngo 1.24\n"), 0o644); err != nil {
+		t.Fatalf("writing scratch go.mod: %v", err)
+	}
+	cmd := exec.Command("go", "run", ".")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("running %s's own %s(%q): %v\n%s", tag, fn, version, err, out)
+	}
+	return string(out)
+}
+
+// TestRefreshDeployWorkflowsHandlesGenuinelyOldUnstampedFile is the
+// mallcoppro-f19 REWORK proof, run against a REAL historical artifact (never
+// a fixture seeded from HEAD's own template): a scan.yml rendered by
+// v0.19.0's OWN renderScanWorkflow -- extracted from the actual v0.19.0 tag
+// and executed at test time, exactly like the veracity adversary did -- has
+// NO content-hash stamp at all (the marker didn't exist yet). This is the
+// live 3dl-dev/mallcop-deploy scenario the item names.
+//
+// The OLD (broken) check re-rendered HEAD's template at the file's own
+// extracted version and compared bytes: HEAD's scan.yml has 19 "doctor"
+// occurrences, v0.19.0's has zero, so that comparison always mismatched and
+// every such file was misreported as a hand-edit (Diverged) -- refusing to
+// ever advance the live case.
+//
+// The FIX: by default this file is classified Unstamped (mallcop truthfully
+// cannot verify whether it was hand-edited -- it predates the marker) and is
+// left completely untouched, distinct from Diverged (a positive hand-edit
+// detection). Passing adoptUnstamped=true (mallcop migrate
+// --adopt-unstamped) is the explicit, non-silent opt-in that advances it
+// cleanly to the target version and stamps it going forward.
+func TestRefreshDeployWorkflowsHandlesGenuinelyOldUnstampedFile(t *testing.T) {
+	old := renderWorkflowAtHistoricalTag(t, "v0.19.0", "scan", "v0.19.0")
+	if strings.Contains(old, "MALLCOP_STAMP") {
+		t.Fatalf("test setup bug: v0.19.0's OWN rendering already carries a stamp marker -- this historical fixture no longer proves the unstamped case:\n%s", old)
+	}
+	if strings.Contains(old, "doctor") {
+		t.Fatalf("test setup bug: v0.19.0 must predate the doctor-publish step (zero 'doctor' occurrences) for this to be the scenario the item names:\n%s", old)
+	}
+	if !strings.Contains(old, `MALLCOP_VERSION: "v0.19.0"`) {
+		t.Fatalf("test setup bug: historical rendering is not pinned to v0.19.0:\n%s", old)
+	}
+
+	dir := t.TempDir()
+	workflowDir := filepath.Join(dir, ".github", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workflowDir, "scan.yml"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default (no --adopt-unstamped): left untouched, reported Unstamped --
+	// NEVER Diverged (that would falsely claim a detected hand-edit when
+	// mallcop actually has no evidence either way).
+	plan, err := refreshDeployWorkflows(dir, "v0.20.0", false)
+	if err != nil {
+		t.Fatalf("refreshDeployWorkflows: %v", err)
+	}
+	scanStatus := mustFindWorkflowStatus(t, plan, "scan.yml")
+	if scanStatus.Diverged {
+		t.Fatalf("a genuinely stale UNSTAMPED file must NOT be reported Diverged (mallcop has no evidence of a hand-edit, only an absent stamp): %+v", scanStatus)
+	}
+	if !scanStatus.Unstamped {
+		t.Fatalf("a real pre-stamp historical file must be reported Unstamped=true: %+v", scanStatus)
+	}
+	if scanStatus.Changed {
+		t.Fatalf("an unstamped file must NOT be advanced without --adopt-unstamped: %+v", scanStatus)
+	}
+	if raw := mustRead(t, filepath.Join(workflowDir, "scan.yml")); raw != old {
+		t.Fatal("default refresh must leave an unstamped file byte-for-byte untouched")
+	}
+
+	// --adopt-unstamped: the mallcoppro-f19 fix actually working -- the SAME
+	// real historical file advances cleanly.
+	plan2, err := refreshDeployWorkflows(dir, "v0.20.0", true)
+	if err != nil {
+		t.Fatalf("refreshDeployWorkflows (adopt-unstamped): %v", err)
+	}
+	scanStatus2 := mustFindWorkflowStatus(t, plan2, "scan.yml")
+	if !scanStatus2.Changed {
+		t.Fatalf("adopting an unstamped file (--adopt-unstamped) must advance it: %+v", scanStatus2)
+	}
+	if scanStatus2.Diverged {
+		t.Fatalf("an adopted unstamped file must not simultaneously report Diverged: %+v", scanStatus2)
+	}
+	raw2 := mustRead(t, filepath.Join(workflowDir, "scan.yml"))
+	if !strings.Contains(raw2, `MALLCOP_VERSION: "v0.20.0"`) {
+		t.Errorf("adopted unstamped file was not advanced to v0.20.0:\n%s", raw2)
+	}
+	if !strings.Contains(raw2, "MALLCOP_STAMP") {
+		t.Errorf("adopted+advanced file should carry a content-hash stamp going forward, closing the migration gap:\n%s", raw2)
+	}
+}
+
+// TestRefreshDeployWorkflowsAdoptUnstampedIsHonestAboutHandEditedFile is the
+// mallcoppro-f19 REWORK defect-2 proof: an unstamped file that has ALSO been
+// hand-edited is INDISTINGUISHABLE, by construction, from an unstamped file
+// that was never touched -- both carry a MALLCOP_VERSION marker and no
+// MALLCOP_STAMP marker, and there is nothing else in the bytes that tells
+// them apart (see planWorkflowRefresh's doc). --adopt-unstamped still
+// advances it (that is the explicit opt-in the operator asked for), but the
+// returned status MUST mark AdoptedUnverified=true so the caller (runMigrate)
+// can report the risk plainly instead of a plain "adopted" success line.
+//
+// Without the AdoptedUnverified guard this test fails: the zero-value bool
+// is false, indistinguishable from an ordinary safe adoption, and nothing in
+// the returned WorkflowFileStatus would let a caller tell "adopted a file we
+// could verify" apart from "adopted a file we could NOT verify and which
+// happened to carry a real hand-edit".
+func TestRefreshDeployWorkflowsAdoptUnstampedIsHonestAboutHandEditedFile(t *testing.T) {
+	dir := t.TempDir()
+	workflowDir := filepath.Join(dir, ".github", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// An unstamped file (predates mallcoppro-f19 provenance tracking) that
+	// has ALSO been hand-edited since generation -- the exact ambiguous case
+	// defect 2 names. stripStampMarkerForTest mirrors migrate_test.go's
+	// stripStampMarker (kept local to this file to avoid a cross-file test
+	// helper dependency): it removes only the MALLCOP_STAMP marker line (and
+	// its explanatory comment block), simulating a file that genuinely
+	// predates the stamp, while leaving the hand-edit appended below intact.
+	unstampedAndHandEdited := stripStampMarkerForTest(renderScanWorkflow("v0.19.0")) +
+		"\n# operator: added a custom notification step here\n"
+	if strings.Contains(unstampedAndHandEdited, "MALLCOP_STAMP") {
+		t.Fatalf("test setup bug: fixture still carries a stamp marker:\n%s", unstampedAndHandEdited)
+	}
+	if err := os.WriteFile(filepath.Join(workflowDir, "scan.yml"), []byte(unstampedAndHandEdited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default (no --adopt-unstamped): must still be left byte-for-byte
+	// untouched and reported Unstamped, exactly like the never-edited case --
+	// mallcop has no way to tell these two fixtures apart, so it must not
+	// treat this one any differently.
+	planDefault, err := refreshDeployWorkflows(dir, "v0.20.0", false)
+	if err != nil {
+		t.Fatalf("refreshDeployWorkflows: %v", err)
+	}
+	stDefault := mustFindWorkflowStatus(t, planDefault, "scan.yml")
+	if !stDefault.Unstamped || stDefault.Changed || stDefault.AdoptedUnverified {
+		t.Fatalf("default (no --adopt-unstamped) run over an unstamped+hand-edited file must be Unstamped=true, Changed=false, AdoptedUnverified=false: %+v", stDefault)
+	}
+	if raw := mustRead(t, filepath.Join(workflowDir, "scan.yml")); raw != unstampedAndHandEdited {
+		t.Fatal("default refresh must leave an unstamped+hand-edited file byte-for-byte untouched")
+	}
+
+	// --adopt-unstamped: the operator's explicit opt-in advances the file
+	// (per the item's accepted ruling -- the flag itself is consent), but the
+	// returned status must be honest that this specific adoption was
+	// UNVERIFIED: mallcop could not tell the hand-edit apart from a clean
+	// legacy file, and the hand-edit is now gone.
+	planAdopt, err := refreshDeployWorkflows(dir, "v0.20.0", true)
+	if err != nil {
+		t.Fatalf("refreshDeployWorkflows (adopt-unstamped): %v", err)
+	}
+	stAdopt := mustFindWorkflowStatus(t, planAdopt, "scan.yml")
+	if !stAdopt.Changed {
+		t.Fatalf("--adopt-unstamped must still advance an unstamped file even if it happens to be hand-edited (that is the accepted opt-in): %+v", stAdopt)
+	}
+	if !stAdopt.AdoptedUnverified {
+		t.Fatalf("adopting an unstamped file must be reported AdoptedUnverified=true -- mallcop cannot tell this hand-edited case apart from a clean one, and that must never be silent: %+v", stAdopt)
+	}
+	raw := mustRead(t, filepath.Join(workflowDir, "scan.yml"))
+	if strings.Contains(raw, "operator: added a custom notification step here") {
+		t.Fatal("test setup bug: expected the hand-edit to have been overwritten by the accepted --adopt-unstamped opt-in")
+	}
+	if !strings.Contains(raw, `MALLCOP_VERSION: "v0.20.0"`) {
+		t.Errorf("adopted unstamped+hand-edited file was not advanced to v0.20.0:\n%s", raw)
+	}
+}
+
+// stripStampMarkerForTest removes the MALLCOP_STAMP marker line and its
+// following explanation comment lines from a rendered workflow, WITHOUT
+// touching anything else -- simulating a file generated before
+// mallcoppro-f19's content-hash provenance tracking existed. Mirrors
+// migrate_test.go's stripStampMarker; kept local here so this file has no
+// test-helper dependency on migrate_test.go.
+func stripStampMarkerForTest(rendered string) string {
+	lines := strings.Split(rendered, "\n")
+	out := make([]string, 0, len(lines))
+	skipping := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, `# MALLCOP_STAMP:`) {
+			skipping = true
+			continue
+		}
+		if skipping {
+			if strings.HasPrefix(line, "#") {
+				continue
+			}
+			skipping = false
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
+func mustFindWorkflowStatus(t *testing.T, plan []WorkflowFileStatus, name string) *WorkflowFileStatus {
+	t.Helper()
+	for i := range plan {
+		if plan[i].Name == name {
+			return &plan[i]
+		}
+	}
+	t.Fatalf("no status returned for %s: %+v", name, plan)
+	return nil
 }
