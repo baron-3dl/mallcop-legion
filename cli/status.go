@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/mallcop-app/mallcop/core/cases"
 	"github.com/mallcop-app/mallcop/core/collect"
 	"github.com/mallcop-app/mallcop/core/store"
 )
@@ -58,6 +60,36 @@ func runStatus(args []string) error {
 
 	fmt.Printf("Findings:   %d recorded\n", len(findings))
 	fmt.Printf("Decisions:  %d recorded\n", len(resolutions))
+
+	// Cases: read back store/cases.json — the SAME projection cli/cases.go's
+	// collapseCases builds via core/cases.Collapse + ApplyCaseDirectives and
+	// commits on every `mallcop scan` (mallcoppro-554) — and hand it straight
+	// to cases.Summarize for counts/formatting. status NEVER re-clusters a
+	// finding or re-derives a Case itself (R4, mallcoppro-a51): doing so would
+	// let this section drift from cases.json exactly as a hand-rolled console
+	// count would. A store with no cases.json yet (ReadSnapshot's documented
+	// "not found is not an error" case) reads back as an empty case set, which
+	// Summarize reports honestly as "0 open" — the section always prints,
+	// never silently disappears on an empty store.
+	casesRaw, err := st.ReadSnapshot(casesSnapshotName)
+	if err != nil {
+		return fmt.Errorf("status: read %s: %w", casesSnapshotName, err)
+	}
+	var caseSet []cases.Case
+	if len(casesRaw) > 0 {
+		if err := json.Unmarshal(casesRaw, &caseSet); err != nil {
+			return fmt.Errorf("status: decode %s: %w", casesSnapshotName, err)
+		}
+	}
+	summary := cases.Summarize(caseSet)
+	if summary.Open > 0 {
+		fmt.Printf("Cases:      %d open (%d recurring)\n", summary.Open, summary.Recurring)
+	} else {
+		fmt.Printf("Cases:      0 open\n")
+	}
+	for _, line := range summary.Lines {
+		fmt.Println(line)
+	}
 
 	// Surface the STORE-PURE coverage gaps the self-heal loop tracks — the same
 	// offline collectors `mallcop collect` runs, with no --fidelity (so no
