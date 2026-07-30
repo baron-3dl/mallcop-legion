@@ -198,10 +198,20 @@ func runDoctorConfirm(ctx context.Context, st *store.Store, diag connect.Diagnos
 	}
 
 	result := connect.ConfirmResult{
-		// Resolved mirrors core/pipeline's confirmResolvedGrants exactly:
-		// Known:true closes the loop, Known:false means the applied fix did
-		// not (yet) resolve the deficiency.
-		Resolved:  report.Diagnosis.Known,
+		// Resolved must use the SAME criterion this file's own
+		// diagnosisDeficient uses to decide exit code 1 for the plain
+		// Diagnose form below (mallcoppro-3fd9): a Known:true diagnosis can
+		// still carry a non-empty Remediation ladder (e.g. the Azure doctor's
+		// defWrongPrincipal/defTokenExpired/defARMAuthorizationFailed/
+		// defResourceContextMode/defMissingWorkspaceGrant all set Known:true
+		// while still deficient) — that is a re-probe landing on a STILL
+		// DEFICIENT branch, not a resolution. Using bare
+		// report.Diagnosis.Known here recorded a FALSE resolution row on the
+		// durable grants stream for exactly that case. diagnosisDeficient is
+		// the file's own definition of "still needs an operator's attention";
+		// Resolved is its negation, never a second, independently-drifting
+		// criterion.
+		Resolved:  !diagnosisDeficient(report),
 		Diagnosis: report.Diagnosis,
 		CheckedAt: time.Now().UTC(),
 	}

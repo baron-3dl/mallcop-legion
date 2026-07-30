@@ -202,7 +202,19 @@ func confirmResolvedGrants(ctx context.Context, st *store.Store, connector conne
 			return fmt.Errorf("pipeline: re-diagnose connector %q to confirm grant resolution: %w", id, err)
 		}
 		result := connect.ConfirmResult{
-			Resolved:  report.Diagnosis.Known,
+			// Resolved is NOT bare report.Diagnosis.Known (mallcoppro-3fd9):
+			// several real classified diagnoses (e.g. the Azure doctor's
+			// defWrongPrincipal/defTokenExpired/defARMAuthorizationFailed/
+			// defResourceContextMode/defMissingWorkspaceGrant) set Known:true
+			// while STILL carrying a non-empty Remediation ladder — that is
+			// the kernel's own "still deficient, not yet fixed" state (mirrors
+			// cli/doctor.go's diagnosisDeficient: !Known || len(Remediation)
+			// > 0), and reporting it Resolved would append a FALSE resolution
+			// row to the automatic, scan-driven confirm path — the same
+			// stream cli/doctor.go's --confirm form writes to. A Known:true
+			// diagnosis only counts as resolved when it ALSO has nothing left
+			// to remediate.
+			Resolved:  report.Diagnosis.Known && len(report.Remediation) == 0,
 			Diagnosis: report.Diagnosis,
 			CheckedAt: time.Now().UTC(),
 		}

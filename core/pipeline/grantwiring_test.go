@@ -320,6 +320,82 @@ func TestPipeline_SuccessfulPullConfirmsPriorGrantMiss(t *testing.T) {
 	}
 }
 
+// TestPipeline_ConfirmKnownTrueWithRemediation_RecordsFreshMissNotResolution
+// is the mallcoppro-3fd9 regression proof for confirmResolvedGrants (route
+// 2's AUTOMATIC, scan-driven confirm path — the SAME duplicated criterion
+// cli/doctor.go's runDoctorConfirm carried the false-resolution bug in): a
+// prior unresolved GRANT-MISS exists, Pull now succeeds, but the re-probed
+// Diagnose comes back Known:true WHILE STILL carrying a non-empty
+// Remediation ladder — the kernel's own "still deficient" shape (mirrors the
+// Azure doctor's defWrongPrincipal/defTokenExpired/etc branches). Bare
+// report.Diagnosis.Known would record this as a resolution on every
+// scheduled scan the connector is diagnosable but not actually fixed on;
+// this test proves pipeline.Run instead appends a FRESH miss (Resolved:false,
+// ResolvedRef empty) — never a false resolution.
+func TestPipeline_ConfirmKnownTrueWithRemediation_RecordsFreshMissNotResolution(t *testing.T) {
+	st := newGitStore(t)
+
+	missSHA, err := st.Append(store.KindGrants, missRow())
+	if err != nil {
+		t.Fatalf("Append(KindGrants) seed miss: %v", err)
+	}
+
+	connector := diagnosableConnector{
+		// Pull succeeds this scan, but the connector is still deficient: the
+		// re-probe's own Diagnose comes back Known:true (classified) yet
+		// still ranks a Remediation option — exactly the state
+		// diagnosisDeficient (cli/doctor.go) and this file's own fixed
+		// criterion both call STILL DEFICIENT, never resolved.
+		report: connect.DiagnosisReport{
+			ConnectorID: "azure-sp-prod",
+			Diagnosis:   connect.Diagnosis{Known: true, Summary: "wrong principal assigned", Confidence: 0.9},
+			Remediation: []connect.RemediationOption{{
+				Command:     "az role assignment create --assignee OID --role Reader --scope SCOPE",
+				BlastRadius: "Lets OID read metadata of every resource in the group.",
+			}},
+		},
+	}
+
+	cfg := pipeline.Config{
+		Connector: connect.Multi(connector),
+		Client:    &inference.DirectClient{BaseURL: "http://unused.invalid", Model: "test-model"},
+		Store:     st,
+		Baseline:  knownActorsBaseline(),
+	}
+
+	if _, err := pipeline.Run(context.Background(), cfg); err != nil {
+		t.Fatalf("pipeline.Run over a Pull-succeeding but still-deficient connector: %v", err)
+	}
+
+	grants, lerr := st.LoadGrantOutcomes()
+	if lerr != nil {
+		t.Fatalf("LoadGrantOutcomes: %v", lerr)
+	}
+	if len(grants) != 2 {
+		t.Fatalf("LoadGrantOutcomes returned %d records, want 2 (seed miss + a FRESH miss the still-deficient re-probe must write)", len(grants))
+	}
+	row := grants[1]
+	if row.Resolved {
+		t.Fatalf("row = %+v, want Resolved=false — Known:true with a non-empty Remediation ladder is STILL DEFICIENT; recording Resolved=true here is the false-resolution bug mallcoppro-3fd9 fixes", row)
+	}
+	if row.ResolvedRef != "" {
+		t.Fatalf("row = %+v, want ResolvedRef empty — a fresh miss, not a resolution referencing %q", row, missSHA)
+	}
+	if row.Connector != "azure-sp-prod" || row.FailureClass != "wrong principal assigned" {
+		t.Errorf("row = %+v, want the fresh re-probed diagnosis for azure-sp-prod", row)
+	}
+
+	// The ORIGINAL miss must still be readable as unresolved: confirmResolvedGrants
+	// must not have mutated it into looking resolved.
+	stillOpen, rerr := st.ResolveGrantMiss(missSHA)
+	if rerr != nil {
+		t.Fatalf("ResolveGrantMiss(%q): %v", missSHA, rerr)
+	}
+	if stillOpen.Resolved {
+		t.Fatalf("original miss row %+v is marked Resolved — the still-deficient re-probe must never mutate the original miss, only append a fresh one", stillOpen)
+	}
+}
+
 // TestRecordConfirmOutcome_ResolvedAppendsResolutionRow proves route 2's
 // success path: a Confirm outcome with Resolved:true lands as a SECOND
 // appended GrantOutcome row (never a mutation) with ResolvedRef pointing at
