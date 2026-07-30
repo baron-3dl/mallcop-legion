@@ -23,6 +23,7 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,8 +48,20 @@ import (
 // to the CONTENT-driven detectors we are deliberately exercising — config-drift
 // and injection-probe — so the finding set is deterministic and exactly two.
 func knownActorsBaseline() *baseline.Baseline {
+	actors := []string{"ops-bot", "drive-by"}
+	// drive-by-1..drive-by-8: eightInjectionProbesFixture's per-finding
+	// distinct actors (inquest_integration_test.go, mallcoppro-42e — a
+	// distinct actor per event is what keeps 8 same-type injection-probe
+	// findings from collapsing onto ONE case now that investigation records
+	// are case-keyed). Pinned known here too, same as "drive-by" always was,
+	// so this fixture stays isolated to the CONTENT-driven detectors this
+	// suite deliberately exercises — an unknown actor would otherwise also
+	// trip the new-actor detector, adding 8 unrelated "resolve" findings.
+	for i := 1; i <= 8; i++ {
+		actors = append(actors, fmt.Sprintf("drive-by-%d", i))
+	}
 	return &baseline.Baseline{
-		KnownActors: []string{"ops-bot", "drive-by"},
+		KnownActors: actors,
 	}
 }
 
@@ -219,7 +232,7 @@ func TestPipeline_EndToEnd_ConnectDetectCascadeStore(t *testing.T) {
 		Store:     st,
 		Baseline:  knownActorsBaseline(),
 		Cascade: agent.CascadeOptions{RepoRoot: root, Tools: fixedTools{
-			text:      "events: evt-mfa-001 mfa_disabled ops-bot 14:22; baseline: ops-bot known, 312 prior changes, break-glass runbook RB-114 on file",
+			text: "events: evt-mfa-001 mfa_disabled ops-bot 14:22; baseline: ops-bot known, 312 prior changes, break-glass runbook RB-114 on file",
 			// Deep tool signals (6 calls / 4 distinct tools) so the investigate-tier
 			// resolve clears the structural gate (>=0.55) and need not fan out.
 			toolCalls: 6, distinctTools: 4,

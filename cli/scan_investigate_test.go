@@ -4,15 +4,22 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/mallcop-app/mallcop/core/cases"
 )
 
 // investigationRecordPath is the on-disk path (inside the store's real work
 // tree — syncWorkTree reconciles it after every commit, see core/store's doc)
-// of the git-oops force-push finding's investigation record. Deterministic:
-// gitOopsEvent's event id is "g1", and core/detect/git_oops.go assigns the
-// force-push finding id "finding-g1-force".
+// of the git-oops force-push finding's investigation record. Case-keyed
+// (mallcoppro-42e): core/pipeline resolves EscalatedFinding.CaseID via the
+// SAME exported core/cases.CaseID hash over (Type, Actor, Entity), so this
+// helper computes the identical case ID rather than a second clustering
+// path. Deterministic for gitOopsEvent: core/detect/git_oops.go's force-push
+// finding is always Type "git-oops", Actor "dev" (the fixture's ev.Actor),
+// and Entity "" (its Evidence carries no grantee/target/member key).
 func investigationRecordPath(storePath string) string {
-	return filepath.Join(storePath, "investigations", "finding-g1-force.json")
+	caseID := cases.CaseID(cases.Key{Type: "git-oops", Actor: "dev", Entity: ""})
+	return filepath.Join(storePath, "investigations", caseID+".json")
 }
 
 // TestScanInvestigate_OnByDefault_OfflineDegradesHonestly proves detection-time

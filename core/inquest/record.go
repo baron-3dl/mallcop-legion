@@ -3,8 +3,13 @@
 // (identity, neighbor events, recurrence cadence, baseline known-ness, and
 // scan-schedule correlation — assemble.go, pure Go, no model) and makes ONE
 // metered narrate call (narrate.go) to produce an operator-facing narrative,
-// then commits the whole thing to investigations/<finding-id>.json in the
-// store (record.go's Record).
+// then commits the whole thing to investigations/<case-id>.json in the store
+// (record.go's Record) — keyed by the finding's case cluster, not the
+// finding itself (mallcoppro-42e): every finding recurring under the same
+// case (core/cases.Key — type+actor+entity) shares and refreshes ONE record,
+// never a duplicate. Falls back to investigations/<finding-id>.json for any
+// caller that hasn't resolved a case (EscalatedFinding.CaseID empty; see
+// EscalatedFinding.RecordKey).
 //
 // CONSENSUS INVARIANT (structural, not policy): this package is called by
 // core/pipeline strictly AFTER the resolutions stream is durably committed
@@ -29,10 +34,11 @@ import (
 	"encoding/json"
 )
 
-// SchemaVersion is the current investigations/<finding-id>.json schema
-// version. Bump ONLY on a breaking change; readers tolerate unknown fields. A
-// record found with an OLDER schema version is treated as refresh-eligible
-// (see inquest.go's idempotency check), never as a fatal read error.
+// SchemaVersion is the current investigations/<case-id>.json (or, absent a
+// resolved case, investigations/<finding-id>.json) schema version. Bump ONLY
+// on a breaking change; readers tolerate unknown fields. A record found with
+// an OLDER schema version is treated as refresh-eligible (see inquest.go's
+// idempotency check), never as a fatal read error.
 const SchemaVersion = 1
 
 // Verdict is the INVESTIGATOR's own assessment — NOT the cascade committee's
@@ -115,11 +121,28 @@ type Usage struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
-// Record is the full investigations/<finding-id>.json document — see the
+// Record is the full investigations/<case-id>.json document (or, absent a
+// resolved case, investigations/<finding-id>.json) — see the
 // package doc for the consensus-invariant discussion of Role/Verdict.
 type Record struct {
-	SchemaVersion  int    `json:"schema_version"`
-	FindingID      string `json:"finding_id"`
+	SchemaVersion int `json:"schema_version"`
+	// FindingID is the MOST RECENT finding that wrote/refreshed this record —
+	// on a case-keyed record (CaseID non-empty) this changes across a refire
+	// (a NEW finding recurring under the SAME case), unlike CreatedAt/CaseID
+	// which stay fixed. It is never a list: the case's own FindingIDs ring
+	// (core/cases.Case, store/cases.json) is the durable multi-finding
+	// membership record; this field is just "who most recently triggered
+	// this evidence".
+	FindingID string `json:"finding_id"`
+	// CaseID is the case cluster (mallcoppro-554's core/cases.Key —
+	// type+actor+entity — hashed via the EXPORTED core/cases.CaseID, never a
+	// second clustering path) this record is keyed by, resolved by the
+	// caller (core/pipeline) and carried in on EscalatedFinding.CaseID
+	// (mallcoppro-42e). Empty for a record written by a caller that never
+	// resolved a case (pre-migration behavior, and this package's own unit
+	// tests that construct an EscalatedFinding directly) — such a record
+	// keys by FindingID alone, exactly as it did before this field existed.
+	CaseID         string `json:"case_id,omitempty"`
 	EventID        string `json:"event_id"`
 	MallcopVersion string `json:"mallcop_version"`
 	CreatedAt      string `json:"created_at"`
@@ -141,10 +164,10 @@ type Record struct {
 	// tolerate unknown fields); bounded to a single short line by calibrateVerdict,
 	// so — like verdict/narrative — it is never a trim target in
 	// enforceRecordSizeCap.
-	ContractNotes   []string        `json:"contract_notes,omitempty"`
-	Model           string          `json:"model"`
-	Usage           Usage           `json:"usage"`
-	Evidence        Evidence        `json:"evidence"`
+	ContractNotes []string `json:"contract_notes,omitempty"`
+	Model         string   `json:"model"`
+	Usage         Usage    `json:"usage"`
+	Evidence      Evidence `json:"evidence"`
 	// Revote, when present, is the SECOND-OPINION committee re-vote a
 	// low-confidence "ok" investigation triggered (mallcoppro-09a). It is
 	// ADDITIVE and OPTIONAL (omitempty, no SchemaVersion bump — readers tolerate
@@ -159,6 +182,28 @@ type Record struct {
 	// evidence, never a family-match rule, and it lives on the evidence record,
 	// never in the disposition streams.
 	Revote *RevoteOutcome `json:"revote,omitempty"`
+	// VerdictFlip records a refresh whose FRESH trusted verdict (this pass
+	// landed StatusOK) differs from the record's own PRIOR trusted verdict
+	// (the existing on-disk record was also StatusOK, with a real — not
+	// VerdictUnassessed — Verdict). This is the ONLY thing a materially
+	// different refire verdict (e.g. benign -> threat) ever does: WRITE the
+	// new verdict (Verdict/Confidence/Narrative above are already the fresh
+	// pass's own values — never averaged, never suppressed) and FLAG the
+	// change here (and, in-band, as a prefix on Narrative itself) so a
+	// customer-facing reader — or a re-reader of just this JSON document —
+	// sees the flip without having to diff two historical copies (there is
+	// only ever one on-disk copy of a case-keyed record; mallcoppro-42e).
+	// nil when there was no prior trusted verdict to compare against (a
+	// brand-new record, or a prior record that never reached "ok"), or the
+	// fresh verdict matches the prior one.
+	VerdictFlip *VerdictFlip `json:"verdict_flip,omitempty"`
+}
+
+// VerdictFlip is the {from, to} pair of a detected verdict change — see
+// Record.VerdictFlip's doc for when this is populated.
+type VerdictFlip struct {
+	From Verdict `json:"from"`
+	To   Verdict `json:"to"`
 }
 
 // RevoteOutcome is the outcome of the low-confidence deeper-pass + committee

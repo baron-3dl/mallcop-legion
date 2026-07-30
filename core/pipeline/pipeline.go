@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/mallcop-app/mallcop/core/agent"
+	"github.com/mallcop-app/mallcop/core/cases"
 	"github.com/mallcop-app/mallcop/core/connect"
 	"github.com/mallcop-app/mallcop/core/detect"
 	"github.com/mallcop-app/mallcop/core/inquest"
@@ -514,15 +515,30 @@ func Run(ctx context.Context, cfg Config) (summary Summary, err error) {
 	// disposition is already durably persisted, so an investigation
 	// PHYSICALLY cannot change one — inquest has no write path to
 	// findings/resolutions/directives/findings.json, only to
-	// investigations/<finding-id>.json (core/inquest's package doc). RunAll
-	// NEVER returns an error this function propagates: a bug or model failure
-	// degrades one record, it never aborts or delays the scan's core output.
+	// investigations/<case-id>.json (core/inquest's package doc; case-keyed
+	// since mallcoppro-42e — see CaseID below). RunAll NEVER returns an error
+	// this function propagates: a bug or model failure degrades one record,
+	// it never aborts or delays the scan's core output.
 	var escalated []inquest.EscalatedFinding
 	for _, r := range results {
 		if r.resolution.Action == agent.ActionEscalated {
 			escalated = append(escalated, inquest.EscalatedFinding{
 				Finding:    r.finding,
 				Resolution: inquest.ResolutionRef{Action: "escalate", Reason: r.resolution.Reason},
+				// CaseID (mallcoppro-42e): resolved via the EXPORTED
+				// core/cases.CaseID — the SAME clustering hash
+				// cli/cases.go's collapseCases (mallcoppro-554) feeds into
+				// cases.Collapse for THIS EXACT (type, actor, entity) triple
+				// (Actor is r.finding.Actor, not a resolution-carried field —
+				// mirrors toResolutionRecord's own Actor source below). Never
+				// re-derived independently: a second clustering path
+				// computing its own notion of "the same case" is exactly the
+				// drift bug this field exists to prevent.
+				CaseID: cases.CaseID(cases.Key{
+					Type:   r.finding.Type,
+					Actor:  r.finding.Actor,
+					Entity: cases.ExtractEntity(r.finding.Evidence),
+				}),
 			})
 		}
 	}
@@ -631,7 +647,7 @@ func runLowConfidenceRevotes(ctx context.Context, cfg Config, escalated []inques
 	// warning, not a failure — the finding is simply not re-voted.
 	var lowConf []inquest.EscalatedFinding
 	for _, ef := range escalated {
-		rec, found, err := inquest.ReadRecord(cfg.Store, ef.Finding.ID)
+		rec, found, err := inquest.ReadRecord(cfg.Store, ef.RecordKey())
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("revote: read record for %s: %v — skipped", ef.Finding.ID, err))
 			continue
@@ -718,7 +734,7 @@ func runLowConfidenceRevotes(ctx context.Context, cfg Config, escalated []inques
 			// its first-pass verdict + low confidence and STAYS escalated
 			// (any-escalate-wins preserved exactly — a finding we could not
 			// de-escalate is never quietly cleared).
-			if err := inquest.AttachRevote(cfg.Store, ef.Finding.ID, inquest.RevoteOutcome{
+			if err := inquest.AttachRevote(cfg.Store, ef.RecordKey(), inquest.RevoteOutcome{
 				Triggered:      false,
 				DeepPassFailed: true,
 				Reason:         "Deeper investigation pass did not produce a fresh trusted verdict (deep budget exhausted, model error, or invalid output); NO committee re-vote ran — re-deciding on the first-pass evidence relabeled as a deeper investigation would misrepresent provenance. The escalation stands at its first-pass confidence.",
@@ -727,14 +743,14 @@ func runLowConfidenceRevotes(ctx context.Context, cfg Config, escalated []inques
 			}
 			continue
 		}
-		rec, found, err := inquest.ReadRecord(cfg.Store, ef.Finding.ID)
+		rec, found, err := inquest.ReadRecord(cfg.Store, ef.RecordKey())
 		if err != nil || !found {
 			warnings = append(warnings, fmt.Sprintf("revote: re-read deep record for %s: found=%v err=%v — skipped", ef.Finding.ID, found, err))
 			continue
 		}
 		deepEvidence := formatDeepEvidence(rec)
 		result := agent.RunRevoteGate(ctx, cfg.Client, ef.Finding, cfg.Cascade, deepEvidence, agent.DefaultConsensusRuns)
-		if err := inquest.AttachRevote(cfg.Store, ef.Finding.ID, inquest.RevoteOutcome{
+		if err := inquest.AttachRevote(cfg.Store, ef.RecordKey(), inquest.RevoteOutcome{
 			Triggered:        true,
 			ResolveVotes:     result.ResolveVotes,
 			TotalVotes:       result.TotalVotes,

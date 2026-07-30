@@ -131,6 +131,31 @@ type OwnedEntity struct {
 type EscalatedFinding struct {
 	Finding    finding.Finding
 	Resolution ResolutionRef
+	// CaseID is the case cluster (mallcoppro-554's core/cases.Key —
+	// type+actor+entity) this finding belongs to, resolved by the caller via
+	// the EXPORTED core/cases.CaseID hash — core/inquest itself cannot
+	// import core/cases (see imports_test.go's closed allowlist), so this is
+	// a plain string, never a core/cases.Key. core/pipeline sets this for
+	// every production finding (mallcoppro-42e); "" is the safe fallback for
+	// any caller (mostly this package's own tests) that hasn't resolved one
+	// — see RecordKey.
+	CaseID string
+}
+
+// RecordKey resolves the on-disk investigation-record identity for ef: its
+// CaseID when set (mallcoppro-42e — multiple findings recurring under the
+// SAME case share ONE record, refreshed on each refire, never duplicated),
+// falling back to the finding's own ID for any caller that hasn't resolved a
+// case (this package's own unit tests, and any pre-migration embedder) —
+// exactly the pre-42e per-finding keying for that fallback. Exported so
+// core/pipeline's low-confidence re-vote step (attach.go's ReadRecord/
+// AttachRevote) resolves the SAME key inquest.RunAll itself used, rather than
+// re-deriving the fallback logic a second time.
+func (ef EscalatedFinding) RecordKey() string {
+	if ef.CaseID != "" {
+		return ef.CaseID
+	}
+	return ef.Finding.ID
 }
 
 // Input is RunAll's whole input.
@@ -227,9 +252,12 @@ type Outcome struct {
 
 // RunAll investigates every finding in in.Findings, at most ONE metered model
 // call per finding, budgeted at in.Config.MaxPerScan calls total THIS run,
-// and commits a Record to investigations/<finding-id>.json per finding (see
-// recordPath). It NEVER returns an error the caller must handle, AND IT NEVER
-// PANICS OUT — every failure mode (nil store, model failure, panic, marshal
+// and commits a Record to investigations/<case-id>.json — the SAME record for
+// every finding sharing a case (EscalatedFinding.CaseID, mallcoppro-42e),
+// refreshed rather than duplicated on a refire; falls back to
+// investigations/<finding-id>.json for any caller that hasn't resolved a case
+// (see recordPath, EscalatedFinding.RecordKey). It NEVER returns an error the
+// caller must handle, AND IT NEVER PANICS OUT — every failure mode (nil store, model failure, panic, marshal
 // error) degrades an INDIVIDUAL record via processOne's own per-finding
 // guard; a panic anywhere else in RunAll's OWN body (the deterministic-order
 // setup below, or any future code added to this function) is caught by the
@@ -239,11 +267,16 @@ type Outcome struct {
 // failureSemantics' "the whole inquest step is panic-guarded" claim literally
 // true: there is no code path in this package that can crash the scan.
 //
-// Idempotency: a finding whose EXISTING record already has the current
-// SchemaVersion and NarrativeStatus "ok" is skipped entirely — zero calls,
-// zero store reads beyond the one existence check, zero writes. A finding
-// whose record is absent, schema-stale, or degraded is (re-)investigated,
-// preserving the original CreatedAt on a refresh.
+// Idempotency: a finding whose case (or, absent a case, itself) already has a
+// record at the current SchemaVersion, NarrativeStatus "ok", AND whose
+// FindingID matches THIS finding's own ID is skipped entirely — zero calls,
+// zero store reads beyond the one existence check, zero writes (a genuine
+// re-run of the same finding). A finding whose record is absent,
+// schema-stale, degraded, OR whose case's existing record was written by a
+// DIFFERENT finding (a refire, mallcoppro-42e) is (re-)investigated,
+// preserving the original CreatedAt on a refresh and flagging any change in
+// trusted verdict (Record.VerdictFlip) rather than averaging or suppressing
+// it.
 func RunAll(ctx context.Context, in Input) (out Outcome) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -350,6 +383,8 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 	var priorCreatedAt string
 	var havePriorCreatedAt bool
 
+	key := ef.RecordKey()
+
 	defer func() {
 		if r := recover(); r != nil {
 			errMsg = appendErr(errMsg, fmt.Sprintf("inquest: panic investigating %s: %v", ef.Finding.ID, r))
@@ -367,13 +402,13 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 				if havePriorCreatedAt {
 					rec.CreatedAt = priorCreatedAt
 				}
-				_, _ = writeRecord(in.Store, rec)
+				_, _ = writeRecord(in.Store, key, rec)
 			}()
 			degraded = 1
 		}
 	}()
 
-	existing, found, rerr := readExistingRecord(in.Store, ef.Finding.ID)
+	existing, found, rerr := readExistingRecord(in.Store, key)
 	if rerr != nil {
 		// Transient read error (e.g. a git-pull/read hiccup) — existing may
 		// hold a perfectly good record we simply can't verify right now.
@@ -387,7 +422,17 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 		priorCreatedAt = existing.CreatedAt
 		havePriorCreatedAt = true
 	}
-	if !in.Force && found && existing.SchemaVersion == SchemaVersion && existing.NarrativeStatus == StatusOK {
+	// The ok-skip is scoped to THIS finding, not just this case: under
+	// case-keying (ef.CaseID set), existing.FindingID == ef.Finding.ID only
+	// when the LAST write to this case record was made BY this exact
+	// finding (a true re-run — the scan retried, or the same finding was
+	// handed to RunAll twice) — that is the only scenario the skip is meant
+	// to short-circuit. A DIFFERENT finding recurring under the same case (a
+	// genuine refire) always gets a fresh pass and REFRESHES the shared
+	// record instead, per the case-keyed recurrence design (mallcoppro-42e);
+	// for the CaseID=="" fallback this comparison is always true (the path
+	// itself is finding-ID-derived), so it changes nothing there.
+	if !in.Force && found && existing.SchemaVersion == SchemaVersion && existing.NarrativeStatus == StatusOK && existing.FindingID == ef.Finding.ID {
 		return 0, 0, 1, errMsg
 	}
 
@@ -395,10 +440,34 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 		processOnePanicHookForTest(ef.Finding.ID)
 	}
 	ev := assemble(in.Store, in.AllEvents, in.Baseline, ef, in.Config)
+	// Case-keyed recurrence continuity (mallcoppro-42e): assembleRecurrence's
+	// own per-(actor,type) prior-finding scan reads recordPath(priorFindingID)
+	// for EACH historically co-occurring finding — a lookup that only ever
+	// resolved anything back when every record lived at its own finding's
+	// path. Under case-keying, a case's own history now lives at ONE shared
+	// path (this case's), so that scan silently finds nothing for any prior
+	// finding sharing this case (the file that WAS at its finding-ID path is
+	// gone — superseded by the shared record). The one piece of continuity
+	// that actually matters — "what did this SAME case's last investigation
+	// conclude" — is exactly what `existing` (read above, before this pass
+	// overwrites it) already holds, so it is appended here as the most
+	// RECENT prior investigation, restoring the "reference-and-refresh,
+	// never contradict" guarantee the narrate prompt depends on
+	// (assemble.go's PriorInvestigation doc) without a second clustering
+	// pass or a broader assemble.go signature change.
+	if found && existing.NarrativeStatus == StatusOK {
+		ev.Recurrence.PriorInvestigations = append(ev.Recurrence.PriorInvestigations, PriorInvestigation{
+			FindingID:  existing.FindingID,
+			Verdict:    string(existing.Verdict),
+			Confidence: existing.Confidence,
+			UpdatedAt:  existing.UpdatedAt,
+		})
+	}
 
 	rec := Record{
 		SchemaVersion:  SchemaVersion,
 		FindingID:      ef.Finding.ID,
+		CaseID:         ef.CaseID,
 		EventID:        underlyingEventID(ef.Finding.ID),
 		MallcopVersion: in.MallcopVersion,
 		CreatedAt:      nowRFC3339(),
@@ -446,6 +515,21 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 			rec.Narrative = res.Narrative
 			rec.ContractNotes = res.ContractNotes
 			investigated = 1
+			// Verdict-flip detection (mallcoppro-42e): the ONLY prior verdict
+			// worth comparing against is one this package itself already
+			// trusted (found, current-ish record, StatusOK, a REAL verdict —
+			// never VerdictUnassessed, which never represents a trusted
+			// assessment). A refire — or a Force deeper pass on the same
+			// finding — landing a DIFFERENT trusted verdict must never
+			// average or silently supersede the prior one: it WRITES the
+			// fresh verdict (already done, above) and FLAGS the change, both
+			// structurally (VerdictFlip) and in-band in the narrative itself
+			// so a reader of just this JSON document sees it without a
+			// historical diff.
+			if found && existing.NarrativeStatus == StatusOK && existing.Verdict != VerdictUnassessed && existing.Verdict != rec.Verdict {
+				rec.VerdictFlip = &VerdictFlip{From: existing.Verdict, To: rec.Verdict}
+				rec.Narrative = fmt.Sprintf("[VERDICT FLIP: %s -> %s] %s", existing.Verdict, rec.Verdict, rec.Narrative)
+			}
 		} else {
 			degraded = 1
 			if res.Err != nil {
@@ -469,7 +553,7 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 		return 0, 1, 0, appendErr(errMsg, fmt.Sprintf("inquest: force re-pass for %s did not reach ok (status=%s) — kept prior ok record, no overwrite", ef.Finding.ID, rec.NarrativeStatus))
 	}
 
-	if _, werr := writeRecord(in.Store, rec); werr != nil {
+	if _, werr := writeRecord(in.Store, key, rec); werr != nil {
 		errMsg = appendErr(errMsg, fmt.Sprintf("inquest: write record for %s: %v", ef.Finding.ID, werr))
 		if investigated == 1 {
 			// The fresh "ok" verdict never persisted — the on-disk record is
@@ -494,14 +578,17 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 // in production.
 var processOnePanicHookForTest func(findingID string)
 
-// recordPath is the store path a finding's investigation record lives at.
-func recordPath(findingID string) string {
-	return "investigations/" + findingID + ".json"
+// recordPath is the store path an investigation record lives at, keyed by
+// key — a CaseID (mallcoppro-42e's case-keyed recurrence design) or, for any
+// caller that hasn't resolved one, a bare finding ID (the pre-42e per-finding
+// keying, preserved exactly as the fallback — see EscalatedFinding.RecordKey).
+func recordPath(key string) string {
+	return "investigations/" + key + ".json"
 }
 
-// readExistingRecord reads back the current record for findingID, if any.
-func readExistingRecord(st *store.Store, findingID string) (Record, bool, error) {
-	data, err := st.ReadSnapshot(recordPath(findingID))
+// readExistingRecord reads back the current record at key's path, if any.
+func readExistingRecord(st *store.Store, key string) (Record, bool, error) {
+	data, err := st.ReadSnapshot(recordPath(key))
 	if err != nil {
 		return Record{}, false, err
 	}
@@ -515,15 +602,19 @@ func readExistingRecord(st *store.Store, findingID string) (Record, bool, error)
 	return rec, true, nil
 }
 
-// writeRecord applies the record size cap and commits rec via WriteSnapshot
-// (a full-document replace, CAS-retried, byte-identical no-op — a refresh
-// that changes nothing costs no commit).
-func writeRecord(st *store.Store, rec Record) (string, error) {
+// writeRecord applies the record size cap and commits rec at key's path via
+// WriteSnapshot (a full-document replace, CAS-retried, byte-identical no-op —
+// a refresh that changes nothing costs no commit). key is the caller's
+// resolved record identity (EscalatedFinding.RecordKey() — a CaseID when the
+// caller has one, else the finding's own ID; mallcoppro-42e) — NOT
+// necessarily rec.FindingID, which (on a case-keyed record) is just the MOST
+// RECENT contributing finding, not the record's path.
+func writeRecord(st *store.Store, key string, rec Record) (string, error) {
 	rec, _, err := enforceRecordSizeCap(rec)
 	if err != nil {
 		return "", err
 	}
-	return st.WriteSnapshot(recordPath(rec.FindingID), rec)
+	return st.WriteSnapshot(recordPath(key), rec)
 }
 
 // minimalDegradedRecord builds the smallest valid Record for the panic-guard
@@ -539,6 +630,7 @@ func minimalDegradedRecord(ef EscalatedFinding, mallcopVersion string, status Na
 	return Record{
 		SchemaVersion:   SchemaVersion,
 		FindingID:       ef.Finding.ID,
+		CaseID:          ef.CaseID,
 		EventID:         underlyingEventID(ef.Finding.ID),
 		MallcopVersion:  mallcopVersion,
 		CreatedAt:       now,
