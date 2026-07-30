@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -483,5 +484,76 @@ func TestLatestByURL_FoldsToMostRecentRowPerURL(t *testing.T) {
 	}
 	if byURL["https://github.com/a/b/pull/2"].State != store.ContribBackOpen {
 		t.Fatalf("latestByURL wrong state for pull/2: %+v", got)
+	}
+}
+
+// liveGitHubReachable does a fast, cheap TCP dial (no HTTP request, so it
+// never counts against the unauthenticated rate limit) to decide whether
+// TestGitHubContract_LivePRShape can run. Offline sandboxes (no internet
+// egress) get a clean skip instead of a hang or a flaky failure.
+func liveGitHubReachable() bool {
+	d := net.Dialer{Timeout: 3 * time.Second}
+	conn, err := d.Dial("tcp", "api.github.com:443")
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// TestGitHubContract_LivePRShape is a LIVE contract test against GitHub's
+// REAL public REST API (mallcoppro-003 veracity rework, defect 2): nothing
+// in poll.go's own test suite had ever validated that GitHub actually
+// reports `state`/`merged` at the TOP LEVEL of the PR object with the
+// semantics PollOutcomes assumes — every other test in this package asserts
+// that contract only against this package's own httptest fixture, which
+// proves nothing about the real API.
+//
+// It makes exactly TWO unauthenticated calls (the unauthenticated rate limit
+// is 60/hr, so this stays cheap): a KNOWN-MERGED PR and a KNOWN-CLOSED-
+// UNMERGED PR. A third call for "still open" is deliberately skipped — that
+// path is a poll-side no-op already proven against the local fixture in
+// TestPollOutcomes_StillOpen_NoChurn, and the still-open shape (`{"state":
+// "open","merged":false}`) is not in question; only the merged-vs-closed
+// disambiguation this test pins is.
+//
+// Skips cleanly when the sandbox has no internet egress (liveGitHubReachable
+// fails fast via a bare TCP dial, not a hung HTTP request); when it runs, a
+// failure past that point is a real broken assumption, not a flake, so it is
+// t.Fatalf, not t.Skipf.
+func TestGitHubContract_LivePRShape(t *testing.T) {
+	if !liveGitHubReachable() {
+		t.Skip("api.github.com unreachable from this sandbox (no internet egress) -- skipping live contract test")
+	}
+
+	fetch := NewGitHubFetcher("")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// mallcop-app/mallcop#240 is a known-merged PR (verified out-of-band via
+	// `curl -sf https://api.github.com/repos/mallcop-app/mallcop/pulls/240`
+	// during this rework: {"state":"closed","merged":true}).
+	merged, err := fetch.FetchPRState(ctx, "mallcop-app", "mallcop", 240)
+	if err != nil {
+		t.Fatalf("live FetchPRState(#240) failed after liveGitHubReachable() succeeded (network is up): %v", err)
+	}
+	if merged.State != "closed" {
+		t.Errorf("PR #240 (known-merged): live State = %q, want \"closed\" -- PollOutcomes' merged branch depends on this", merged.State)
+	}
+	if !merged.Merged {
+		t.Errorf("PR #240 (known-merged): live Merged = false, want true -- PollOutcomes' merged/closed disambiguation depends on this")
+	}
+
+	// mallcop-app/mallcop#1 is a known-closed-UNMERGED PR (verified out-of-
+	// band the same way: {"state":"closed","merged":false}).
+	closedUnmerged, err := fetch.FetchPRState(ctx, "mallcop-app", "mallcop", 1)
+	if err != nil {
+		t.Fatalf("live FetchPRState(#1) failed: %v", err)
+	}
+	if closedUnmerged.State != "closed" {
+		t.Errorf("PR #1 (known-closed-unmerged): live State = %q, want \"closed\"", closedUnmerged.State)
+	}
+	if closedUnmerged.Merged {
+		t.Errorf("PR #1 (known-closed-unmerged): live Merged = true, want false -- a closed-but-unmerged PR must not be mistaken for merged by PollOutcomes")
 	}
 }

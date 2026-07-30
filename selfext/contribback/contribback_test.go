@@ -3,11 +3,14 @@ package contribback
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mallcop-app/mallcop/core/store"
 	"github.com/mallcop-app/mallcop/selfext/autonomy"
 )
 
@@ -55,10 +58,16 @@ func eligibleArtifact() Artifact {
 	}
 }
 
-func enabledOpener(pr PROpener) *Opener {
+// enabledOpener wires a REAL store (openStore, poll_test.go's helper: a real
+// `git init` temp repo, real git-commit Append) — Contribute persists the
+// opened-PR record through this exact handle, so every test that reaches a
+// successful OpenPR is exercising the real store-append path, not a fake.
+func enabledOpener(t *testing.T, pr PROpener) *Opener {
+	t.Helper()
 	return &Opener{
 		Config: Config{Enabled: true, Repo: "mallcop-app/mallcop"},
 		PR:     pr,
+		Store:  openStore(t),
 	}
 }
 
@@ -97,7 +106,7 @@ func TestContributeOpensButNeverMergesAtEveryDial(t *testing.T) {
 	for _, dial := range dials {
 		t.Run(string(dial), func(t *testing.T) {
 			pr := &fakePR{}
-			o := enabledOpener(pr)
+			o := enabledOpener(t, pr)
 			out, err := o.Contribute(context.Background(), dial, eligibleArtifact())
 			if err != nil {
 				t.Fatalf("Contribute(dial=%q): %v", dial, err)
@@ -135,7 +144,7 @@ func TestContributeDisabledNoSharedPR(t *testing.T) {
 // Defense in depth: even enabled, a non-consented artifact opens no PR.
 func TestContributeNotConsentedNoPR(t *testing.T) {
 	pr := &fakePR{}
-	o := enabledOpener(pr)
+	o := enabledOpener(t, pr)
 	art := eligibleArtifact()
 	art.Consented = false
 	out, err := o.Contribute(context.Background(), autonomy.FullyAutonomy, art)
@@ -153,7 +162,7 @@ func TestContributeNotConsentedNoPR(t *testing.T) {
 // Defense in depth: a tenant-specific (non-universal) widen opens no PR.
 func TestContributeNotUniversalNoPR(t *testing.T) {
 	pr := &fakePR{}
-	o := enabledOpener(pr)
+	o := enabledOpener(t, pr)
 	art := eligibleArtifact()
 	art.Universal = false
 	out, err := o.Contribute(context.Background(), autonomy.FullyAutonomy, art)
@@ -171,7 +180,7 @@ func TestContributeNotUniversalNoPR(t *testing.T) {
 // The Opener passes the configured target repo + branch through to the PR opener.
 func TestContributeUsesConfiguredRepoAndBranch(t *testing.T) {
 	pr := &fakePR{}
-	o := &Opener{Config: Config{Enabled: true, Repo: "mallcop-app/mallcop", BaseBranch: "trunk"}, PR: pr}
+	o := &Opener{Config: Config{Enabled: true, Repo: "mallcop-app/mallcop", BaseBranch: "trunk"}, PR: pr, Store: openStore(t)}
 	if _, err := o.Contribute(context.Background(), autonomy.SemiAutonomy, eligibleArtifact()); err != nil {
 		t.Fatalf("Contribute: %v", err)
 	}
@@ -268,13 +277,29 @@ func TestLoadArtifactFromRouterEmission(t *testing.T) {
 
 	// End-to-end wiring: the loaded artifact opens a PR (not merged) when enabled.
 	pr := &fakePR{}
-	o := enabledOpener(pr)
+	o := enabledOpener(t, pr)
 	out, err := o.Contribute(context.Background(), autonomy.FullyAutonomy, art)
 	if err != nil {
 		t.Fatalf("Contribute(loaded): %v", err)
 	}
 	if !out.Opened || pr.mergeCalls != 0 {
 		t.Fatalf("loaded artifact: opened=%v merges=%d, want opened + zero merges", out.Opened, pr.mergeCalls)
+	}
+	// mallcoppro-003 veracity rework: Contribute must have PERSISTED a
+	// ContribBackRecord through the real store — nothing in this test hand-
+	// seeds one.
+	recs, err := o.Store.LoadContribBackRecords()
+	if err != nil {
+		t.Fatalf("LoadContribBackRecords: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("LoadContribBackRecords = %d records, want exactly 1 persisted by Contribute itself", len(recs))
+	}
+	if recs[0].PRURL != out.PRURL || recs[0].State != store.ContribBackOpen || recs[0].Fingerprint != art.Fingerprint {
+		t.Errorf("persisted record = %+v, want PRURL=%s State=open Fingerprint=%s", recs[0], out.PRURL, art.Fingerprint)
+	}
+	if recs[0].OpenedAt.IsZero() || recs[0].UpdatedAt.IsZero() {
+		t.Errorf("persisted record has zero OpenedAt/UpdatedAt: %+v", recs[0])
 	}
 }
 
@@ -353,7 +378,7 @@ func TestLoadCodeArtifact_MapsToPRRequest(t *testing.T) {
 	// End-to-end: the loaded code artifact maps to a PRRequest and opens a PR
 	// (NOT merged) when enabled, at the top dial.
 	pr := &fakePR{}
-	o := enabledOpener(pr)
+	o := enabledOpener(t, pr)
 	out, err := o.Contribute(context.Background(), autonomy.FullyAutonomy, art)
 	if err != nil {
 		t.Fatalf("Contribute(code): %v", err)
@@ -367,6 +392,18 @@ func TestLoadCodeArtifact_MapsToPRRequest(t *testing.T) {
 	if pr.lastReq.Title != art.Title {
 		t.Errorf("PRRequest title = %q, want %q", pr.lastReq.Title, art.Title)
 	}
+	// mallcoppro-003 veracity rework: the CODE lane persists exactly like the
+	// DATA lane — Contribute is lane-agnostic about the persist step.
+	recs, err := o.Store.LoadContribBackRecords()
+	if err != nil {
+		t.Fatalf("LoadContribBackRecords: %v", err)
+	}
+	if len(recs) != 1 || recs[0].PRURL != out.PRURL || recs[0].State != store.ContribBackOpen {
+		t.Fatalf("persisted records = %+v, want exactly 1 open record for %s", recs, out.PRURL)
+	}
+	if recs[0].Fingerprint != art.Fingerprint {
+		t.Errorf("persisted fingerprint = %q, want %q", recs[0].Fingerprint, art.Fingerprint)
+	}
 }
 
 // A code artifact with the wrong kind (a DATA-lane file) is rejected — the two
@@ -379,6 +416,132 @@ func TestLoadCodeArtifact_RejectsWrongKind(t *testing.T) {
 	}
 	if _, err := LoadCodeArtifact(path); err == nil {
 		t.Fatal("expected LoadCodeArtifact to reject a non-authored_detector file")
+	}
+}
+
+// TestContribute_ThenPollOutcomes_FullLoopFromRealPersist is the primary
+// mallcoppro-003 veracity-rework proof: it exercises the ENTIRE contribute-
+// back loop -- open, persist, poll, update -- with NO hand-seeded
+// ContribBackRecord anywhere in this test. Contribute must persist the
+// opened-PR record itself (the defect the rework closes: OpenPR returning a
+// URL is not the same as writing it anywhere); PollOutcomes then reads that
+// SAME real store and a real local HTTP server (standing in for GitHub's
+// public API) to observe the PR merged, and appends the updated row.
+func TestContribute_ThenPollOutcomes_FullLoopFromRealPersist(t *testing.T) {
+	s := openStore(t)
+	pr := &fakePR{url: "https://github.com/mallcop-app/mallcop/pull/999"}
+	o := &Opener{
+		Config: Config{Enabled: true, Repo: "mallcop-app/mallcop"},
+		PR:     pr,
+		Store:  s,
+	}
+
+	// (1) OPEN: Contribute opens the PR and must persist the record ITSELF --
+	// this test never calls s.Append(KindContribBack, ...) directly.
+	out, err := o.Contribute(context.Background(), autonomy.FullyAutonomy, eligibleArtifact())
+	if err != nil {
+		t.Fatalf("Contribute: %v", err)
+	}
+	if !out.Opened || out.PRURL != pr.url {
+		t.Fatalf("Contribute out = %+v, want Opened with PRURL=%s", out, pr.url)
+	}
+
+	preRecs, err := s.LoadContribBackRecords()
+	if err != nil {
+		t.Fatalf("LoadContribBackRecords after open: %v", err)
+	}
+	if len(preRecs) != 1 || preRecs[0].State != store.ContribBackOpen || preRecs[0].PRURL != pr.url {
+		t.Fatalf("post-open records = %+v, want exactly 1 open record for %s persisted by Contribute itself", preRecs, pr.url)
+	}
+
+	// (2) POLL: a later scan asks a real local HTTP server (the GitHub
+	// public-API stand-in) whether the PR merged.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/mallcop-app/mallcop/pulls/999" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"state": "closed", "merged": true})
+	}))
+	defer srv.Close()
+
+	sum, err := PollOutcomes(context.Background(), s, NewGitHubFetcher(srv.URL))
+	if err != nil {
+		t.Fatalf("PollOutcomes: %v", err)
+	}
+	if sum.Considered != 1 || sum.Updated != 1 || sum.Failed != 0 {
+		t.Fatalf("poll summary = %+v, want Considered=1 Updated=1 Failed=0", sum)
+	}
+
+	// (3) VERIFY: the outcome flowed back -- the fire-and-forget gap this
+	// item closes.
+	postRecs, err := s.LoadContribBackRecords()
+	if err != nil {
+		t.Fatalf("LoadContribBackRecords after poll: %v", err)
+	}
+	if len(postRecs) != 2 {
+		t.Fatalf("post-poll records = %d, want 2 (opened + merged rows, never mutated in place)", len(postRecs))
+	}
+	if postRecs[0].State != store.ContribBackOpen {
+		t.Errorf("first row mutated: %+v", postRecs[0])
+	}
+	if postRecs[1].State != store.ContribBackMerged || postRecs[1].PRURL != pr.url {
+		t.Errorf("second row = %+v, want State=merged PRURL=%s", postRecs[1], pr.url)
+	}
+}
+
+// TestContribute_NilStore_FailsBeforeOpeningNotAfter proves the Store-wiring
+// guard fires BEFORE any PR is opened: an enabled Opener with no Store wired
+// is a configuration bug (mallcoppro-003: the operator forgot to wire the
+// handle that makes the opened PR pollable), and it must fail closed rather
+// than open an orphan PR nothing can ever poll.
+func TestContribute_NilStore_FailsBeforeOpeningNotAfter(t *testing.T) {
+	pr := &fakePR{}
+	o := &Opener{Config: Config{Enabled: true, Repo: "mallcop-app/mallcop"}, PR: pr}
+	out, err := o.Contribute(context.Background(), autonomy.FullyAutonomy, eligibleArtifact())
+	if err == nil {
+		t.Fatal("Contribute: want an error when Store is nil (enabled but not wired), got nil")
+	}
+	if out.Opened {
+		t.Errorf("out.Opened = true, want false -- a nil Store must be caught before OpenPR is ever called")
+	}
+	if pr.openCalls != 0 {
+		t.Errorf("OpenPR called %d times with a nil Store, want 0 (fail before opening an unpollable orphan PR)", pr.openCalls)
+	}
+}
+
+// TestContribute_StoreAppendFailure_ReportsErrorNotSilentLoss proves the
+// opposite failure mode never regresses: if persisting the opened-PR record
+// fails, Contribute returns an error (rather than silently reporting success
+// while the record never lands) -- the exact silent-loss shape this rework
+// closes, now made impossible even under a REAL git-plumbing failure (the
+// repo's object store made unwritable), not a fake error injected via an
+// interface.
+func TestContribute_StoreAppendFailure_ReportsErrorNotSilentLoss(t *testing.T) {
+	dir := initRepo(t)
+	s, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	objDir := filepath.Join(dir, ".git", "objects")
+	if err := os.Chmod(objDir, 0o500); err != nil {
+		t.Fatalf("chmod objects dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(objDir, 0o700) }) // let t.TempDir() clean up
+
+	pr := &fakePR{}
+	o := &Opener{Config: Config{Enabled: true, Repo: "mallcop-app/mallcop"}, PR: pr, Store: s}
+
+	out, err := o.Contribute(context.Background(), autonomy.FullyAutonomy, eligibleArtifact())
+	if err == nil {
+		t.Fatal("Contribute: want an error when the store append fails (unwritable object store), got nil")
+	}
+	if !out.Opened {
+		t.Errorf("out.Opened = false, want true (the PR itself DID open on GitHub before the persist failed)")
+	}
+	if !strings.Contains(err.Error(), "persist") {
+		t.Errorf("error = %q, want it to name the persist failure", err.Error())
 	}
 }
 

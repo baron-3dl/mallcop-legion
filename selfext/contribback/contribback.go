@@ -37,7 +37,9 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 
+	"github.com/mallcop-app/mallcop/core/store"
 	"github.com/mallcop-app/mallcop/selfext/autonomy"
 )
 
@@ -204,6 +206,14 @@ type Opener struct {
 	// PR is the injected PR opener (real = ghOpener under operator identity).
 	// Required when Config.Enabled.
 	PR PROpener
+	// Store is the operator's own git-backed store. Required when
+	// Config.Enabled: the moment a shared-OSS PR opens, Contribute appends a
+	// ContribBackRecord (State=open) to store.KindContribBack through this
+	// handle — this is the ONLY place that record is ever written, and
+	// without it a later scan's selfext/contribback.PollOutcomes has nothing
+	// to poll (mallcoppro-003 veracity rework: OpenPR returning a URL is not
+	// the same as persisting it).
+	Store *store.Store
 	// Logger receives non-secret events. Nil → discard.
 	Logger *slog.Logger
 }
@@ -240,6 +250,9 @@ func (o *Opener) Contribute(ctx context.Context, dial autonomy.Dial, art Artifac
 	if o.PR == nil {
 		return Outcome{}, errors.New("contribback: PR opener is nil (enabled but not wired)")
 	}
+	if o.Store == nil {
+		return Outcome{}, errors.New("contribback: store is nil (enabled but not wired) -- required to persist the opened PR so a later scan can poll its outcome")
+	}
 	if strings.TrimSpace(o.Config.Repo) == "" {
 		return Outcome{}, errors.New("contribback: Config.Repo is empty (enabled but no target repo)")
 	}
@@ -254,6 +267,28 @@ func (o *Opener) Contribute(ctx context.Context, dial autonomy.Dial, art Artifac
 	res, err := o.PR.OpenPR(ctx, req)
 	if err != nil {
 		return Outcome{Attempted: true}, fmt.Errorf("contribback: open shared-OSS PR: %w", err)
+	}
+
+	// PERSIST IMMEDIATELY. Returning res.URL to the caller is not enough — the
+	// contribback stream is the ONLY thing a later scan's PollOutcomes reads,
+	// so if this Append never happens the PR is opened-and-forgotten: no
+	// outcome ever flows back (mallcoppro-003 veracity rework). This is a
+	// fresh row, never a mutation, mirroring the KindGrants/KindScans
+	// append-only discipline every other stream uses.
+	now := time.Now().UTC()
+	rec := store.ContribBackRecord{
+		Fingerprint: art.Fingerprint,
+		PRURL:       res.URL,
+		State:       store.ContribBackOpen,
+		OpenedAt:    now,
+		UpdatedAt:   now,
+	}
+	if _, aerr := o.Store.Append(store.KindContribBack, rec); aerr != nil {
+		// The PR is already open on GitHub and cannot be un-opened here — but a
+		// failure to persist the record is a real defect (the PR becomes
+		// unpollable), so it is reported as an error rather than swallowed.
+		return Outcome{Attempted: true, Opened: true, PRURL: res.URL},
+			fmt.Errorf("contribback: opened %s but failed to persist its contribback record: %w", res.URL, aerr)
 	}
 
 	// The dial is deliberately NOT consulted, and there is deliberately NO merge
