@@ -17,7 +17,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -819,21 +818,18 @@ func TestPipeline_LowConfidenceInvestigation_DeescalatesOnUnanimousRevote(t *tes
 }
 
 // eightInjectionProbesFixture returns 8 DISTINCT injection-probe events —
-// same payload, but a DISTINCT actor per event (drive-by-1..drive-by-8) —
-// so each independently floor-escalates into its own finding
-// (core/detect/injection_probe.go's per-event dedup: Finding.ID =
-// "finding-"+ev.ID+"-inj-<rule>", so distinct event IDs never collide into
-// one finding) AND, since mallcoppro-42e keys investigation records by case
-// (type, actor, entity — core/cases.Key) rather than finding ID, each of the
-// 8 also lands in its OWN case (distinct Actor is the only distinguishing
-// field here; injection-probe's Evidence carries no grantee/target/member
-// key, so Entity is "" for all 8, and Type is the same "injection-probe" for
-// all 8 — Actor is what keeps them from collapsing into one shared case,
-// which the budget test below depends on to assert 8 INDEPENDENT records).
-// Event IDs are the SAME width (evt-inj-101..evt-inj-108) so the resulting
-// finding IDs sort in the SAME order numerically and lexicographically — the
-// budget test below relies on that to know exactly which 5 of the 8 a
-// MaxDeepPerScan=5 budget covers.
+// same actor, same payload, only the event ID varies — so each independently
+// floor-escalates into its own finding (core/detect/injection_probe.go's
+// per-event dedup: Finding.ID = "finding-"+ev.ID+"-inj-<rule>", so distinct
+// event IDs never collide into one finding). Since mallcoppro-42e keys
+// investigation records by case (type, actor, entity — core/cases.Key) and
+// all 8 share the SAME (type, actor, entity) triple, they cluster onto ONE
+// shared case — this is deliberate: it is the repo's coverage of the
+// multi-finding-per-case shape (8 findings, 1 case, 1 shared record,
+// refreshed 8 times in one scan). Event IDs are the SAME width
+// (evt-inj-101..evt-inj-108) so the resulting finding IDs sort in the SAME
+// order numerically and lexicographically — the budget test below relies on
+// that to know exactly which 5 of the 8 a MaxDeepPerScan=5 budget covers.
 func eightInjectionProbesFixture(t *testing.T) []event.Event {
 	t.Helper()
 	ts := time.Date(2026, 6, 18, 14, 22, 0, 0, time.UTC)
@@ -846,7 +842,7 @@ func eightInjectionProbesFixture(t *testing.T) []event.Event {
 			ID:        fmt.Sprintf("evt-inj-10%d", i),
 			Source:    "github",
 			Type:      "comment_created",
-			Actor:     fmt.Sprintf("drive-by-%d", i),
+			Actor:     "drive-by",
 			Timestamp: ts,
 			Org:       "atom",
 			Payload:   injPayload,
@@ -858,13 +854,23 @@ func eightInjectionProbesFixture(t *testing.T) []event.Event {
 // TestPipeline_LowConfidenceInvestigation_RevoteBoundedByDeepBudget proves the
 // mallcoppro-09a review fix: when MORE low-confidence findings exist than the
 // deep pass's MaxDeepPerScan budget, the re-vote loop is bounded to EXACTLY the
-// deep budget — a finding whose deep pass never ran this scan (it fell past
-// the budget) must NEVER be re-voted on stale first-pass evidence relabeled as
-// a "deeper investigation" that didn't happen for it. All 8 injection-probe
-// findings floor-escalate (zero cascade model calls — the pre-LLM floor's
-// always-escalate route) and all come back investigated at confidence 0.3
-// (< the 0.5 threshold), so all 8 are low-confidence — but MaxDeepPerScan is
-// 5, so only 5 may receive a fresh deep pass and a committee re-vote.
+// deep budget. All 8 injection-probe findings floor-escalate (zero cascade
+// model calls — the pre-LLM floor's always-escalate route), come back
+// investigated at confidence 0.3 (< the 0.5 threshold) — so all 8 are
+// low-confidence — but MaxDeepPerScan is 5, so only 5 may receive a fresh
+// deep narrate call this scan.
+//
+// mallcoppro-42e: all 8 share the SAME (type, actor, entity) — the
+// multi-finding-per-case shape — so they cluster onto ONE case and share
+// ONE investigation record; there is no "5 revoted files / 3 untouched
+// files" split to assert anymore (that was the pre-case-keyed shape, where
+// each finding got its own file). What the deep budget still, and only,
+// bounds is the METERED cost: the number of deep-pass narrate calls this
+// scan actually spends. That is asserted directly via be.CallCount() — 8
+// first-pass calls (one per finding; each is a genuine investigation, even
+// though all 8 write/refresh the one shared case record) + exactly 5
+// deep-pass calls (MaxDeepPerScan, never 8) = 13, never 16. The shared
+// record ends up reflecting a genuine budget-bounded deeper pass + re-vote.
 func TestPipeline_LowConfidenceInvestigation_RevoteBoundedByDeepBudget(t *testing.T) {
 	root := useShippedCorpus(t)
 
@@ -903,6 +909,10 @@ func TestPipeline_LowConfidenceInvestigation_RevoteBoundedByDeepBudget(t *testin
 			"(an unbounded revote loop would re-vote every low-confidence finding regardless "+
 			"of whether its deep pass actually ran this scan)", sum.LowConfidenceRevotes)
 	}
+	if n := be.CallCount(); n != 13 {
+		t.Fatalf("narrate calls = %d, want 13 (8 first-pass + 5 deep-pass, budget-capped — NOT 8 first-pass "+
+			"+ 8 deep-pass=16, which is what an unbounded deep pass over the shared case would cost)", n)
+	}
 
 	res := loadResolutions(t, st)
 	var findingIDs []string
@@ -915,26 +925,28 @@ func TestPipeline_LowConfidenceInvestigation_RevoteBoundedByDeepBudget(t *testin
 	if len(findingIDs) != 8 {
 		t.Fatalf("resolutions = %d, want 8", len(findingIDs))
 	}
-	sort.Strings(findingIDs) // the SAME deterministic order runLowConfidenceRevotes bounds by
 
-	revoted, untouched := findingIDs[:5], findingIDs[5:]
-	for _, id := range revoted {
-		rec := readInvestigationRecord(t, st, id)
-		if rec.Revote == nil || !rec.Revote.Triggered {
-			t.Errorf("finding %s (within the deep budget): Revote = %+v, want a Triggered re-vote", id, rec.Revote)
-		}
+	// Multi-finding-per-case shape (mallcoppro-42e, must be covered, not
+	// avoided): all 8 findings resolve to the SAME case — never 8
+	// independent cases/records.
+	caseIDs := map[string]bool{}
+	for _, id := range findingIDs {
+		caseIDs[caseIDForFinding(mustFinding(t, st, id))] = true
 	}
-	for _, id := range untouched {
-		rec := readInvestigationRecord(t, st, id)
-		if rec.Revote != nil {
-			t.Errorf("finding %s (past the deep budget): Revote = %+v, want nil — its deep pass never ran "+
-				"this scan, so it must NOT be re-voted on stale first-pass evidence mislabeled as a deeper "+
-				"investigation", id, rec.Revote)
-		}
-		if rec.Confidence != 0.3 {
-			t.Errorf("finding %s (past the deep budget): Confidence = %v, want 0.3 (the untouched "+
-				"first-pass value — no fresh deep pass ran for it this scan)", id, rec.Confidence)
-		}
+	if len(caseIDs) != 1 {
+		t.Fatalf("findings resolved to %d distinct cases, want 1 (same type+actor+entity — the shared-case shape this fixture exists to exercise)", len(caseIDs))
+	}
+
+	// The ONE shared record reflects the budget-bounded deeper pass: a
+	// trusted verdict and a Triggered re-vote (some in-budget finding's
+	// deeper pass landed and was re-voted; the exact per-finding
+	// attribution is moot once every finding shares this one record).
+	rec := readInvestigationRecord(t, st, findingIDs[0])
+	if rec.NarrativeStatus != inquest.StatusOK {
+		t.Fatalf("NarrativeStatus = %q, want ok", rec.NarrativeStatus)
+	}
+	if rec.Revote == nil || !rec.Revote.Triggered {
+		t.Fatalf("Revote = %+v, want a Triggered re-vote on the shared case record", rec.Revote)
 	}
 }
 

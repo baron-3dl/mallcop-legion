@@ -95,6 +95,13 @@ const (
 	StatusAbsentDisabled NarrativeStatus = "absent-disabled"
 )
 
+// maxTrackedFindingIDs bounds Record.InvestigatedFindingIDs — a FIFO ring,
+// oldest dropped first, mirroring core/cases.Case's own findingIDRingCap
+// (same 50; this is an idempotency aid over a case's contributing findings,
+// not a second audit trail — core/cases.Case.FindingIDs/store/cases.json is
+// that).
+const maxTrackedFindingIDs = 50
+
 // maxRecordBytes is the hard marshal-time cap on one Record's committed JSON
 // (the SAME encoding WriteSnapshot uses — see enforceRecordSizeCap). When
 // over cap, the neighbor tail is dropped first, then the recurrence prior
@@ -129,10 +136,13 @@ type Record struct {
 	// FindingID is the MOST RECENT finding that wrote/refreshed this record —
 	// on a case-keyed record (CaseID non-empty) this changes across a refire
 	// (a NEW finding recurring under the SAME case), unlike CreatedAt/CaseID
-	// which stay fixed. It is never a list: the case's own FindingIDs ring
-	// (core/cases.Case, store/cases.json) is the durable multi-finding
-	// membership record; this field is just "who most recently triggered
-	// this evidence".
+	// which stay fixed. It is a single scalar, not a list: the DURABLE
+	// multi-finding membership audit trail is core/cases.Case's own
+	// FindingIDs ring (store/cases.json); this field is just "who most
+	// recently triggered this evidence". InvestigatedFindingIDs below IS a
+	// list on this record, but for a narrower, DIFFERENT purpose (the
+	// idempotency skip's per-finding membership check, mallcoppro-42e
+	// review fix) — it is not a second audit trail.
 	FindingID string `json:"finding_id"`
 	// CaseID is the case cluster (mallcoppro-554's core/cases.Key —
 	// type+actor+entity — hashed via the EXPORTED core/cases.CaseID, never a
@@ -142,11 +152,26 @@ type Record struct {
 	// resolved a case (pre-migration behavior, and this package's own unit
 	// tests that construct an EscalatedFinding directly) — such a record
 	// keys by FindingID alone, exactly as it did before this field existed.
-	CaseID         string `json:"case_id,omitempty"`
-	EventID        string `json:"event_id"`
-	MallcopVersion string `json:"mallcop_version"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
+	CaseID string `json:"case_id,omitempty"`
+	// InvestigatedFindingIDs is the set of distinct finding IDs that have
+	// EACH independently landed a TRUSTED (StatusOK) investigation pass as
+	// part of THIS case-keyed record (mallcoppro-42e review fix: the
+	// multi-finding-per-case shape — several findings can recur under the
+	// SAME case, sharing this one record — means the record's idempotency
+	// guarantee, "a genuine re-run of any ONE contributing finding costs
+	// zero calls", must be checked PER FINDING, not by comparing against
+	// only FindingID (the single most-recent contributor), which a second,
+	// DIFFERENT co-occurring finding always fails to match even on its own
+	// exact re-run). Bounded FIFO at maxTrackedFindingIDs. omitempty +
+	// additive: a record written before this field existed, or by any
+	// caller that hasn't resolved a case, simply has none — the idempotency
+	// skip (processOne) falls back to the FindingID-equality check for
+	// compatibility with such records.
+	InvestigatedFindingIDs []string `json:"investigated_finding_ids,omitempty"`
+	EventID                string   `json:"event_id"`
+	MallcopVersion         string   `json:"mallcop_version"`
+	CreatedAt              string   `json:"created_at"`
+	UpdatedAt              string   `json:"updated_at"`
 	// Role is hard-coded "evidence" — it documents the consensus invariant
 	// in-band, on every record, for any consumer that reads the file directly.
 	Role       string        `json:"role"`
@@ -195,8 +220,26 @@ type Record struct {
 	// only ever one on-disk copy of a case-keyed record; mallcoppro-42e).
 	// nil when there was no prior trusted verdict to compare against (a
 	// brand-new record, or a prior record that never reached "ok"), or the
-	// fresh verdict matches the prior one.
+	// fresh verdict matches the prior one, OR the prior trusted verdict was
+	// written EARLIER IN THIS SAME RunAll call (see CoOccurringVerdict —
+	// that is never a flip, since nothing changed over time).
 	VerdictFlip *VerdictFlip `json:"verdict_flip,omitempty"`
+	// CoOccurringVerdict records that TWO OR MORE findings recurring under
+	// the SAME case within a SINGLE scan (one RunAll call) produced
+	// DIFFERING investigator verdicts — mallcoppro-42e review fix. This is
+	// NEVER a "flip": nothing changed over time, two findings that happened
+	// to co-occur in one scan simply disagreed at the same moment, so it
+	// uses the SAME {From, To} shape as VerdictFlip only for field-shape
+	// reuse — never populated together with VerdictFlip on the same write
+	// (a write is either an intra-scan disagreement or a cross-scan flip,
+	// never both). The later finding's verdict is still the one WRITTEN
+	// (Verdict/Confidence/Narrative above — never averaged, never
+	// suppressed); this field is the deliberate record that the earlier
+	// co-occurring finding this scan assessed differently, so a reader is
+	// never misled into thinking the record's single verdict was the only
+	// opinion this scan produced. nil when no co-occurring disagreement
+	// happened on this write.
+	CoOccurringVerdict *VerdictFlip `json:"co_occurring_verdict,omitempty"`
 }
 
 // VerdictFlip is the {from, to} pair of a detected verdict change — see

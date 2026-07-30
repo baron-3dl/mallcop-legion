@@ -363,6 +363,119 @@ func TestRunAll_CaseKeyed_VerdictFlipFlagged(t *testing.T) {
 	}
 }
 
+// TestRunAll_CaseKeyed_MultiFindingPerCase_RerunIsIdempotent proves the
+// mallcoppro-42e review fix (BUG 1 — re-run idempotency was lost): two
+// DISTINCT findings sharing ONE case, in a SINGLE scan, both genuinely need
+// investigating the first time (Investigated=2, one call each) — but an
+// IDENTICAL RERUN of that exact same scan (the SAME two findings handed to
+// RunAll again) must cost ZERO additional calls (Skipped=2), exactly like
+// the single-finding-per-case case. Without the fix, the skip condition
+// compared only against the record's single FindingID (the most recent
+// contributor), which a second, different finding can never match even on
+// its own exact re-run — so this scenario re-invested BOTH findings on
+// EVERY re-scan, forever (a metered-cost regression).
+func TestRunAll_CaseKeyed_MultiFindingPerCase_RerunIsIdempotent(t *testing.T) {
+	s := newTempStore(t)
+	const caseID = "case-multi1"
+	client := &scriptedClient{reply: `{"verdict":"benign","confidence":0.9,"narrative":"routine, first pass."}`}
+
+	in := Input{
+		Store: s, Client: client,
+		Findings: []EscalatedFinding{
+			escalatedForCase("finding-1", "actor-a", caseID),
+			escalatedForCase("finding-2", "actor-a", caseID),
+		},
+		Config: okConfig(),
+	}
+
+	first := RunAll(context.Background(), in)
+	if first.Investigated != 2 || first.Skipped != 0 {
+		t.Fatalf("scan 1 Outcome = %+v, want Investigated=2 Skipped=0 (both findings are new)", first)
+	}
+	if client.calls != 2 {
+		t.Fatalf("scan 1 made %d calls, want 2 (one per distinct finding)", client.calls)
+	}
+	rec1 := readRecord(t, in, caseID)
+	if !containsString(rec1.InvestigatedFindingIDs, "finding-1") || !containsString(rec1.InvestigatedFindingIDs, "finding-2") {
+		t.Fatalf("rec1.InvestigatedFindingIDs = %v, want both finding-1 and finding-2", rec1.InvestigatedFindingIDs)
+	}
+
+	// Scan 2: the IDENTICAL scan (same two findings, same case) re-runs.
+	// This must be a pure no-op: zero additional calls, zero writes.
+	beforeSHA := headSHA(t, s)
+	second := RunAll(context.Background(), in)
+	if second.Investigated != 0 || second.Skipped != 2 || second.Degraded != 0 {
+		t.Fatalf("scan 2 (identical re-run) Outcome = %+v, want Investigated=0 Skipped=2 — a re-run of "+
+			"a multi-finding case must cost zero calls, exactly like a single-finding case", second)
+	}
+	if client.calls != 2 {
+		t.Errorf("client called %d times across 2 identical scans, want 2 (scan 2 must make ZERO additional "+
+			"model calls — a metered-cost regression if it doesn't)", client.calls)
+	}
+	afterSHA := headSHA(t, s)
+	if beforeSHA != afterSHA {
+		t.Errorf("identical re-run produced a new commit (%s -> %s); the shared case record must be untouched", beforeSHA, afterSHA)
+	}
+	rec2 := readRecord(t, in, caseID)
+	if rec2.CreatedAt != rec1.CreatedAt || rec2.UpdatedAt != rec1.UpdatedAt {
+		t.Errorf("identical re-run touched the record: rec1=%+v rec2=%+v", rec1, rec2)
+	}
+}
+
+// TestRunAll_CaseKeyed_IntraScanDisagreement_NotAFlip proves the
+// mallcoppro-42e review fix (BUG 2 — spurious intra-scan VerdictFlip): two
+// DISTINCT findings sharing ONE case, landing DIFFERENT investigator
+// verdicts within a SINGLE scan (a sequencedClient serves benign then
+// threat), is NEVER a VerdictFlip — nothing changed over TIME, two findings
+// simply co-occurred and disagreed at the same moment. The later verdict is
+// still WRITTEN (never averaged/suppressed), and the disagreement is
+// deliberately represented via CoOccurringVerdict + an in-band narrative
+// note — never silently overwritten, and never mislabeled as a temporal
+// flip.
+func TestRunAll_CaseKeyed_IntraScanDisagreement_NotAFlip(t *testing.T) {
+	s := newTempStore(t)
+	const caseID = "case-cooccur1"
+	client := &sequencedClient{replies: []string{
+		`{"verdict":"benign","confidence":0.8,"narrative":"first finding looks routine."}`,
+		`{"verdict":"threat","confidence":0.9,"narrative":"second finding, same scan, looks malicious."}`,
+	}}
+
+	in := Input{
+		Store: s, Client: client,
+		Findings: []EscalatedFinding{
+			escalatedForCase("finding-1", "actor-a", caseID), // processed first (sorted by finding ID)
+			escalatedForCase("finding-2", "actor-a", caseID), // processed second
+		},
+		Config: okConfig(),
+	}
+
+	out := RunAll(context.Background(), in)
+	if out.Investigated != 2 {
+		t.Fatalf("Outcome = %+v, want Investigated=2 (both co-occurring findings are new)", out)
+	}
+
+	rec := readRecord(t, in, caseID)
+	if rec.Verdict != VerdictThreat {
+		t.Fatalf("rec.Verdict = %q, want threat — the later finding's verdict is written, not averaged", rec.Verdict)
+	}
+	if rec.VerdictFlip != nil {
+		t.Fatalf("rec.VerdictFlip = %+v, want nil — two co-occurring findings in ONE scan disagreeing is "+
+			"never a flip (nothing changed over time)", rec.VerdictFlip)
+	}
+	if rec.CoOccurringVerdict == nil {
+		t.Fatal("rec.CoOccurringVerdict = nil, want a co-occurring-disagreement flag (benign -> threat)")
+	}
+	if rec.CoOccurringVerdict.From != VerdictBenign || rec.CoOccurringVerdict.To != VerdictThreat {
+		t.Errorf("CoOccurringVerdict = %+v, want {From:benign To:threat}", rec.CoOccurringVerdict)
+	}
+	if strings.Contains(rec.Narrative, "VERDICT FLIP") {
+		t.Errorf("Narrative = %q, must NOT claim a VERDICT FLIP — nothing flipped over time", rec.Narrative)
+	}
+	if !strings.Contains(rec.Narrative, "CO-OCCURRING") {
+		t.Errorf("Narrative = %q, want an in-band co-occurring-disagreement note", rec.Narrative)
+	}
+}
+
 // TestRunAll_Force_BypassesIdempotencySkip proves the low-confidence
 // deeper-pass retrigger (mallcoppro-09a): a finding whose EXISTING record is
 // already ok + current-schema (the case the normal path SKIPS) IS re-investigated

@@ -268,15 +268,21 @@ type Outcome struct {
 // true: there is no code path in this package that can crash the scan.
 //
 // Idempotency: a finding whose case (or, absent a case, itself) already has a
-// record at the current SchemaVersion, NarrativeStatus "ok", AND whose
-// FindingID matches THIS finding's own ID is skipped entirely — zero calls,
-// zero store reads beyond the one existence check, zero writes (a genuine
-// re-run of the same finding). A finding whose record is absent,
-// schema-stale, degraded, OR whose case's existing record was written by a
-// DIFFERENT finding (a refire, mallcoppro-42e) is (re-)investigated,
-// preserving the original CreatedAt on a refresh and flagging any change in
-// trusted verdict (Record.VerdictFlip) rather than averaging or suppressing
-// it.
+// record at the current SchemaVersion, NarrativeStatus "ok", AND that THIS
+// finding has itself already contributed a trusted pass to (either it is the
+// record's most recent contributor, FindingID, OR its ID is a member of
+// Record.InvestigatedFindingIDs — the per-finding membership set a
+// multi-finding-per-case record accumulates, mallcoppro-42e review fix) is
+// skipped entirely — zero calls, zero store reads beyond the one existence
+// check, zero writes (a genuine re-run of that same finding, even when OTHER
+// findings share its case). A finding whose record is absent, schema-stale,
+// degraded, or that has NOT itself yet contributed (a refire — a NEW finding
+// recurring under the same case, or a co-occurring finding new to this scan)
+// is (re-)investigated, preserving the original CreatedAt on a refresh and
+// flagging any change in trusted verdict: Record.VerdictFlip for a change
+// across scans (a genuine refire), or Record.CoOccurringVerdict for two
+// findings sharing a case that simply disagreed within ONE scan (never a
+// flip — nothing changed over time) — never averaging or suppressing either.
 func RunAll(ctx context.Context, in Input) (out Outcome) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -340,9 +346,19 @@ func RunAll(ctx context.Context, in Input) (out Outcome) {
 			"inquest: load directives for attention weighting: %v — falling back to finding-ID order", derr))
 	}
 
+	// touchedThisRun tracks, per record key, whether an EARLIER finding in
+	// THIS SAME RunAll call has already written to that key — the
+	// scan-awareness seam mallcoppro-42e's review fix needs: two findings
+	// sharing a case that BOTH land in this one call's Findings slice can
+	// disagree (co-occurring, never a temporal flip), while a finding
+	// sharing a case with a record from an EARLIER RunAll call (a genuine
+	// refire, possibly scans apart) is comparing across time, where a
+	// differing verdict IS a flip. See processOne's use of this map.
+	touchedThisRun := make(map[string]bool, len(findings))
+
 	callsUsed := 0
 	for _, ef := range findings {
-		investigated, degraded, skipped, errMsg := processOne(ctx, in, ef, maxPerScan, &callsUsed)
+		investigated, degraded, skipped, errMsg := processOne(ctx, in, ef, maxPerScan, &callsUsed, touchedThisRun)
 		out.Investigated += investigated
 		out.Degraded += degraded
 		out.Skipped += skipped
@@ -378,12 +394,22 @@ var runAllPanicHookForTest func()
 // priorCreatedAt/havePriorCreatedAt are captured from the pre-panic
 // existing-record read (below) so the panic-guard fallback record preserves a
 // known CreatedAt rather than resetting it to now() (review finding 3b).
-func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan int, callsUsed *int) (investigated, degraded, skipped int, errMsg string) {
+func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan int, callsUsed *int, touchedThisRun map[string]bool) (investigated, degraded, skipped int, errMsg string) {
 	var modelCallAttempted bool
 	var priorCreatedAt string
 	var havePriorCreatedAt bool
+	var priorFindingIDs []string
 
 	key := ef.RecordKey()
+	// sameScanPriorWrite is true when an EARLIER finding in THIS SAME RunAll
+	// call already wrote to key — see touchedThisRun's doc comment (RunAll)
+	// and the verdict-comparison use below (mallcoppro-42e review fix: an
+	// intra-scan disagreement between co-occurring findings is never a
+	// "flip", since nothing changed over time). Computed BEFORE marking
+	// touched below, so it reflects state as of the START of this finding's
+	// processing, not this finding's own write.
+	sameScanPriorWrite := touchedThisRun[key]
+	touchedThisRun[key] = true
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -401,6 +427,7 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 				rec := minimalDegradedRecord(ef, in.MallcopVersion, status)
 				if havePriorCreatedAt {
 					rec.CreatedAt = priorCreatedAt
+					rec.InvestigatedFindingIDs = priorFindingIDs
 				}
 				_, _ = writeRecord(in.Store, key, rec)
 			}()
@@ -421,18 +448,25 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 	if found {
 		priorCreatedAt = existing.CreatedAt
 		havePriorCreatedAt = true
+		priorFindingIDs = existing.InvestigatedFindingIDs
 	}
-	// The ok-skip is scoped to THIS finding, not just this case: under
-	// case-keying (ef.CaseID set), existing.FindingID == ef.Finding.ID only
-	// when the LAST write to this case record was made BY this exact
-	// finding (a true re-run — the scan retried, or the same finding was
-	// handed to RunAll twice) — that is the only scenario the skip is meant
-	// to short-circuit. A DIFFERENT finding recurring under the same case (a
-	// genuine refire) always gets a fresh pass and REFRESHES the shared
-	// record instead, per the case-keyed recurrence design (mallcoppro-42e);
-	// for the CaseID=="" fallback this comparison is always true (the path
-	// itself is finding-ID-derived), so it changes nothing there.
-	if !in.Force && found && existing.SchemaVersion == SchemaVersion && existing.NarrativeStatus == StatusOK && existing.FindingID == ef.Finding.ID {
+	// The ok-skip must be scoped to THIS finding, PER FINDING — not just to
+	// "the last write to this case record" (mallcoppro-42e review fix: BUG
+	// 1). Under case-keying, several DISTINCT findings can share one case
+	// and each independently, genuinely need investigating the first time
+	// they're seen; a true RE-RUN of any ONE of them (the scan retried, or
+	// the same finding handed to RunAll twice) must still cost zero calls,
+	// even though it is no longer the LAST finding to have written this
+	// shared record. existing.FindingID == ef.Finding.ID (true whenever
+	// THIS finding was the most recent contributor) is kept as the exact
+	// pre-42e check for backward compatibility with a record written before
+	// InvestigatedFindingIDs existed; existing.InvestigatedFindingIDs
+	// containing this finding's ID is the per-finding membership check that
+	// covers every other case-keyed re-run. For the CaseID=="" fallback,
+	// InvestigatedFindingIDs (once populated) holds exactly the one ID this
+	// keying ever sees, so the two checks agree and nothing changes there.
+	alreadyInvestigated := existing.FindingID == ef.Finding.ID || containsString(existing.InvestigatedFindingIDs, ef.Finding.ID)
+	if !in.Force && found && existing.SchemaVersion == SchemaVersion && existing.NarrativeStatus == StatusOK && alreadyInvestigated {
 		return 0, 0, 1, errMsg
 	}
 
@@ -478,7 +512,8 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 		Evidence:       ev,
 	}
 	if found {
-		rec.CreatedAt = existing.CreatedAt // preserve on refresh
+		rec.CreatedAt = existing.CreatedAt           // preserve on refresh
+		rec.InvestigatedFindingIDs = priorFindingIDs // carry forward membership; appended to below only on a fresh ok landing
 	}
 
 	switch {
@@ -515,20 +550,38 @@ func processOne(ctx context.Context, in Input, ef EscalatedFinding, maxPerScan i
 			rec.Narrative = res.Narrative
 			rec.ContractNotes = res.ContractNotes
 			investigated = 1
-			// Verdict-flip detection (mallcoppro-42e): the ONLY prior verdict
-			// worth comparing against is one this package itself already
-			// trusted (found, current-ish record, StatusOK, a REAL verdict —
-			// never VerdictUnassessed, which never represents a trusted
-			// assessment). A refire — or a Force deeper pass on the same
-			// finding — landing a DIFFERENT trusted verdict must never
+			// Per-finding membership (mallcoppro-42e review fix, BUG 1): this
+			// finding just landed a trusted pass, so it joins the set the
+			// idempotency skip checks against — see the skip's doc comment
+			// above.
+			rec.InvestigatedFindingIDs = appendUniqueFindingID(rec.InvestigatedFindingIDs, ef.Finding.ID, maxTrackedFindingIDs)
+
+			// Verdict-change detection (mallcoppro-42e): the ONLY prior
+			// verdict worth comparing against is one this package itself
+			// already trusted (found, current-ish record, StatusOK, a REAL
+			// verdict — never VerdictUnassessed, which never represents a
+			// trusted assessment). A DIFFERENT trusted verdict must never
 			// average or silently supersede the prior one: it WRITES the
-			// fresh verdict (already done, above) and FLAGS the change, both
-			// structurally (VerdictFlip) and in-band in the narrative itself
-			// so a reader of just this JSON document sees it without a
-			// historical diff.
+			// fresh verdict (already done, above) and FLAGS the change
+			// in-band in the narrative — but WHICH flag depends on WHEN the
+			// prior verdict was written (review fix, BUG 2):
+			//
+			//   - sameScanPriorWrite (the existing record was written
+			//     EARLIER IN THIS SAME RunAll call, by a co-occurring
+			//     finding sharing this case): nothing changed over TIME —
+			//     two findings that happened to land in the same scan simply
+			//     disagreed. This is CoOccurringVerdict, never VerdictFlip.
+			//   - otherwise: existing predates this RunAll call (a genuine
+			//     refire, possibly scans apart, or none at all if !found).
+			//     A differing trusted verdict here IS a flip.
 			if found && existing.NarrativeStatus == StatusOK && existing.Verdict != VerdictUnassessed && existing.Verdict != rec.Verdict {
-				rec.VerdictFlip = &VerdictFlip{From: existing.Verdict, To: rec.Verdict}
-				rec.Narrative = fmt.Sprintf("[VERDICT FLIP: %s -> %s] %s", existing.Verdict, rec.Verdict, rec.Narrative)
+				if sameScanPriorWrite {
+					rec.CoOccurringVerdict = &VerdictFlip{From: existing.Verdict, To: rec.Verdict}
+					rec.Narrative = fmt.Sprintf("[CO-OCCURRING VERDICTS THIS SCAN: %s -> %s] %s", existing.Verdict, rec.Verdict, rec.Narrative)
+				} else {
+					rec.VerdictFlip = &VerdictFlip{From: existing.Verdict, To: rec.Verdict}
+					rec.Narrative = fmt.Sprintf("[VERDICT FLIP: %s -> %s] %s", existing.Verdict, rec.Verdict, rec.Narrative)
+				}
 			}
 		} else {
 			degraded = 1
@@ -651,6 +704,35 @@ func minimalDegradedRecord(ef EscalatedFinding, mallcopVersion string, status Na
 // approximation for the suffixed one.
 func underlyingEventID(findingID string) string {
 	return strings.TrimPrefix(findingID, "finding-")
+}
+
+// containsString reports whether s is present in ss.
+func containsString(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// appendUniqueFindingID appends id to ids unless it is already present,
+// capping the result at maxLen via FIFO (oldest dropped first) — see
+// Record.InvestigatedFindingIDs's doc comment. A no-op re-add (id already a
+// member) returns ids unchanged rather than growing/reordering it, so a
+// finding that lands "ok" more than once (e.g. a Force deeper pass over a
+// finding whose first pass already added it) never duplicates its own entry.
+func appendUniqueFindingID(ids []string, id string, maxLen int) []string {
+	for _, v := range ids {
+		if v == id {
+			return ids
+		}
+	}
+	out := append(append([]string(nil), ids...), id)
+	if len(out) > maxLen {
+		out = out[len(out)-maxLen:]
+	}
+	return out
 }
 
 func nowRFC3339() string {
