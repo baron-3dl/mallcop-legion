@@ -215,8 +215,18 @@ type resolved struct {
 //
 // Run is safe to call once per Config. A non-nil error means the scan could not
 // complete (connector, detector-input, or a store write failed); a nil error with
-// a Summary means the scan completed and the counts are authoritative.
-func Run(ctx context.Context, cfg Config) (Summary, error) {
+// a Summary means the scan completed and the counts are authoritative. Either
+// way (mallcoppro-24e), Run appends exactly one store.ScanRecord before
+// returning — Success=true on the nil-error path, Success=false with
+// FailedStage/Error populated on every error path, including a connector Pull
+// failure. The store never goes dark on a failed scan.
+//
+// Run uses NAMED returns (summary, err) so the deferred recordScan call below
+// can see whatever value the function is actually returning at each of its
+// many early-return sites, without every one of them needing to be rewritten
+// to also append a ScanRecord (mallcoppro-24e). See the defer immediately
+// after the Connector/Store nil guards for the mechanism.
+func Run(ctx context.Context, cfg Config) (summary Summary, err error) {
 	start := time.Now()
 
 	if cfg.Connector == nil {
@@ -226,11 +236,46 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 		return Summary{}, fmt.Errorf("pipeline: nil Store")
 	}
 
+	// stage names the pipeline phase in flight. It advances ONLY after a
+	// phase's fallible step succeeds, so at any early return its value is
+	// exactly the phase that was running when the error fired — recordScan
+	// (deferred below) uses it to fill ScanRecord.FailedStage. It is
+	// meaningless on the success path (recordScan clears FailedStage whenever
+	// err is nil), so no discipline is needed advancing it past the last
+	// fallible step.
+	stage := "connect"
+
+	// mallcoppro-24e (design §5, the reinforcing bug): a connector Pull
+	// failure used to return at this point BEFORE recordScan ever fired, so
+	// a 403-on-connect left NO ScanRecord at all — the store went dark
+	// exactly when the liveness watchdog needed the signal. Deferring the
+	// append here means EVERY return from Run — success or any of the many
+	// error returns below — commits exactly one ScanRecord. cfg.Store is
+	// already validated non-nil above, so the handle is safe to use no
+	// matter which stage fails.
+	defer func() {
+		if rerr := recordScan(cfg, summary, start, stage, err); rerr != nil {
+			// recordScan's own doc comment treats a write failure here as a
+			// hard error like any other store append in Run. If Run was
+			// otherwise succeeding, that failure becomes Run's error; if Run
+			// was already failing, the original failure is more actionable,
+			// so the record failure is folded in for legibility rather than
+			// replacing it.
+			if err == nil {
+				err = rerr
+				summary = Summary{}
+			} else {
+				err = fmt.Errorf("%w (additionally failed to record scan: %v)", err, rerr)
+			}
+		}
+	}()
+
 	// (1) CONNECT.
 	events, err := cfg.Connector.Pull(ctx)
 	if err != nil {
 		return Summary{}, fmt.Errorf("pipeline: connect: %w", err)
 	}
+	stage = "baseline"
 
 	// (1a) DERIVE THE BASELINE FROM PRIOR HISTORY — the idempotency keystone.
 	// Read the store's ALREADY-committed events (everything earlier scans saw)
@@ -304,6 +349,7 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 	var duplicatesSkipped int
 	events, duplicatesSkipped = dedupeEvents(events, priorEvents)
 
+	stage = "store_events"
 	// Append every (deduped) pulled event to the durable store, in ONE commit
 	// instead of one commit per event, so the scan's input corpus is itself
 	// reconstructable from the git log (the store is the one brain) without
@@ -335,6 +381,7 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 	// Only the derived baseline is persisted — an explicit Config.Baseline is already
 	// a durable file, and re-appending it would only add noise to the eval/academy
 	// path. Append (not overwrite): KindBaseline is the append-only history stream.
+	stage = "store_baseline_snapshot"
 	if derived {
 		if _, err := cfg.Store.Append(store.KindBaseline, bl); err != nil {
 			return Summary{}, fmt.Errorf("pipeline: store baseline snapshot: %w", err)
@@ -347,6 +394,7 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 	// it the directives stream is inert. The drop happens BEFORE the
 	// findings-append below, so a suppressed finding is neither recorded nor
 	// resolved — the operator's decision persists and the next scan obeys it.
+	stage = "load_directives"
 	directives, err := cfg.Store.LoadDirectives()
 	if err != nil {
 		return Summary{}, fmt.Errorf("pipeline: load directives: %w", err)
@@ -375,7 +423,7 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 		findings = append(findings, *mf)
 	}
 
-	summary := Summary{
+	summary = Summary{
 		EventsScanned:     len(events),
 		FindingsDetected:  len(findings),
 		DuplicatesSkipped: duplicatesSkipped,
@@ -400,6 +448,7 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 	// linearizes. Persists displayFindings (severity-overridden) so an operator's
 	// relabel is visible in the durable record — this is a display artifact, not
 	// resolve input (see the R9 note above `displayFindings`'s assignment).
+	stage = "store_findings"
 	if len(displayFindings) > 0 {
 		batch := make([]any, len(displayFindings))
 		for i := range displayFindings {
@@ -417,24 +466,27 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 	// scan overwrites a stale snapshot). Uses displayFindings for the same reason
 	// as the store batch above — the severity label an operator sees, never the
 	// resolve input.
+	stage = "write_findings_snapshot"
 	if _, err := cfg.Store.WriteSnapshot("findings.json", displayFindings); err != nil {
 		return Summary{}, fmt.Errorf("pipeline: write findings snapshot: %w", err)
 	}
 
 	if len(findings) == 0 {
-		if err := recordScan(cfg, summary, start); err != nil {
-			return Summary{}, err
-		}
+		// The tail recordScan call this used to be lives in the deferred call
+		// registered above now — every return from Run appends exactly one
+		// ScanRecord, this early return included.
 		summary.Duration = time.Since(start)
 		return summary, nil
 	}
 
 	// (3) RESOLVE through a bounded worker pool. The cascade is the security floor;
 	// the pool only parallelizes the per-finding model round-trips.
+	stage = "resolve"
 	results, err := resolveAll(ctx, cfg, findings)
 	if err != nil {
 		return Summary{}, err
 	}
+	stage = "store_resolutions"
 
 	// (4) STORE resolutions + count. Build every resolution record and tally
 	// Escalated/Resolved in the SAME deterministic finding-order loop as before,
@@ -521,10 +573,9 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 		summary.InvestigationWarnings = append(summary.InvestigationWarnings, warns...)
 	}
 
-	if err := recordScan(cfg, summary, start); err != nil {
-		return Summary{}, err
-	}
-
+	// The tail recordScan call this used to be lives in the deferred call
+	// registered near the top of Run now (mallcoppro-24e) — every return from
+	// Run appends exactly one ScanRecord, this success path included.
 	summary.Duration = time.Since(start)
 	return summary, nil
 }
@@ -739,13 +790,22 @@ func backstopEventIDs(findings []finding.Finding) []finding.Finding {
 
 // recordScan appends one store.ScanRecord to the store's KindScans register —
 // the durable, rotation-surviving source detection-time investigation's
-// scan-schedule correlation reads (core/inquest's assemble.go). Called at the
-// end of EVERY Run, findings or not, so the register's cadence reflects the
-// TRUE scan schedule regardless of whether anything fired. A write failure
-// here is a hard error, exactly like every other store append in Run — the
-// register is part of "durably recording what happened this scan", not an
-// optional side effect.
-func recordScan(cfg Config, summary Summary, startedAt time.Time) error {
+// scan-schedule correlation reads (core/inquest's assemble.go). Called via a
+// defer registered near the top of Run (mallcoppro-24e), so it fires on EVERY
+// return from Run — success, a mid-pipeline failure, or the empty-findings
+// early exit — instead of only the tail success path. That is the fix for
+// the reinforcing bug (design §5): a connector 403-on-connect used to return
+// before recordScan ever fired, leaving the register dark exactly when the
+// liveness watchdog needed the signal. A write failure here is still a hard
+// error, exactly like every other store append in Run — the defer at Run's
+// top folds it into Run's returned error (see that comment for the exact
+// precedence rule when Run was already failing).
+//
+// runErr is Run's own error at the time it returned (nil on success). When
+// non-nil, the record carries Success=false, FailedStage=stage (the pipeline
+// phase in flight when runErr fired), and Error=runErr.Error(). When nil, the
+// record carries Success=true and both string fields empty.
+func recordScan(cfg Config, summary Summary, startedAt time.Time, stage string, runErr error) error {
 	rec := store.ScanRecord{
 		StartedAt:        startedAt,
 		FinishedAt:       time.Now(),
@@ -753,6 +813,11 @@ func recordScan(cfg Config, summary Summary, startedAt time.Time) error {
 		FindingsDetected: summary.FindingsDetected,
 		Escalated:        summary.Escalated,
 		MallcopVersion:   cfg.MallcopVersion,
+		Success:          runErr == nil,
+	}
+	if runErr != nil {
+		rec.FailedStage = stage
+		rec.Error = runErr.Error()
 	}
 	if _, err := cfg.Store.Append(store.KindScans, rec); err != nil {
 		return fmt.Errorf("pipeline: store scan record: %w", err)

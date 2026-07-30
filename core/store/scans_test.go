@@ -79,6 +79,70 @@ func TestKindScansAppendAndLoadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestKindScansRoundTrip_SuccessFailureFields proves the mallcoppro-24e
+// additive fields (Success/FailedStage/Error) round-trip through Append +
+// LoadScans exactly like every other field, and that a record written
+// BEFORE these fields existed (a raw JSON blob with no "success" key,
+// simulating an older binary's ScanRecord) decodes as Success=false with
+// both string fields empty — the documented legacy-record shape callers
+// must recognize as "predates this field" rather than "failed", per the
+// type's doc comment.
+func TestKindScansRoundTrip_SuccessFailureFields(t *testing.T) {
+	repo := initRepo(t)
+	s, err := Open(repo)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	t1 := time.Date(2026, 7, 30, 9, 0, 0, 0, time.UTC)
+	ok := ScanRecord{StartedAt: t1, FinishedAt: t1.Add(time.Second), EventsScanned: 4, Success: true}
+	failed := ScanRecord{
+		StartedAt: t1.Add(time.Hour), FinishedAt: t1.Add(time.Hour + time.Second),
+		Success: false, FailedStage: "connect", Error: "github: 403 Forbidden",
+	}
+	if _, err := s.Append(KindScans, ok); err != nil {
+		t.Fatalf("Append(KindScans, ok): %v", err)
+	}
+	if _, err := s.Append(KindScans, failed); err != nil {
+		t.Fatalf("Append(KindScans, failed): %v", err)
+	}
+	// A raw legacy record: no "success"/"failed_stage"/"error" keys at all,
+	// exactly what a pre-mallcoppro-24e binary wrote.
+	legacyRaw := []byte(`{"started_at":"2026-07-30T11:00:00Z","finished_at":"2026-07-30T11:00:02Z","events_scanned":7,"findings_detected":1,"escalated":0,"mallcop_version":"v0.19.0"}`)
+	var legacy map[string]any
+	if err := json.Unmarshal(legacyRaw, &legacy); err != nil {
+		t.Fatalf("sanity-unmarshal legacyRaw: %v", err)
+	}
+	if _, err := s.Append(KindScans, legacy); err != nil {
+		t.Fatalf("Append(KindScans, legacy): %v", err)
+	}
+
+	got, err := s.LoadScans()
+	if err != nil {
+		t.Fatalf("LoadScans: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("LoadScans returned %d records, want 3", len(got))
+	}
+
+	if !got[0].Success || got[0].FailedStage != "" || got[0].Error != "" {
+		t.Errorf("success record decoded as %+v, want Success=true FailedStage=\"\" Error=\"\"", got[0])
+	}
+	if got[1].Success || got[1].FailedStage != "connect" || got[1].Error != "github: 403 Forbidden" {
+		t.Errorf("failure record decoded as %+v, want Success=false FailedStage=connect Error=%q", got[1], "github: 403 Forbidden")
+	}
+	// The legacy-record caveat: no "success" key means Go's zero-value
+	// unmarshal, i.e. Success=false — this is expected and documented, NOT a
+	// bug this test is asserting away. A consumer must treat
+	// FailedStage=="" && Error=="" as "predates this field", not "failed".
+	if got[2].Success || got[2].FailedStage != "" || got[2].Error != "" {
+		t.Errorf("legacy record decoded as %+v, want the zero-value shape (Success=false, both strings empty)", got[2])
+	}
+	if got[2].EventsScanned != 7 {
+		t.Errorf("legacy record EventsScanned = %d, want 7 (pre-existing fields must still decode)", got[2].EventsScanned)
+	}
+}
+
 // TestKindSelfextDispatchesAppendAndLoadRoundTrip proves the eighth stream
 // (mallcoppro-0d95) round-trips exactly like KindScans did for the seventh:
 // Append + Load recovers the typed records in commit order, and
