@@ -4,7 +4,10 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mallcop-app/mallcop/core/store"
@@ -93,6 +96,85 @@ func realRoutedArtifact(t *testing.T, artifactBase, fingerprint string) router.D
 	return dec
 }
 
+// runGitT runs one git command in dir and fails the test on error, returning
+// combined output for the (rare) caller that wants to inspect it.
+func runGitT(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s (dir=%s): %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+	return string(out)
+}
+
+// newBareOSSRemote creates a REAL bare git repo on disk — standing in for the
+// shared OSS repo's remote, exactly as the STILL BINDING constraint on this
+// item requires ("do not push a contribute-back PR to mallcop-app/mallcop as
+// a side effect of testing — use a local bare repo"). pushContribBranch
+// clones this exact filesystem path with a plain `git clone`; production
+// clones an https://github.com/... URL instead, but it is the SAME code path
+// (contribPushRunner shells out to the SAME `git clone/checkout/commit/push`
+// sequence either way) — this is not a parallel fake mechanism.
+//
+// It seeds a "main" branch with one file first, mirroring a real repo (never
+// empty at HEAD) so pushContribBranch's `git checkout main` has a real branch
+// to land on before branching off it.
+func newBareOSSRemote(t *testing.T) string {
+	t.Helper()
+	bare := filepath.Join(t.TempDir(), "oss-remote.git")
+	if out, err := exec.Command("git", "init", "--quiet", "--bare", "-b", "main", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+	seed := t.TempDir()
+	runGitT(t, seed, "init", "--quiet", "-b", "main")
+	runGitT(t, seed, "config", "user.email", "seed@test.example")
+	runGitT(t, seed, "config", "user.name", "seed")
+	runGitT(t, seed, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitT(t, seed, "add", "README.md")
+	runGitT(t, seed, "commit", "--quiet", "-m", "seed")
+	runGitT(t, seed, "remote", "add", "origin", bare)
+	runGitT(t, seed, "push", "--quiet", "origin", "main")
+	return bare
+}
+
+// verifyPushedHeadBranch proves, by cloning bareRepo FRESH into a brand-new
+// directory (never reusing pushContribBranch's own scratch clone), that
+// headBranch genuinely exists on the remote with a real, non-empty commit
+// ahead of "main" carrying wantFile — the exact three things mallcoppro-a6c's
+// veracity finding said were never true in production ("Head sha can't be
+// blank", "No commits between main and contribback/...", "Head ref must be a
+// branch").
+func verifyPushedHeadBranch(t *testing.T, bareRepo, headBranch, wantFile string) {
+	t.Helper()
+	clone := t.TempDir()
+	runGitT(t, "", "clone", "--quiet", bareRepo, clone)
+	// The branch ref must exist on the remote at all (a missing head branch
+	// is exactly the "Head ref must be a branch" failure mode).
+	branches := runGitT(t, clone, "branch", "-r")
+	if !strings.Contains(branches, "origin/"+headBranch) {
+		t.Fatalf("remote has no branch %q; branches:\n%s", headBranch, branches)
+	}
+	// The branch must be genuinely ahead of main — a real commit, not an
+	// empty one ("No commits between main and contribback/..." was the exact
+	// production failure).
+	ahead := strings.TrimSpace(runGitT(t, clone, "rev-list", "--count", "main..origin/"+headBranch))
+	if ahead == "0" || ahead == "" {
+		t.Fatalf("origin/%s has %s commits ahead of main, want >=1 (an empty branch reproduces the veracity finding)", headBranch, ahead)
+	}
+	// The file the artifact was materialized as must actually be present in
+	// that commit's tree ("Head sha can't be blank" reproduces when nothing
+	// was ever committed at all).
+	diffFiles := runGitT(t, clone, "diff", "--name-only", "main", "origin/"+headBranch)
+	if !strings.Contains(diffFiles, wantFile) {
+		t.Fatalf("origin/%s diff vs main does not include %q; diff --name-only:\n%s", headBranch, wantFile, diffFiles)
+	}
+}
+
 // TestContributeArtifacts_OpensRealPRAndPersistsThroughRealStore is the
 // acceptance test for mallcoppro-a6c: from a store containing a
 // ROUTER-EMITTED contribute-back artifact (never hand-seeded), invoking the
@@ -103,7 +185,9 @@ func realRoutedArtifact(t *testing.T, artifactBase, fingerprint string) router.D
 // loop through the SAME store this call wrote to.
 func TestContributeArtifacts_OpensRealPRAndPersistsThroughRealStore(t *testing.T) {
 	artifactBase := t.TempDir()
-	realRoutedArtifact(t, artifactBase, "fp-real-router-emit-1")
+	fp := "fp-real-router-emit-1"
+	realRoutedArtifact(t, artifactBase, fp)
+	headBranch := contribback.Artifact{Fingerprint: fp}.HeadBranch()
 
 	storeDir := t.TempDir()
 	st, err := openOrInitStore(storeDir)
@@ -111,12 +195,19 @@ func TestContributeArtifacts_OpensRealPRAndPersistsThroughRealStore(t *testing.T
 		t.Fatalf("openOrInitStore: %v", err)
 	}
 
+	// A REAL local bare git repo stands in for the shared OSS remote (STILL
+	// BINDING constraint: never push a real PR to mallcop-app/mallcop as a
+	// side effect of testing). pushContribBranch runs its real
+	// clone/checkout/commit/push sequence against this exact path.
+	bareRemote := newBareOSSRemote(t)
+
 	pr := &fakePROpener{url: "https://github.com/mallcop-app/mallcop/pull/777"}
 	sum, err := contributeArtifacts(context.Background(), contributeArgs{
 		artifactDir: artifactBase,
 		storeRepo:   storeDir,
 		ossRepo:     "mallcop-app/mallcop",
 		autonomy:    autonomy.FullyAutonomy, // proves the dial never gates opening a PR
+		cloneSpec:   bareRemote,
 	}, st, pr, silentLogger())
 	if err != nil {
 		t.Fatalf("contributeArtifacts: %v", err)
@@ -130,6 +221,15 @@ func TestContributeArtifacts_OpensRealPRAndPersistsThroughRealStore(t *testing.T
 	if pr.lastReq.Repo != "mallcop-app/mallcop" {
 		t.Errorf("PRRequest.Repo = %q, want mallcop-app/mallcop", pr.lastReq.Repo)
 	}
+	if pr.lastReq.HeadBranch != headBranch {
+		t.Errorf("PRRequest.HeadBranch = %q, want %q", pr.lastReq.HeadBranch, headBranch)
+	}
+
+	// THE VERACITY-FINDING PROOF: the head branch was REALLY created,
+	// REALLY committed to, and REALLY pushed to the remote — checked by
+	// cloning the bare repo fresh (not reusing pushContribBranch's own
+	// scratch clone) and inspecting it with real git commands.
+	verifyPushedHeadBranch(t, bareRemote, headBranch, "contrib-back/"+fp+".json")
 
 	// PERSISTED THROUGH THE REAL STORE — reopen it fresh (a new handle on the
 	// same on-disk git repo) to prove the record is durable, not merely held
@@ -267,6 +367,7 @@ func TestContributeArtifacts_OpenPRFailure_IsReportedNotSwallowed(t *testing.T) 
 		artifactDir: artifactBase,
 		storeRepo:   storeDir,
 		ossRepo:     "mallcop-app/mallcop",
+		cloneSpec:   newBareOSSRemote(t), // push must SUCCEED so this test isolates the OpenPR failure, not a push failure
 	}, st, pr, silentLogger())
 	if err == nil {
 		t.Fatal("expected an error when OpenPR fails")
@@ -282,6 +383,105 @@ func TestContributeArtifacts_OpenPRFailure_IsReportedNotSwallowed(t *testing.T) 
 	}
 	if len(recs) != 0 {
 		t.Fatalf("got %d contribback records after a failed OpenPR, want 0", len(recs))
+	}
+}
+
+// TestPushContribBranch_CreatesRealCommitAndPushesIt is a focused, direct
+// test of pushContribBranch (mallcoppro-a6c's core fix): given a real bare
+// remote and a real Artifact, it must leave the head branch really created,
+// really committed to, and really pushed — verified by cloning the remote
+// fresh, exactly the veracity finding's three named failure modes ("Head sha
+// can't be blank", "No commits between main and contribback/...", "Head ref
+// must be a branch").
+func TestPushContribBranch_CreatesRealCommitAndPushesIt(t *testing.T) {
+	bare := newBareOSSRemote(t)
+	art := contribback.Artifact{
+		Fingerprint: "direct-push-fp",
+		Consented:   true,
+		Universal:   true,
+		Title:       "selfext(contribute-back): test widen",
+		Body:        "body text",
+	}
+	if err := pushContribBranch(context.Background(), bare, "main", art); err != nil {
+		t.Fatalf("pushContribBranch: %v", err)
+	}
+	verifyPushedHeadBranch(t, bare, art.HeadBranch(), "contrib-back/direct-push-fp.json")
+}
+
+// TestPushContribBranch_ReRunIsIdempotentViaForcePush proves a SECOND call for
+// the SAME fingerprint (the retry-after-partial-failure scenario: an earlier
+// run pushed the branch but OpenPR then errored) succeeds rather than failing
+// on a stale non-fast-forward against its own prior attempt.
+func TestPushContribBranch_ReRunIsIdempotentViaForcePush(t *testing.T) {
+	bare := newBareOSSRemote(t)
+	art := contribback.Artifact{Fingerprint: "retry-fp", Title: "t", Body: "b"}
+	if err := pushContribBranch(context.Background(), bare, "main", art); err != nil {
+		t.Fatalf("first pushContribBranch: %v", err)
+	}
+	if err := pushContribBranch(context.Background(), bare, "main", art); err != nil {
+		t.Fatalf("second pushContribBranch (retry): %v", err)
+	}
+	verifyPushedHeadBranch(t, bare, art.HeadBranch(), "contrib-back/retry-fp.json")
+}
+
+// TestPushContribBranch_FailsOnUnreachableRemote proves the failure path is
+// reported, not silently swallowed as success: an unreachable clone target
+// must return an error, reproducing (at the push step, where it now surfaces
+// LOUDLY and early) the exact "nothing was ever created" condition the
+// veracity finding described. This is the regression-proof half of REQUIRED
+// #2: had pushContribBranch never been wired into contributeArtifacts (or
+// been a no-op), this failure would instead surface downstream as gh's
+// "Head sha can't be blank" — this test pins the failure at the source.
+func TestPushContribBranch_FailsOnUnreachableRemote(t *testing.T) {
+	unreachable := filepath.Join(t.TempDir(), "does-not-exist.git")
+	art := contribback.Artifact{Fingerprint: "unreachable-fp", Title: "t", Body: "b"}
+	if err := pushContribBranch(context.Background(), unreachable, "main", art); err == nil {
+		t.Fatal("pushContribBranch: expected an error cloning a nonexistent remote, got nil")
+	}
+}
+
+// TestContributeArtifacts_PushFailure_NeverCallsOpenPR is the end-to-end proof
+// that contributeArtifacts (mallcoppro-a6c's production entry point) treats a
+// push failure as fatal for that artifact BEFORE ever reaching OpenPR or
+// persisting anything — i.e. the ordering fix (push, then Contribute) is
+// wired all the way through the CLI layer, not just provable at the
+// pushContribBranch unit level. Confirmed to bite: with the
+// `if perr := pushContribBranch(...); perr != nil { ... continue }` guard
+// removed (verified by hand during development), this test fails because
+// fakePROpener.calls becomes 1 and sum.Failed becomes 0 — the exact silent
+// regression this test exists to catch.
+func TestContributeArtifacts_PushFailure_NeverCallsOpenPR(t *testing.T) {
+	artifactBase := t.TempDir()
+	realRoutedArtifact(t, artifactBase, "fp-push-fails")
+
+	storeDir := t.TempDir()
+	st, err := openOrInitStore(storeDir)
+	if err != nil {
+		t.Fatalf("openOrInitStore: %v", err)
+	}
+
+	pr := &fakePROpener{}
+	sum, err := contributeArtifacts(context.Background(), contributeArgs{
+		artifactDir: artifactBase,
+		storeRepo:   storeDir,
+		ossRepo:     "mallcop-app/mallcop",
+		cloneSpec:   filepath.Join(t.TempDir(), "no-such-remote.git"), // unreachable -> push must fail
+	}, st, pr, silentLogger())
+	if err == nil {
+		t.Fatal("expected an error when the head-branch push fails")
+	}
+	if sum.Failed != 1 || sum.Opened != 0 {
+		t.Fatalf("summary = %+v, want {Failed:1 Opened:0}", sum)
+	}
+	if pr.calls != 0 {
+		t.Fatalf("fakePROpener.OpenPR called %d times, want 0 (a failed push must never reach OpenPR)", pr.calls)
+	}
+	recs, lerr := st.LoadContribBackRecords()
+	if lerr != nil {
+		t.Fatalf("LoadContribBackRecords: %v", lerr)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("got %d contribback records after a failed push, want 0", len(recs))
 	}
 }
 

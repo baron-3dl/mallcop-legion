@@ -422,6 +422,27 @@ type contributeArgs struct {
 	storeRepo   string
 	ossRepo     string
 	autonomy    autonomy.Dial
+
+	// cloneSpec overrides the git clone target pushContribBranch clones from
+	// and pushes the head branch to. Empty (the production default, left
+	// unset by every CLI-flag-driven call) resolves to
+	// "https://github.com/<ossRepo>.git" via resolveCloneSpec. Only tests set
+	// this — to a REAL local bare repo path, so pushContribBranch's git
+	// clone/checkout/commit/push sequence runs for real with no network.
+	cloneSpec string
+}
+
+// resolveCloneSpec returns the git clone target for this contribute-back
+// run's head-branch push: the explicit override if set (tests only), else
+// the shared OSS repo's github.com HTTPS URL, which `git clone`/`git push`
+// resolve through the operator's own `gh`-configured git credential helper
+// (`gh auth login` wires this up for github.com) — no token is ever read or
+// set into the child environment (design ruling R8).
+func (a contributeArgs) resolveCloneSpec() string {
+	if strings.TrimSpace(a.cloneSpec) != "" {
+		return a.cloneSpec
+	}
+	return "https://github.com/" + strings.TrimSpace(a.ossRepo) + ".git"
 }
 
 // contributeSummary tallies what one `mallcop selfext --contribute` run did, for
@@ -484,15 +505,21 @@ func runSelfextContribute(a contributeArgs) error {
 // contributeArtifacts is the testable core of `mallcop selfext --contribute`.
 // It discovers router-emitted contribute-back artifacts under
 // <artifact-dir>/oss (the exact directory selfext --propose's Router.ArtifactDir
-// writes into), loads each — DATA-lane oss-pr-*.json via contribback.LoadArtifact,
-// or a CODE-lane authored-detector promotion via contribback.LoadCodeArtifact,
-// disambiguated by sniffing the file's own top-level "kind" field — and calls
-// Opener.Contribute for every one the store has not already recorded a
-// ContribBackRecord for.
+// writes into), loads each via contribback.LoadArtifact, and — for every one
+// the store has not already recorded a ContribBackRecord for — FIRST creates,
+// commits to, and pushes the PR's head branch (pushContribBranch), THEN calls
+// Opener.Contribute (which calls PROpener.OpenPR and persists the record).
+//
+// The push-before-open ordering is load-bearing (mallcoppro-a6c veracity
+// rework): `gh pr create` fails outright ("Head sha can't be blank") if asked
+// to open a PR from a branch that does not exist or carries no commits ahead
+// of base, so the branch must be real BEFORE Contribute ever reaches OpenPR.
 //
 // pr is injected so a test can assert against a fake without shelling out to a
 // real `gh`; the only production caller (runSelfextContribute) always passes
-// contribback.NewGHOpener("").
+// contribback.NewGHOpener(""). The git push step itself is NOT faked by pr —
+// see pushContribBranch and contribPushRunner for how tests exercise it for
+// real against a local bare repo.
 func contributeArtifacts(ctx context.Context, a contributeArgs, st *store.Store, pr contribback.PROpener, log *slog.Logger) (contributeSummary, error) {
 	var sum contributeSummary
 
@@ -532,6 +559,14 @@ func contributeArtifacts(ctx context.Context, a contributeArgs, st *store.Store,
 		if seen[art.Fingerprint] {
 			sum.Skipped++
 			log.Info("selfext --contribute: already recorded, skipping", "path", path, "fingerprint", art.Fingerprint)
+			continue
+		}
+		// Create + commit + push the PR's head branch BEFORE opening the PR —
+		// `gh pr create` cannot open a PR from a branch that doesn't exist or
+		// has no commits ahead of base (mallcoppro-a6c veracity rework).
+		if perr := pushContribBranch(ctx, a.resolveCloneSpec(), opener.Config.ResolvedBaseBranch(), art); perr != nil {
+			sum.Failed++
+			errs = append(errs, fmt.Errorf("%s: %w", path, perr))
 			continue
 		}
 		out, cerr := opener.Contribute(ctx, a.autonomy, art)
@@ -578,26 +613,27 @@ func discoverContribArtifacts(artifactDir string) ([]string, error) {
 	return paths, nil
 }
 
-// loadContribArtifact loads path as a contribback.Artifact, dispatching to the
-// DATA lane (contribback.LoadArtifact) or the CODE lane
-// (contribback.LoadCodeArtifact) by sniffing the file's own top-level "kind"
-// field: LoadCodeArtifact's codeArtifactFile has kind=="authored_detector" at
-// the top level, while LoadArtifact's ossArtifactFile only nests a (different)
-// "kind" under "proposal" — the two shapes are unambiguous from this one field.
+// loadContribArtifact loads path as a contribback.Artifact via
+// contribback.LoadArtifact — the DATA lane (mapping/tuning widen), the only
+// lane any producer in this repo ever emits (selfext/router.emitOSSArtifact).
+//
+// contribback.LoadCodeArtifact (the CODE lane: promoting a merged authored
+// detector into OSS core) deliberately has NO caller here. It was wired in an
+// earlier revision of this function (sniffing a top-level "kind" ==
+// "authored_detector" field) despite there being no producer anywhere in the
+// repo for that shape — grepping for "authored_detector"/"code-pr-" only ever
+// matched contribback's own decode logic and its unit test, never anything
+// that writes one. A dispatch branch a real artifact can never reach is
+// speculative dead code on a security-sensitive path (this repo's hard
+// invariant: no code-first component ships a branch nothing can drive), so it
+// is removed here rather than kept "in case a producer shows up later" — building
+// that producer (an authored-detector promotion pipeline: reading the
+// customer's own thin-embed repo, verifying the merged gate, staging the
+// files) is a real, separately-scoped feature, not something to guess the
+// shape of speculatively. contribback.LoadCodeArtifact/artifact_code.go
+// themselves are left in place (still unit-tested, decode logic that a real
+// producer could wire up later) — only this dead caller branch is gone.
 func loadContribArtifact(path string) (contribback.Artifact, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return contribback.Artifact{}, fmt.Errorf("read %s: %w", path, err)
-	}
-	var probe struct {
-		Kind string `json:"kind"`
-	}
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return contribback.Artifact{}, fmt.Errorf("sniff kind of %s: %w", path, err)
-	}
-	if probe.Kind == "authored_detector" {
-		return contribback.LoadCodeArtifact(path)
-	}
 	return contribback.LoadArtifact(path)
 }
 
