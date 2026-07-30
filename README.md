@@ -130,6 +130,9 @@ mallcop status --store store
 Store:      store
 Findings:   2 recorded
 Decisions:  2 recorded
+Cases:      2 open (0 recurring)
+  injection-probe  entity=(no entity)  count=1  cadence=no established cadence  status=open
+  new-actor  entity=(no entity)  count=1  cadence=no established cadence  status=open
 Coverage gaps:   0 (0 reported miss)
 State:      idle
 ```
