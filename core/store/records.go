@@ -347,3 +347,70 @@ func (s *Store) ResolveGrantMiss(ref string) (GrantOutcome, error) {
 	}
 	return r, nil
 }
+
+// ContribBack lifecycle states (mallcoppro-003). Exported so no caller
+// hand-types the strings.
+const (
+	// ContribBackOpen is a contribute-back PR's state from the moment it was
+	// opened until a later scan observes it merged or closed.
+	ContribBackOpen = "open"
+	// ContribBackMerged means the OSS maintainers merged the contribution.
+	ContribBackMerged = "merged"
+	// ContribBackClosed means the PR was closed WITHOUT merging.
+	ContribBackClosed = "closed"
+)
+
+// ContribBackRecord is one entry on the contribback stream (mallcoppro-003,
+// Design §Gap E1 rescoped 2026-07-30: POLL, not webhook): a durable row
+// tracking one contribute-back pull request's lifecycle, from the moment
+// selfext/contribback opens it (under the operator's own `gh` identity
+// against the shared OSS repo, R8) through a later scan observing it merged
+// or closed via GitHub's public REST API.
+//
+// A state change is ALWAYS a FRESH appended row — never a mutation of an
+// earlier one — same append-only discipline KindGrants/KindScans already use.
+// A caller replaying this stream must fold it down to the LATEST row per
+// PRURL to get each PR's current state (see selfext/contribback.PollOutcomes);
+// LoadContribBackRecords itself does no folding, it just replays the raw
+// history in commit order, exactly like LoadGrantOutcomes/LoadScans.
+type ContribBackRecord struct {
+	// Fingerprint is the originating gap's fingerprint (mirrors
+	// contribback.Artifact.Fingerprint) — provenance only, never used to
+	// look the PR up; the PR is always identified by PRURL.
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// PRURL is the opened pull request's URL, exactly as
+	// contribback.PRResult.URL returned it. This is the ONLY identifier the
+	// poll ever reads a PR's live state through — never re-derived from
+	// config, never accepted from anywhere else (mallcoppro-003: a record's
+	// URL can only have been written by this operator's own OpenPR call, so
+	// there is no path for an attacker-supplied URL to cause a write here).
+	PRURL string `json:"pr_url"`
+	// State is one of ContribBackOpen/ContribBackMerged/ContribBackClosed.
+	State string `json:"state"`
+	// OpenedAt is when the PR was first opened. Preserved verbatim across
+	// every later state-change row for the same PRURL.
+	OpenedAt time.Time `json:"opened_at"`
+	// UpdatedAt is when THIS row's state was observed/recorded.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// LoadContribBackRecords replays the contribback stream into typed
+// ContribBackRecord records, oldest first — mirrors LoadGrantOutcomes'/
+// LoadScans' contract exactly. A store that predates KindContribBack, or has
+// never had a contribute-back PR opened, returns an empty slice, not an
+// error.
+func (s *Store) LoadContribBackRecords() ([]ContribBackRecord, error) {
+	raws, err := s.Load(KindContribBack)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ContribBackRecord, 0, len(raws))
+	for i, raw := range raws {
+		var r ContribBackRecord
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return nil, fmt.Errorf("store: decode contribback record %d: %w", i, err)
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}

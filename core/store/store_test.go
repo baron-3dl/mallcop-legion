@@ -901,12 +901,12 @@ func TestAppendRejectsUnknownKind(t *testing.T) {
 	}
 }
 
-// TestKindsCoverage guards the closed set: Kinds() returns exactly the nine
+// TestKindsCoverage guards the closed set: Kinds() returns exactly the ten
 // streams and every one is valid.
 func TestKindsCoverage(t *testing.T) {
 	ks := Kinds()
-	if len(ks) != 9 {
-		t.Fatalf("want 9 kinds, got %d", len(ks))
+	if len(ks) != 10 {
+		t.Fatalf("want 10 kinds, got %d", len(ks))
 	}
 	for _, k := range ks {
 		if !k.valid() {

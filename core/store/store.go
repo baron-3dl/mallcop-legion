@@ -1,6 +1,6 @@
-// Package store is the git-repo source of truth for mallcop's nine append-only
+// Package store is the git-repo source of truth for mallcop's ten append-only
 // streams: events, findings, resolutions, baseline, conversation, directives,
-// scans, selfext_dispatches, and grants.
+// scans, selfext_dispatches, grants, and contribback.
 //
 // ONE-BRAIN keystone. Every other core subsystem (the agent loop, the scan
 // pipeline) CONSUMES this package; this package consumes nothing from them. The
@@ -45,7 +45,7 @@ import (
 	"time"
 )
 
-// Kind identifies one of the nine append-only streams. The string value is
+// Kind identifies one of the ten append-only streams. The string value is
 // also the on-disk basename (Kind+".jsonl").
 type Kind string
 
@@ -105,6 +105,25 @@ const (
 	// PR machinery does not apply here). Purely additive — an older binary
 	// that has never heard of KindGrants reads every other stream unaffected.
 	KindGrants Kind = "grants"
+	// KindContribBack is the OSS contribute-back PR-outcome stream
+	// (mallcoppro-003, Design §Gap E1 — RESCOPED 2026-07-30 from an inbound
+	// webhook to a credential-free outbound POLL): one row per contribute-back
+	// pull request opened against the shared OSS repo. The PR is opened by
+	// selfext/contribback under the OPERATOR's own `gh` identity against the
+	// SHARED repo (design ruling R8 — mallcop holds no standing write
+	// credential there), so the customer's own GHA run never receives a
+	// native event for it merging or closing days later. Instead, a later
+	// scan reads this stream and, for each row still State=="open", asks
+	// GitHub's PUBLIC REST API (unauthenticated — no secret, no inbound
+	// endpoint) whether it merged or closed; see
+	// selfext/contribback.PollOutcomes. A state CHANGE is a FRESH appended
+	// row — same append-only discipline KindGrants/KindScans already use — but
+	// a poll that observes no change (still open, or the read failed) appends
+	// nothing: no fabricated outcome, no duplicate row, no re-scan churn
+	// (mirrors the mallcoppro-42e idempotent-record discipline). Purely
+	// additive — an older binary that has never heard of KindContribBack
+	// reads every other stream unaffected.
+	KindContribBack Kind = "contribback"
 )
 
 // kinds is the closed set of valid streams. Append/Load reject anything else so
@@ -119,15 +138,16 @@ var kinds = map[Kind]bool{
 	KindScans:             true,
 	KindSelfextDispatches: true,
 	KindGrants:            true,
+	KindContribBack:       true,
 }
 
-// Kinds returns the nine stream kinds in deterministic order. Useful for
+// Kinds returns the ten stream kinds in deterministic order. Useful for
 // callers that want to enumerate or snapshot every stream.
 func Kinds() []Kind {
 	return []Kind{
 		KindEvents, KindFindings, KindResolutions,
 		KindBaseline, KindConversation, KindDirectives, KindScans,
-		KindSelfextDispatches, KindGrants,
+		KindSelfextDispatches, KindGrants, KindContribBack,
 	}
 }
 
