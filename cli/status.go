@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/mallcop-app/mallcop/core/collect"
 	"github.com/mallcop-app/mallcop/core/store"
@@ -26,6 +27,8 @@ import (
 func runStatus(args []string) error {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	storePath := fs.String("store", "", "Path to the git-repo store to report on (required)")
+	gate := fs.Bool("gate", false, "Exit nonzero (the errFindings sentinel) when the whole-pipeline liveness watchdog fails: the newest recorded scan is older than --max-age or did not complete successfully. Design §5 primitive 1 — runs on the customer's own cron; mallcop holds no standing credential.")
+	maxAge := fs.Duration("max-age", 48*time.Hour, "Under --gate, how old the newest KindScans record may be before the liveness watchdog fails (e.g. 48h). Ignored without --gate.")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -39,6 +42,13 @@ func runStatus(args []string) error {
 
 	if _, err := os.Stat(filepath.Join(*storePath, ".git")); err != nil {
 		fmt.Printf("State:      uninitialized (no scan has written here yet)\n")
+		if *gate {
+			// No store at all means no evidence the pipeline has ever run —
+			// exactly the darkness the liveness watchdog (design §5) exists to
+			// surface as a first-class dated failure, not silence.
+			fmt.Printf("Liveness:   FAIL (no scan history recorded — the pipeline has never completed a run)\n")
+			return errFindings
+		}
 		return nil
 	}
 
@@ -84,6 +94,81 @@ func runStatus(args []string) error {
 	if recallReds > 0 {
 		fmt.Printf("Recall reds:     %d (missed known attacks — fail a scheduled scan under 'mallcop collect --gate')\n", recallReds)
 	}
+
+	// Whole-pipeline liveness watchdog (design §5 primitive 1): under --gate,
+	// fail loud when the pipeline has stopped running or keeps failing — the
+	// exact "6-day silent failure" this primitive turns into a first-class
+	// dated failing job on the customer's own cron (cli/deployrepo.go's
+	// scanWorkflowTemplate `if: always()` step).
+	if *gate {
+		scans, err := st.LoadScans()
+		if err != nil {
+			return fmt.Errorf("status: load scans: %w", err)
+		}
+		result := evaluateLiveness(scans, *maxAge, time.Now())
+		if !result.Healthy {
+			fmt.Printf("Liveness:   FAIL (%s)\n", result.Reason)
+			return errFindings
+		}
+		fmt.Printf("Liveness:   OK\n")
+	}
+
 	fmt.Printf("State:      idle\n")
 	return nil
+}
+
+// livenessResult is the whole-pipeline liveness watchdog's pure decision
+// (design §5 primitive 1), separated from I/O so it can be exercised
+// directly by tests without a CLI invocation.
+type livenessResult struct {
+	Healthy bool
+	// Reason is a human-readable explanation, populated only when !Healthy.
+	Reason string
+}
+
+// evaluateLiveness applies the whole-pipeline liveness watchdog: the newest
+// store.ScanRecord must be both RECENT (its FinishedAt within maxAge of now)
+// and HEALTHY (Success, or a legacy pre-mallcoppro-24e record that predates
+// the Success/FailedStage/Error fields entirely). A store with no scan
+// history at all is unhealthy — the watchdog has no evidence the pipeline
+// has ever run, which is exactly the darkness this primitive exists to
+// surface as a dated failure instead of quiet confidence.
+//
+// Legacy-record caveat (mallcoppro-24e / mallcoppro-3c7): a ScanRecord
+// written by a binary that predates the Success/FailedStage/Error fields
+// decodes as Success=false via Go's JSON zero-value — indistinguishable at
+// the field level from a genuine failure with an empty stage/error. This is
+// disambiguated by treating FailedStage=="" AND Error=="" as
+// legacy-completed (NOT a failure): every record written before these
+// fields existed represents a run that reached the tail recordScan call — a
+// COMPLETED scan (see store.ScanRecord's doc comment). A genuine failure on
+// a post-24e binary always populates FailedStage (core/pipeline.recordScan
+// sets it unconditionally on any non-nil runErr), so the empty/empty
+// combination cannot occur on a real failure once 24e is in the binary that
+// wrote the record.
+func evaluateLiveness(scans []store.ScanRecord, maxAge time.Duration, now time.Time) livenessResult {
+	if len(scans) == 0 {
+		return livenessResult{Healthy: false, Reason: "no scan history recorded — the pipeline has never completed a run"}
+	}
+
+	// LoadScans replays oldest-first; the newest record is the last element.
+	newest := scans[len(scans)-1]
+
+	legacyCompleted := !newest.Success && newest.FailedStage == "" && newest.Error == ""
+	if !newest.Success && !legacyCompleted {
+		return livenessResult{
+			Healthy: false,
+			Reason: fmt.Sprintf("newest scan (started %s) failed at stage %q: %s",
+				newest.StartedAt.UTC().Format(time.RFC3339), newest.FailedStage, newest.Error),
+		}
+	}
+
+	if age := now.Sub(newest.FinishedAt); age > maxAge {
+		return livenessResult{
+			Healthy: false,
+			Reason:  fmt.Sprintf("newest scan finished %s ago, exceeding --max-age %s", age.Round(time.Second), maxAge),
+		}
+	}
+
+	return livenessResult{Healthy: true}
 }

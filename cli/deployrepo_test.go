@@ -165,6 +165,73 @@ func TestScanWorkflowPublishesGapsAndGatesOnMiss(t *testing.T) {
 	}
 }
 
+// TestScanWorkflowHasLivenessWatchdog is the mallcoppro-1e0 DONE CONDITION
+// check: the rendered scan.yml carries an `if: always()` step invoking
+// `mallcop status --gate --max-age 48h` (design §5 primitive 1 — the
+// whole-pipeline liveness watchdog, the customer's own cron as dead-man's
+// switch). always() is load-bearing: without it, GitHub Actions skips this
+// step the moment an earlier step (e.g. 'Run mallcop scan') has already
+// failed — exactly the case this watchdog exists to still catch. Also
+// proves the step parses as a well-formed YAML step (not just a substring
+// match) and that it needs no MALLCOP_API_KEY (it only reads the local
+// store checkout — no new standing credential).
+func TestScanWorkflowHasLivenessWatchdog(t *testing.T) {
+	w := renderScanWorkflow("v0.7.0")
+
+	if !strings.Contains(w, "mallcop status --gate --store ./store --max-age 48h") {
+		t.Fatalf("scan.yml does not run the whole-pipeline liveness watchdog ('mallcop status --gate --max-age 48h'):\n%s", w)
+	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(w), &doc); err != nil {
+		t.Fatalf("scan.yml does not parse as YAML: %v\n%s", err, w)
+	}
+	jobs, _ := doc["jobs"].(map[string]any)
+	scanJob, _ := jobs["scan"].(map[string]any)
+	steps, _ := scanJob["steps"].([]any)
+	if len(steps) == 0 {
+		t.Fatalf("scan.yml's scan job has no steps:\n%s", w)
+	}
+	var watchdog map[string]any
+	for _, s := range steps {
+		stepMap, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if run, _ := stepMap["run"].(string); strings.Contains(run, "mallcop status --gate") {
+			watchdog = stepMap
+		}
+	}
+	if watchdog == nil {
+		t.Fatalf("scan.yml has no parsed step running 'mallcop status --gate':\n%s", w)
+	}
+	// YAML's "always()" reads back as the literal string "always()" under
+	// yaml.v3's default any-decoding (it is a GitHub Actions expression, not
+	// a YAML boolean literal).
+	ifCond, _ := watchdog["if"].(string)
+	if ifCond != "always()" {
+		t.Fatalf("the liveness watchdog step must be if: always() (so it still runs after an earlier step already failed the job), got %q:\n%s", ifCond, w)
+	}
+	if _, has := watchdog["env"]; has {
+		t.Fatalf("the liveness watchdog step needs no env / credential (it only reads the local store checkout), got: %+v", watchdog["env"])
+	}
+
+	// Migrate force-refreshes generated workflows, so the watchdog must be
+	// present in the refresh path too (existing repos upgrade on 'mallcop
+	// migrate'), matching the sibling recall-red gate's own coverage above.
+	dir := t.TempDir()
+	if err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
+		t.Fatalf("refreshDeployWorkflows: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, ".github", "workflows", "scan.yml"))
+	if err != nil {
+		t.Fatalf("read refreshed scan.yml: %v", err)
+	}
+	if !strings.Contains(string(raw), "mallcop status --gate --store ./store --max-age 48h") {
+		t.Fatalf("refreshed scan.yml (migrate path) is missing the liveness watchdog:\n%s", raw)
+	}
+}
+
 // TestScaffoldDeployAssetsWritesWellFormedInvestigateWorkflow is the
 // mallcoppro-067 DONE CONDITION check for the GHA scaffold half of the item:
 // mallcop-investigate.yml must PARSE as YAML (not just contain the right
