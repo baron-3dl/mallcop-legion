@@ -29,6 +29,8 @@ fi
 state=$(cat "$DOCTOR_STATE_FILE" 2>/dev/null || echo deficient)
 if [ "$state" = "healthy" ]; then
   printf '%s\n' '{"diagnosis":{"known":true,"summary":"credentials valid","confidence":0.95}}'
+elif [ "$state" = "still_deficient" ]; then
+  printf '%s\n' '{"diagnosis":{"known":false,"summary":"still missing read:audit_log scope after applied fix","confidence":0.4}}'
 else
   printf '%s\n' '{"diagnosis":{"known":true,"summary":"missing read:audit_log scope","confidence":0.9},"remediation":[{"command":"az role assignment create --assignee OID --role Reader --scope SCOPE","blast_radius":"Lets OID read metadata of every resource in the group.","known_issues":["PROPOSED BUT UNVERIFIED: mallcop CI eval has never proven this against a live account."],"dry_run":"az role assignment list --assignee OID --scope SCOPE -o table"}]}'
 fi
@@ -363,6 +365,126 @@ func TestFindDiagnosable_UnknownID_NamesConfiguredConnectors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "aws-prod") {
 		t.Errorf("error = %v, want it to name aws-prod", err)
+	}
+}
+
+// TestRunDoctor_HumanReadableDiagnose_RendersRankedRemediation is the actual
+// proof of this item's literal first acceptance clause — "`mallcop doctor
+// <connector>` PRINTS the diagnosis plus ranked grants with blast-radius /
+// dry-run / staleness" — against the HUMAN-READABLE renderer
+// (printDiagnosisReport, cli/doctor.go's ranked-remediation loop), not the
+// --json payload. TestRunDoctor_DiagnoseThenConfirm_RealStoreGitPath above
+// only asserts the JSON shape; this test is the one that would catch a
+// deleted KnownIssues loop or a deleted DryRun line in the human renderer.
+func TestRunDoctor_HumanReadableDiagnose_RendersRankedRemediation(t *testing.T) {
+	dir := t.TempDir()
+	stateFile := filepath.Join(dir, "state")
+	writeFile(t, stateFile, "deficient")
+	t.Setenv("DOCTOR_STATE_FILE", stateFile)
+
+	bin := writeFakeSibling(t, dir, "doctor-sibling", doctorFakeSibling)
+	storePath := filepath.Join(dir, "store")
+	cfgPath := filepath.Join(dir, "mallcop.yaml")
+	writeDoctorConfig(t, cfgPath, storePath, "azure-prod", bin)
+
+	var err error
+	out := captureStdout(t, func() {
+		err = runDoctor([]string{"azure-prod", "--config", cfgPath})
+	})
+	if !isFindingsError(err) {
+		t.Fatalf("runDoctor (human-readable) over a deficient connector: err = %v, want the errFindings sentinel", err)
+	}
+
+	const wantCommand = "az role assignment create --assignee OID --role Reader --scope SCOPE"
+	if !strings.Contains(out, wantCommand) {
+		t.Errorf("human-readable output missing the ranked remediation command %q\noutput:\n%s", wantCommand, out)
+	}
+	if !strings.Contains(out, "Blast radius:") || !strings.Contains(out, "Lets OID read metadata of every resource in the group.") {
+		t.Errorf("human-readable output missing the Blast radius line\noutput:\n%s", out)
+	}
+	const wantDryRun = "az role assignment list --assignee OID --scope SCOPE -o table"
+	if !strings.Contains(out, "Dry run:") || !strings.Contains(out, wantDryRun) {
+		t.Errorf("human-readable output missing the Dry run preview %q\noutput:\n%s", wantDryRun, out)
+	}
+	if !strings.Contains(out, "Note:") || !strings.Contains(out, "PROPOSED BUT UNVERIFIED") {
+		t.Errorf("human-readable output missing the staleness KnownIssues banner\noutput:\n%s", out)
+	}
+}
+
+// TestRunDoctor_Confirm_StillDeficient_HumanReadableAndFreshMissRow covers
+// printConfirmResult's STILL DEFICIENT branch (human-readable renderer) and
+// the NEW-A19 fresh-miss row it records: an operator applies a fix that does
+// NOT resolve the deficiency (the fixture's state file is left "deficient"),
+// re-probes via --confirm, and both the printed "STILL DEFICIENT" line and a
+// SECOND unresolved grants row (not a resolution referencing the original)
+// must exist through the real git-backed store.
+func TestRunDoctor_Confirm_StillDeficient_HumanReadableAndFreshMissRow(t *testing.T) {
+	dir := t.TempDir()
+	stateFile := filepath.Join(dir, "state")
+	writeFile(t, stateFile, "deficient")
+	t.Setenv("DOCTOR_STATE_FILE", stateFile)
+
+	bin := writeFakeSibling(t, dir, "doctor-sibling", doctorFakeSibling)
+	storePath := filepath.Join(dir, "store")
+	cfgPath := filepath.Join(dir, "mallcop.yaml")
+	writeDoctorConfig(t, cfgPath, storePath, "azure-prod", bin)
+
+	var jsonErr error
+	jsonOut := captureStdout(t, func() {
+		jsonErr = runDoctor([]string{"azure-prod", "--config", cfgPath, "--json"})
+	})
+	if !isFindingsError(jsonErr) {
+		t.Fatalf("runDoctor initial diagnose: err = %v, want errFindings", jsonErr)
+	}
+	var report doctorReport
+	if jerr := json.Unmarshal([]byte(jsonOut), &report); jerr != nil {
+		t.Fatalf("--json output did not parse: %v\noutput: %s", jerr, jsonOut)
+	}
+	grantRef := report.GrantRef
+	if grantRef == "" {
+		t.Fatal("report.GrantRef is empty")
+	}
+
+	// The operator's applied fix did NOT work — flip the fixture to the
+	// "still_deficient" state (Known:false: the re-probe can no longer even
+	// classify it, the kernel's own NEW-A19 fresh-miss case) and re-probe via
+	// --confirm, human-readable (no --json).
+	writeFile(t, stateFile, "still_deficient")
+
+	var confirmErr error
+	confirmOut := captureStdout(t, func() {
+		confirmErr = runDoctor([]string{"azure-prod", "--config", cfgPath, "--confirm", grantRef})
+	})
+	if !isFindingsError(confirmErr) {
+		t.Fatalf("runDoctor --confirm still-deficient: err = %v, want errFindings", confirmErr)
+	}
+	if !strings.Contains(confirmOut, "STILL DEFICIENT") {
+		t.Errorf("human-readable --confirm output missing STILL DEFICIENT\noutput:\n%s", confirmOut)
+	}
+	if !strings.Contains(confirmOut, "still missing read:audit_log scope after applied fix") {
+		t.Errorf("human-readable --confirm output missing the re-probed diagnosis summary\noutput:\n%s", confirmOut)
+	}
+	if !strings.Contains(confirmOut, "fresh miss") {
+		t.Errorf("human-readable --confirm output missing the fresh-miss framing of its own grant ref\noutput:\n%s", confirmOut)
+	}
+
+	st, serr := store.Open(storePath)
+	if serr != nil {
+		t.Fatalf("store.Open: %v", serr)
+	}
+	grants, gerr := st.LoadGrantOutcomes()
+	if gerr != nil {
+		t.Fatalf("LoadGrantOutcomes: %v", gerr)
+	}
+	if len(grants) != 2 {
+		t.Fatalf("LoadGrantOutcomes after a still-deficient confirm returned %d records, want 2 (original miss + NEW-A19 fresh miss)", len(grants))
+	}
+	freshMiss := grants[1]
+	if freshMiss.Resolved {
+		t.Fatalf("freshMiss = %+v, want Resolved=false (a fresh miss, not a resolution)", freshMiss)
+	}
+	if freshMiss.Connector != "azure-prod" || freshMiss.FailureClass != "still missing read:audit_log scope after applied fix" {
+		t.Errorf("freshMiss = %+v, want connector=azure-prod failure_class=%q", freshMiss, "still missing read:audit_log scope after applied fix")
 	}
 }
 
