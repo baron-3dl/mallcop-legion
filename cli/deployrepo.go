@@ -680,6 +680,51 @@ jobs:
                    commit --quiet -m "mallcop collect: publish coverage gaps"
           fi
 
+      - name: Publish doctor reports (self-heal loop)
+        # DOCTOR-PUBLISH (mallcoppro-62c): the MISSING LINK between
+        # mallcoppro-529 (the 'mallcop doctor <connector> --json' CLI, ONE
+        # DiagnosisReport object per invocation -- that per-connector
+        # contract is UNCHANGED here) and mallcoppro-99b0 (the console that
+        # reads doctor.json). 'mallcop doctor --all --json' walks every
+        # configured connector that supports self-diagnosis in ONE process
+        # and prints the results as a single JSON array -- the same
+        # in-process aggregation shape 'mallcop collect --json' already uses
+        # for gaps.json above, never a bash loop re-invoking the
+        # single-connector form per connector.
+        #
+        # A connector with no doctor support is silently absent from the
+        # array (a scan must not die because one connector lacks a doctor —
+        # there is nothing to fail on), and 'mallcop doctor --all' itself
+        # never fabricates a placeholder/empty-but-healthy entry for a
+        # connector whose live probe errors -- it omits that connector and
+        # reports the failure to this step's own log instead (see
+        # runDoctorAll's doc in cli/doctor.go). The set +e / set -e pair
+        # below neutralizes 'mallcop doctor --all's own exit code (1 when
+        # anything is deficient, 2 on a hard failure to even start -- e.g. no
+        # connectors configured) so it NEVER fails this job: publish what you
+        # have. jq then validates the captured output actually IS a JSON
+        # array before overwriting store/doctor.json -- a hard failure
+        # (empty stdout) leaves whatever doctor.json a PRIOR run already
+        # published untouched, rather than clobbering real history with an
+        # empty snapshot.
+        run: |
+          set -euo pipefail
+          if [ -d store/.git ]; then
+            set +e
+            mallcop doctor --all --json --store ./store > /tmp/mallcop-doctor.json
+            set -e
+            if [ -s /tmp/mallcop-doctor.json ] && jq -e 'type == "array"' /tmp/mallcop-doctor.json > /dev/null 2>&1; then
+              cp /tmp/mallcop-doctor.json store/doctor.json
+              git -C store add doctor.json
+              git -C store -c user.name=mallcop-doctor -c user.email=doctor@mallcop.app \
+                diff --cached --quiet \
+                || git -C store -c user.name=mallcop-doctor -c user.email=doctor@mallcop.app \
+                     commit --quiet -m "mallcop doctor: publish diagnosis reports"
+            else
+              echo "mallcop doctor --all produced no usable JSON this run -- leaving store/doctor.json unchanged (never publish an empty/fabricated snapshot)" >&2
+            fi
+          fi
+
       - name: Push findings store
         # 'mallcop scan' (core/store) already durably COMMITS every stream
         # write as it runs -- this step only PUSHES whatever store/'s current
@@ -689,7 +734,9 @@ jobs:
         # which a live proof run of this item found can be left in a
         # deletion-staged (but uncommitted) state after 'mallcop scan' exits
         # -- see mallcoppro-f3b's reported finding. Pushing HEAD as-is only
-        # ever ships what mallcop scan itself already committed.
+        # ever ships what mallcop scan itself already committed. The doctor
+        # and gaps publish steps above are the ONLY exceptions permitted to
+        # stage+commit inside store/, and each stages only its own single file.
         run: |
           set -euo pipefail
           if [ -d store/.git ]; then

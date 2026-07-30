@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -88,6 +90,238 @@ learning:
   dir: detectors
   autonomy: non
 `)
+}
+
+// writeDoctorConfigMulti writes a mallcop.yaml naming several connectors: one
+// kind:file connector (id "local-events", the NON-diagnosable kind — proves
+// "a connector with no doctor support is skipped without failing the job")
+// plus one kind:cloud connector per (id, binaryPath) pair in clouds.
+func writeDoctorConfigMulti(t *testing.T, cfgPath, storePath string, clouds map[string]string) {
+	t.Helper()
+	body := `version: 1
+inference:
+  mode: offline
+  endpoint: ""
+  key_env: MALLCOP_API_KEY
+  model: mallcop-default
+store:
+  path: ` + storePath + `
+  baseline: ""
+connectors:
+  - kind: file
+    id: local-events
+    path: ` + filepath.Join(filepath.Dir(cfgPath), "events.jsonl") + `
+`
+	for id, bin := range clouds {
+		body += `  - kind: cloud
+    id: ` + id + `
+    binary: ` + bin + `
+`
+	}
+	body += `detectors:
+  builtin:
+    enabled: true
+    disable: []
+learning:
+  dir: detectors
+  autonomy: non
+`
+	writeFile(t, cfgPath, body)
+}
+
+// TestRunDoctorAll_MixedConnectors_RealConfigRealSubprocess is the mallcoppro-62c
+// headline acceptance proof for the aggregate form: against a REAL mallcop.yaml
+// naming a non-diagnosable kind:file connector plus two REAL kind:cloud
+// connectors (connect/exec.ExecConnector forking the real doctorFakeSibling /
+// doctorHealthySibling scripts as subprocesses — the exact production shape
+// buildConnectors() produces, not a hand-rolled Diagnosable stand-in),
+// `mallcop doctor --all --json`:
+//
+//  1. emits an array with exactly ONE entry per DIAGNOSABLE connector (2, not
+//     3 — the file connector never appears: "skipped without failing the job");
+//  2. the array carries the real deficient diagnosis (with ranked remediation)
+//     for one connector and the real healthy diagnosis for the other,
+//     produced by two independently-invoked live subprocesses;
+//  3. exits with the errFindings sentinel because at least one connector is
+//     deficient (mirrors the single-connector form's own convention).
+func TestRunDoctorAll_MixedConnectors_RealConfigRealSubprocess(t *testing.T) {
+	dir := t.TempDir()
+	stateFile := filepath.Join(dir, "state")
+	writeFile(t, stateFile, "deficient")
+	t.Setenv("DOCTOR_STATE_FILE", stateFile)
+
+	deficientBin := writeFakeSibling(t, dir, "deficient-sibling", doctorFakeSibling)
+	healthyBin := writeFakeSibling(t, dir, "healthy-sibling", doctorHealthySibling)
+	storePath := filepath.Join(dir, "store")
+	cfgPath := filepath.Join(dir, "mallcop.yaml")
+	writeDoctorConfigMulti(t, cfgPath, storePath, map[string]string{
+		"azure-prod": deficientBin,
+		"gcp-prod":   healthyBin,
+	})
+
+	var err error
+	out := captureStdout(t, func() {
+		err = runDoctor([]string{"--all", "--config", cfgPath, "--json"})
+	})
+	if !isFindingsError(err) {
+		t.Fatalf("runDoctor --all with one deficient connector: err = %v, want the errFindings sentinel", err)
+	}
+
+	var reports []connect.DiagnosisReport
+	if jerr := json.Unmarshal([]byte(out), &reports); jerr != nil {
+		t.Fatalf("--all --json output did not parse as []DiagnosisReport: %v\noutput: %s", jerr, out)
+	}
+	if len(reports) != 2 {
+		t.Fatalf("got %d reports, want exactly 2 (one per DIAGNOSABLE connector — the kind:file connector must be absent, not fabricated): %+v", len(reports), reports)
+	}
+
+	byID := make(map[string]connect.DiagnosisReport, len(reports))
+	for _, r := range reports {
+		byID[r.ConnectorID] = r
+	}
+	if _, ok := byID["local-events"]; ok {
+		t.Fatalf("the non-diagnosable kind:file connector must be absent from doctor.json, not present with a fabricated entry: %+v", reports)
+	}
+	deficient, ok := byID["azure-prod"]
+	if !ok {
+		t.Fatalf("azure-prod missing from reports: %+v", reports)
+	}
+	if !deficient.Diagnosis.Known || deficient.Diagnosis.Summary != "missing read:audit_log scope" || len(deficient.Remediation) != 1 {
+		t.Fatalf("azure-prod report = %+v, want the classified deficiency with 1 ranked remediation from the fixture", deficient)
+	}
+	healthy, ok := byID["gcp-prod"]
+	if !ok {
+		t.Fatalf("gcp-prod missing from reports: %+v", reports)
+	}
+	if !healthy.Diagnosis.Known || len(healthy.Remediation) != 0 {
+		t.Fatalf("gcp-prod report = %+v, want a healthy classified diagnosis with no remediation", healthy)
+	}
+
+	// --all must NEVER record to the grants stream (unlike the single-connector
+	// form): doctor.json is an observability snapshot, not the interactive
+	// remediation loop, and recording every scheduled run would flood the
+	// grants stream with steady-state noise. The strongest proof of that is
+	// that --all never even opens/inits the store (unlike runDoctor's plain
+	// form, which calls openOrInitStore before anything else) -- so
+	// storePath must not exist as a git repo at all after this run.
+	if _, statErr := os.Stat(filepath.Join(storePath, ".git")); statErr == nil {
+		t.Fatalf("storePath %q was initialized as a git repo -- 'doctor --all' must not touch the store at all, let alone write to the grants stream", storePath)
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("unexpected error stat'ing store path: %v", statErr)
+	}
+}
+
+// TestRunDoctorAll_AllHealthy_ExitZero proves the all-healthy path exits 0
+// (no errFindings) and still emits a well-formed JSON array, not merely the
+// "at least one deficient" path above.
+func TestRunDoctorAll_AllHealthy_ExitZero(t *testing.T) {
+	dir := t.TempDir()
+	bin := writeFakeSibling(t, dir, "healthy-sibling", doctorHealthySibling)
+	storePath := filepath.Join(dir, "store")
+	cfgPath := filepath.Join(dir, "mallcop.yaml")
+	writeDoctorConfigMulti(t, cfgPath, storePath, map[string]string{"gcp-prod": bin})
+
+	var err error
+	out := captureStdout(t, func() {
+		err = runDoctor([]string{"--all", "--config", cfgPath, "--json"})
+	})
+	if err != nil {
+		t.Fatalf("runDoctor --all, all healthy: err = %v, want nil", err)
+	}
+	var reports []connect.DiagnosisReport
+	if jerr := json.Unmarshal([]byte(out), &reports); jerr != nil {
+		t.Fatalf("--all --json output did not parse: %v\noutput: %s", jerr, out)
+	}
+	if len(reports) != 1 || reports[0].ConnectorID != "gcp-prod" {
+		t.Fatalf("reports = %+v, want exactly 1 entry for gcp-prod", reports)
+	}
+}
+
+// TestRunDoctorAll_NoConnectorsSupportDiagnosis_EmptyArrayNotFailure proves
+// the degenerate case — a config with only non-diagnosable connectors —
+// still emits a well-formed EMPTY array (never null, never a hard failure):
+// "a scan must not die because one connector lacks a doctor" generalizes to
+// "...or because NONE of them do."
+func TestRunDoctorAll_NoConnectorsSupportDiagnosis_EmptyArrayNotFailure(t *testing.T) {
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "store")
+	cfgPath := filepath.Join(dir, "mallcop.yaml")
+	writeDoctorConfigMulti(t, cfgPath, storePath, nil)
+
+	var err error
+	out := captureStdout(t, func() {
+		err = runDoctor([]string{"--all", "--config", cfgPath, "--json"})
+	})
+	if err != nil {
+		t.Fatalf("runDoctor --all with no diagnosable connectors: err = %v, want nil", err)
+	}
+	if strings.TrimSpace(out) != "[]" {
+		t.Fatalf("output = %q, want a bare empty JSON array", out)
+	}
+}
+
+// diagnoseAllFake is a minimal connect.Diagnosable test double used ONLY by
+// TestDiagnoseAll_OneConnectorErrors below, to force a genuine Diagnose
+// error deterministically. This is necessary because the REAL production
+// Diagnosable (connect/exec.ExecConnector, exercised end-to-end by
+// TestRunDoctorAll_MixedConnectors_RealConfigRealSubprocess above) is
+// documented to almost NEVER return a non-nil error from Diagnose — a
+// missing sibling binary, a sibling with no --doctor support, non-JSON
+// output, or a subprocess timeout are ALL folded into a Known:false
+// DiagnosisReport with a nil error (see connect/exec/exec.go's Diagnose doc);
+// only a pre-flight ctx cancellation surfaces a real error, and forcing that
+// through the CLI would cancel every connector's call uniformly, which
+// cannot distinguish "some succeeded, one errored" from "all errored". A
+// fake implementing the two-method Diagnosable interface directly is the
+// only way to prove the omit-on-error / continue-past-one-failure branch
+// against a MIX of successes and one failure.
+type diagnoseAllFake struct {
+	id     string
+	report connect.DiagnosisReport
+	err    error
+}
+
+func (f diagnoseAllFake) ID() string { return f.id }
+func (f diagnoseAllFake) Diagnose(context.Context) (connect.DiagnosisReport, error) {
+	return f.report, f.err
+}
+
+// TestDiagnoseAll_OneConnectorErrors_OmittedNotFabricated is a unit test on
+// diagnoseAll (the pure aggregation helper runDoctorAll wraps): with 3 fake
+// Diagnosables — one erroring, one healthy, one deficient — the erroring one
+// must be OMITTED from the returned reports (never a fabricated placeholder
+// entry, per the item's anti-lie contract), the warning must be written to
+// errW, and both anyError and anyDeficient must be true.
+func TestDiagnoseAll_OneConnectorErrors_OmittedNotFabricated(t *testing.T) {
+	healthy := connect.DiagnosisReport{ConnectorID: "healthy-conn", Diagnosis: connect.Diagnosis{Known: true, Summary: "ok", Confidence: 1}}
+	deficient := connect.DiagnosisReport{ConnectorID: "deficient-conn", Diagnosis: connect.Diagnosis{Known: true, Summary: "missing scope", Confidence: 0.8}, Remediation: []connect.RemediationOption{{Command: "fix it", BlastRadius: "reads metadata"}}}
+
+	diags := []connect.Diagnosable{
+		diagnoseAllFake{id: "erroring-conn", err: fmt.Errorf("boom: probe transport unreachable")},
+		diagnoseAllFake{id: "healthy-conn", report: healthy},
+		diagnoseAllFake{id: "deficient-conn", report: deficient},
+	}
+
+	var errBuf bytes.Buffer
+	reports, anyDeficient, anyError := diagnoseAll(context.Background(), diags, &errBuf)
+
+	if len(reports) != 2 {
+		t.Fatalf("reports = %+v, want exactly 2 (erroring-conn must be omitted, not fabricated)", reports)
+	}
+	for _, r := range reports {
+		if r.ConnectorID == "erroring-conn" {
+			t.Fatalf("erroring-conn must NOT appear in reports at all: %+v", reports)
+		}
+	}
+	if !anyError {
+		t.Error("anyError = false, want true (one connector's Diagnose call returned an error)")
+	}
+	if !anyDeficient {
+		t.Error("anyDeficient = false, want true (deficient-conn is present and deficient)")
+	}
+	if !strings.Contains(errBuf.String(), "erroring-conn") || !strings.Contains(errBuf.String(), "boom: probe transport unreachable") {
+		t.Fatalf("errW = %q, want it to name the omitted connector and the underlying error (honest reporting, not silent)", errBuf.String())
+	}
 }
 
 // TestRunDoctor_DiagnoseThenConfirm_RealStoreGitPath is the headline
