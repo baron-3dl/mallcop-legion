@@ -13,6 +13,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history + tags: cli/deployrepo_test.go (mallcoppro-f19) does
+          # `git show v0.19.0:cli/deployrepo.go` to render a real historical
+          # workflow artifact for the stamp/divergence tests. The default
+          # fetch-depth:1, fetch-tags:false checkout fetches zero tags, so
+          # that tag ref is unresolvable and the test fails under CI's
+          # default shallow clone even though it passes on a normal
+          # developer checkout (which already has tags locally).
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Go
         uses: actions/setup-go@v5

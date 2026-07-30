@@ -370,8 +370,22 @@ type WorkflowFileStatus struct {
 	Existed     bool   // false if the file didn't exist before this refresh
 	Diverged    bool   // hand-edited since generation (stamp mismatch, or no recognizable shape at all) -- left untouched
 	Unstamped   bool   // has a version marker but NO content-hash stamp -- predates mallcoppro-f19 provenance tracking; divergence cannot be verified (see planWorkflowRefresh)
-	FromVersion string // version extracted from the file's own marker; "" if absent/unrecognized
-	Changed     bool   // true if refreshDeployWorkflows actually wrote new content
+	// AdoptedUnverified is true iff this file was Unstamped AND the caller
+	// opted in with adoptUnstamped=true (mallcop migrate --adopt-unstamped).
+	// It exists to make one fact impossible to miss: an unstamped file is
+	// UNVERIFIABLE BY CONSTRUCTION (see planWorkflowRefresh's doc) -- mallcop
+	// has NO way to tell "genuinely stale, never touched" apart from
+	// "genuinely stale AND hand-edited" by looking at the file alone. Setting
+	// this flag is the honest admission that adopting it anyway (advancing
+	// and overwriting it) carries a real, unverified risk of silently
+	// discarding an operator's customisation -- the caller (runMigrate) must
+	// surface it plainly, not fold it into an ordinary success message. See
+	// the field's own doc + TestRefreshDeployWorkflowsAdoptUnstampedIsHonestAboutHandEditedFile
+	// for why re-deriving verification from a historical render was rejected
+	// instead of warning.
+	AdoptedUnverified bool
+	FromVersion       string // version extracted from the file's own marker; "" if absent/unrecognized
+	Changed           bool   // true if refreshDeployWorkflows actually wrote new content
 }
 
 // planWorkflowRefresh inspects dir's managed workflow files against
@@ -407,6 +421,46 @@ type WorkflowFileStatus struct {
 // --adopt-unstamped) is the explicit, non-silent opt-in that says "I have not
 // hand-edited my workflows — advance them anyway and stamp them going
 // forward."
+//
+// AN UNSTAMPED FILE THAT *HAS* BEEN HAND-EDITED IS INDISTINGUISHABLE, BY
+// CONSTRUCTION, FROM ONE THAT HASN'T: both have a MALLCOP_VERSION marker and
+// no MALLCOP_STAMP marker, and there is nothing else in the file's bytes
+// that tells them apart. adoptUnstamped=true therefore overwrites BOTH cases
+// identically — a real risk this safety opt-in must never let ride silently.
+// Two ways to close that were weighed:
+//
+//  1. Diff the file against a historical re-render of its own pinned
+//     version before adopting, and refuse on mismatch.
+//  2. Warn plainly, at the point of adoption, that verification is
+//     impossible and the operator is accepting that specific risk.
+//
+// (1) was rejected: it requires re-deriving what mallcop's template looked
+// like at an arbitrary past version, which is EXACTLY the mechanism this
+// item's centerpiece fix retired (the template is one unversioned Go string
+// constant — re-rendering HEAD's copy of it at an old version reproduces
+// "today's template with an old version number spliced in", not what
+// actually generated the file; that is the bug that misclassified the real
+// v0.19.0 case as Diverged in the first place). The ONLY way to reconstruct
+// a genuine historical render is `git show <tag>:cli/deployrepo.go` against
+// mallcop's OWN source history (see renderWorkflowAtHistoricalTag in
+// deployrepo_test.go) — a mechanism available to a test running inside this
+// repo's git checkout, but not to `mallcop migrate` running as the pinned
+// release BINARY inside a customer's deploy repo (D2+2fd: the core binary is
+// always the downloaded release tarball, never built from source the runner
+// has checked out — see the package doc). Shipping (1) in production would
+// mean either embedding every past template version forever (unbounded,
+// exactly the "generic engine reads authored data" shape the project's
+// code-first invariant rejects) or silently degrading to a no-op check that
+// looks like verification but isn't.
+//
+// (2) is what AdoptedUnverified (on WorkflowFileStatus) and runMigrate's
+// output implement: the file is still adopted (the operator already opted
+// in via the flag), but every adoption of an unstamped file is reported with
+// language that states plainly "mallcop cannot verify whether this was
+// hand-edited" — never folded into an ordinary "refreshed" success line. See
+// TestRefreshDeployWorkflowsAdoptUnstampedIsHonestAboutHandEditedFile
+// (deployrepo_test.go) and TestRunMigrateAdoptUnstampedWarnsOfUnverifiedOverwrite
+// (migrate_test.go).
 func planWorkflowRefresh(dir, targetVersion string, adoptUnstamped bool) ([]WorkflowFileStatus, error) {
 	workflowDir := filepath.Join(dir, ".github", "workflows")
 	statuses := make([]WorkflowFileStatus, len(managedWorkflowFiles))
@@ -443,6 +497,11 @@ func planWorkflowRefresh(dir, targetVersion string, adoptUnstamped bool) ([]Work
 				continue
 			}
 			// Adopted: fall through and treat this file as safe to advance.
+			// AdoptedUnverified=true regardless of whether this particular
+			// file happens to have been hand-edited -- mallcop cannot tell
+			// the two cases apart (see the doc above), so every unstamped
+			// adoption is marked, not just the ones we'd wish were safe.
+			st.AdoptedUnverified = true
 		} else if computeWorkflowStamp(stampCanonicalForm(current)) != stamp {
 			// The file's own bytes no longer hash to its own recorded stamp --
 			// an operator edited it since mallcop generated it. This holds no

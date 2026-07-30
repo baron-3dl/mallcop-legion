@@ -581,3 +581,73 @@ func TestRunMigrateDryRunReportsUnstampedAndAdoptFlagAdvances(t *testing.T) {
 		t.Errorf("dry-run --adopt-unstamped output missing the adopted-refresh line:\n%s", stdout2)
 	}
 }
+
+// TestRunMigrateAdoptUnstampedWarnsOfUnverifiedOverwrite is the mallcoppro-f19
+// REWORK defect-2 proof at the CLI surface: an unstamped scan.yml that has
+// ALSO been hand-edited is indistinguishable from a clean unstamped file (see
+// TestRefreshDeployWorkflowsAdoptUnstampedIsHonestAboutHandEditedFile in
+// deployrepo_test.go for the underlying mechanism). --adopt-unstamped still
+// advances it -- that is the accepted opt-in -- but `mallcop migrate`'s
+// operator-facing output, in BOTH --dry-run and the real run, must state
+// PLAINLY that this specific adoption could not be verified and may have
+// just discarded a real customisation. Folding that fact into an ordinary
+// "refreshed"/"would refresh" success line (the pre-fix wording) is exactly
+// the silent-clobber the item's safety clause forbids.
+//
+// Proof this actually bites: before the migrate.go wording fix, both
+// messages read "...(unstamped legacy file, adopted via --adopt-unstamped)"
+// with no unverified/risk language at all -- this test's substring
+// assertions below would fail against that old wording, which is
+// indistinguishable (to an operator reading the log) from an ordinary, safe
+// refresh.
+func TestRunMigrateAdoptUnstampedWarnsOfUnverifiedOverwrite(t *testing.T) {
+	dir := seedMigrateDir(t)
+	handEditedUnstamped := stripStampMarker(renderScanWorkflow("v0.19.0")) +
+		"\n# operator: added a custom notification step here\n"
+	if strings.Contains(handEditedUnstamped, "MALLCOP_STAMP") {
+		t.Fatalf("test setup bug: fixture still carries a stamp marker:\n%s", handEditedUnstamped)
+	}
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "scan.yml"), handEditedUnstamped)
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "mallcop-investigate.yml"), renderInvestigateWorkflow("v0.19.0"))
+
+	// --dry-run --adopt-unstamped: must preview the same unverified-risk
+	// warning before anything is written.
+	var dryErr error
+	dryStdout := captureStdout(t, func() {
+		dryErr = runMigrate([]string{"--dir", dir, "--mallcop-version", "v0.20.0", "--dry-run", "--adopt-unstamped"})
+	})
+	if dryErr != nil {
+		t.Fatalf("--dry-run --adopt-unstamped must not error (the flag is the operator's consent): %v", dryErr)
+	}
+	for _, want := range []string{"UNVERIFIED", "cannot tell whether this file was hand-edited"} {
+		if !strings.Contains(dryStdout, want) {
+			t.Errorf("dry-run --adopt-unstamped output missing unverified-risk warning %q:\n%s", want, dryStdout)
+		}
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "workflows", "scan.yml")); got != handEditedUnstamped {
+		t.Error("--dry-run must never write, even for an adopted unstamped file")
+	}
+
+	// Real run --adopt-unstamped: the file DOES advance (accepted opt-in),
+	// but stdout must state plainly that the overwrite was unverified and
+	// may have discarded a real hand-edit.
+	var runErr error
+	stdout := captureStdout(t, func() {
+		runErr = runMigrate([]string{"--dir", dir, "--mallcop-version", "v0.20.0", "--adopt-unstamped"})
+	})
+	if runErr != nil {
+		t.Fatalf("--adopt-unstamped run must not error: %v", runErr)
+	}
+	for _, want := range []string{"UNVERIFIED ADOPTION", "could NOT verify whether this file had been hand-edited"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("--adopt-unstamped run output missing unverified-adoption warning %q:\n%s", want, stdout)
+		}
+	}
+	got := mustRead(t, filepath.Join(dir, ".github", "workflows", "scan.yml"))
+	if strings.Contains(got, "operator: added a custom notification step here") {
+		t.Error("test setup bug: expected the hand-edit to have been overwritten by the accepted --adopt-unstamped opt-in")
+	}
+	if !strings.Contains(got, `MALLCOP_VERSION: "v0.20.0"`) {
+		t.Errorf("scan.yml was not advanced to v0.20.0:\n%s", got)
+	}
+}

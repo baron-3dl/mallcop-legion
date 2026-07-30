@@ -1021,6 +1021,111 @@ func TestRefreshDeployWorkflowsHandlesGenuinelyOldUnstampedFile(t *testing.T) {
 	}
 }
 
+// TestRefreshDeployWorkflowsAdoptUnstampedIsHonestAboutHandEditedFile is the
+// mallcoppro-f19 REWORK defect-2 proof: an unstamped file that has ALSO been
+// hand-edited is INDISTINGUISHABLE, by construction, from an unstamped file
+// that was never touched -- both carry a MALLCOP_VERSION marker and no
+// MALLCOP_STAMP marker, and there is nothing else in the bytes that tells
+// them apart (see planWorkflowRefresh's doc). --adopt-unstamped still
+// advances it (that is the explicit opt-in the operator asked for), but the
+// returned status MUST mark AdoptedUnverified=true so the caller (runMigrate)
+// can report the risk plainly instead of a plain "adopted" success line.
+//
+// Without the AdoptedUnverified guard this test fails: the zero-value bool
+// is false, indistinguishable from an ordinary safe adoption, and nothing in
+// the returned WorkflowFileStatus would let a caller tell "adopted a file we
+// could verify" apart from "adopted a file we could NOT verify and which
+// happened to carry a real hand-edit".
+func TestRefreshDeployWorkflowsAdoptUnstampedIsHonestAboutHandEditedFile(t *testing.T) {
+	dir := t.TempDir()
+	workflowDir := filepath.Join(dir, ".github", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// An unstamped file (predates mallcoppro-f19 provenance tracking) that
+	// has ALSO been hand-edited since generation -- the exact ambiguous case
+	// defect 2 names. stripStampMarkerForTest mirrors migrate_test.go's
+	// stripStampMarker (kept local to this file to avoid a cross-file test
+	// helper dependency): it removes only the MALLCOP_STAMP marker line (and
+	// its explanatory comment block), simulating a file that genuinely
+	// predates the stamp, while leaving the hand-edit appended below intact.
+	unstampedAndHandEdited := stripStampMarkerForTest(renderScanWorkflow("v0.19.0")) +
+		"\n# operator: added a custom notification step here\n"
+	if strings.Contains(unstampedAndHandEdited, "MALLCOP_STAMP") {
+		t.Fatalf("test setup bug: fixture still carries a stamp marker:\n%s", unstampedAndHandEdited)
+	}
+	if err := os.WriteFile(filepath.Join(workflowDir, "scan.yml"), []byte(unstampedAndHandEdited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default (no --adopt-unstamped): must still be left byte-for-byte
+	// untouched and reported Unstamped, exactly like the never-edited case --
+	// mallcop has no way to tell these two fixtures apart, so it must not
+	// treat this one any differently.
+	planDefault, err := refreshDeployWorkflows(dir, "v0.20.0", false)
+	if err != nil {
+		t.Fatalf("refreshDeployWorkflows: %v", err)
+	}
+	stDefault := mustFindWorkflowStatus(t, planDefault, "scan.yml")
+	if !stDefault.Unstamped || stDefault.Changed || stDefault.AdoptedUnverified {
+		t.Fatalf("default (no --adopt-unstamped) run over an unstamped+hand-edited file must be Unstamped=true, Changed=false, AdoptedUnverified=false: %+v", stDefault)
+	}
+	if raw := mustRead(t, filepath.Join(workflowDir, "scan.yml")); raw != unstampedAndHandEdited {
+		t.Fatal("default refresh must leave an unstamped+hand-edited file byte-for-byte untouched")
+	}
+
+	// --adopt-unstamped: the operator's explicit opt-in advances the file
+	// (per the item's accepted ruling -- the flag itself is consent), but the
+	// returned status must be honest that this specific adoption was
+	// UNVERIFIED: mallcop could not tell the hand-edit apart from a clean
+	// legacy file, and the hand-edit is now gone.
+	planAdopt, err := refreshDeployWorkflows(dir, "v0.20.0", true)
+	if err != nil {
+		t.Fatalf("refreshDeployWorkflows (adopt-unstamped): %v", err)
+	}
+	stAdopt := mustFindWorkflowStatus(t, planAdopt, "scan.yml")
+	if !stAdopt.Changed {
+		t.Fatalf("--adopt-unstamped must still advance an unstamped file even if it happens to be hand-edited (that is the accepted opt-in): %+v", stAdopt)
+	}
+	if !stAdopt.AdoptedUnverified {
+		t.Fatalf("adopting an unstamped file must be reported AdoptedUnverified=true -- mallcop cannot tell this hand-edited case apart from a clean one, and that must never be silent: %+v", stAdopt)
+	}
+	raw := mustRead(t, filepath.Join(workflowDir, "scan.yml"))
+	if strings.Contains(raw, "operator: added a custom notification step here") {
+		t.Fatal("test setup bug: expected the hand-edit to have been overwritten by the accepted --adopt-unstamped opt-in")
+	}
+	if !strings.Contains(raw, `MALLCOP_VERSION: "v0.20.0"`) {
+		t.Errorf("adopted unstamped+hand-edited file was not advanced to v0.20.0:\n%s", raw)
+	}
+}
+
+// stripStampMarkerForTest removes the MALLCOP_STAMP marker line and its
+// following explanation comment lines from a rendered workflow, WITHOUT
+// touching anything else -- simulating a file generated before
+// mallcoppro-f19's content-hash provenance tracking existed. Mirrors
+// migrate_test.go's stripStampMarker; kept local here so this file has no
+// test-helper dependency on migrate_test.go.
+func stripStampMarkerForTest(rendered string) string {
+	lines := strings.Split(rendered, "\n")
+	out := make([]string, 0, len(lines))
+	skipping := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, `# MALLCOP_STAMP:`) {
+			skipping = true
+			continue
+		}
+		if skipping {
+			if strings.HasPrefix(line, "#") {
+				continue
+			}
+			skipping = false
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
 func mustFindWorkflowStatus(t *testing.T, plan []WorkflowFileStatus, name string) *WorkflowFileStatus {
 	t.Helper()
 	for i := range plan {

@@ -134,7 +134,7 @@ func runMigrate(args []string) error {
 				case st.FromVersion == version:
 					fmt.Printf("mallcop migrate: [dry-run] %s already pinned to %s — no change\n", rel, version)
 				case st.Unstamped:
-					fmt.Printf("mallcop migrate: [dry-run] would refresh %s: %s -> %s (unstamped legacy file, adopted via --adopt-unstamped)\n", rel, st.FromVersion, version)
+					fmt.Printf("mallcop migrate: [dry-run] would refresh %s: %s -> %s (unstamped legacy file, adopted via --adopt-unstamped) — UNVERIFIED: mallcop cannot tell whether this file was hand-edited (it predates content-hash provenance), so it cannot tell a genuine customisation apart from an untouched legacy file; if it WAS hand-edited, that edit would be silently overwritten by the real run. You are accepting that risk by passing --adopt-unstamped\n", rel, st.FromVersion, version)
 				default:
 					fmt.Printf("mallcop migrate: [dry-run] would refresh %s: %s -> %s\n", rel, st.FromVersion, version)
 				}
@@ -155,7 +155,7 @@ func runMigrate(args []string) error {
 					unstampedCount++
 					fmt.Printf("mallcop migrate: SKIPPED %s — no provenance stamp (generated before mallcoppro-f19 tracking, pinned %s); mallcop CANNOT verify whether it was hand-edited, so it was left untouched. Re-run with --adopt-unstamped if you have not hand-edited it\n", rel, describeFromVersion(st.FromVersion))
 				case st.Changed && st.Unstamped:
-					fmt.Printf("mallcop migrate: refreshed %s (pinned %s, adopted unstamped legacy file via --adopt-unstamped)\n", rel, version)
+					fmt.Printf("mallcop migrate: refreshed %s (pinned %s, adopted unstamped legacy file via --adopt-unstamped) — UNVERIFIED ADOPTION: mallcop could NOT verify whether this file had been hand-edited before overwriting it (it predates content-hash provenance tracking); if you HAD customised it, that customisation is gone now — recover it from git history if needed\n", rel, version)
 				case st.Changed:
 					fmt.Printf("mallcop migrate: refreshed %s (pinned %s)\n", rel, version)
 				default:
