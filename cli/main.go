@@ -22,6 +22,7 @@
 //	mallcop init        [--dir <path>] [--pro] [--create-repo owner/name] [--mallcop-version <tag>] [--github-token-env <VAR>]
 //	mallcop migrate     [--dir <path>] [--mallcop-version <tag>] [--config-only] [--dry-run]
 //	mallcop status      --store <dir> [--gate --max-age <dur>]
+//	mallcop doctor      <connector-id> [--config <mallcop.yaml>] [--store <dir>] [--json] [--confirm <grant-ref>]
 //	mallcop config
 //	mallcop config set connector --kind=file|github|cloud --id=<id> [...]
 //	mallcop config set autonomy <non|semi|fully>
@@ -86,6 +87,8 @@ func Main() {
 		err = runMigrate(args)
 	case "status":
 		err = runStatus(args)
+	case "doctor":
+		err = runDoctor(args)
 	case "config":
 		if len(args) > 0 && args[0] == "set" {
 			err = runConfigSet(args[1:])
@@ -242,6 +245,18 @@ Commands:
     --store    Path to the git-repo store written by 'mallcop scan' (required)
                Also surfaces the store-pure coverage gaps (operator report-miss
                reports + override/dissent) and flags any RECALL RED.
+
+  doctor <connector-id>  Ask a configured connector to self-diagnose why it can't pull
+    --config   Path to mallcop.yaml naming the connector (overrides discovery/$MALLCOP_CONFIG)
+    --store    Path to the git-repo store where the diagnosis is recorded (overrides config store.path)
+    --json     Emit the structured DiagnosisReport as JSON (grant_ref included)
+    --confirm  <grant-ref>  Re-probe after you've applied a printed remediation and
+               record whether it resolved the deficiency, against the ORIGINAL
+               run's grant_ref (printed on every plain 'mallcop doctor' run).
+               Prints ranked, copy-pasteable least-privilege remediation
+               commands (blast-radius, dry-run, staleness) — this process
+               NEVER runs one. Exit 1 (like 'mallcop scan') when deficient or
+               still-failing-after-confirm; 0 when healthy/resolved.
 
   config  Print the effective scan config merged from a discovered mallcop.yaml + the environment
   config set connector --kind=file|github|cloud --id=<id> [--path=][--org=][--source=][--binary=][--since=][--args=a,b][--env=NAME1,NAME2]

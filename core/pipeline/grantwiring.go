@@ -24,7 +24,7 @@ import (
 	"github.com/mallcop-app/mallcop/core/store"
 )
 
-// diagnosables returns every connect.Diagnosable reachable from connector:
+// Diagnosables returns every connect.Diagnosable reachable from connector:
 // itself, if it directly implements the interface, or — for the shape
 // cli/scan.go's buildConnectors ALWAYS returns in production
 // (connect.Multi(subs...), even for a single configured source, cfg/scan.go:558)
@@ -32,11 +32,13 @@ import (
 // rework, Route 1). *connect.MultiConnector never itself implements
 // Diagnosable (core/connect/multi.go), so a caller that only ever asserts
 // directly on cfg.Connector silently finds nothing for exactly the
-// connectors — kind:cloud's ExecConnector — that actually HAVE a doctor. This
-// helper is the one place both recordConnectorDiagnosis (the failure path)
-// and confirmResolvedGrants (the success path, Route 2) reach the real leaf
-// connectors from, so the walk is defined once, not duplicated.
-func diagnosables(connector connect.Connector) []connect.Diagnosable {
+// connectors — kind:cloud's ExecConnector — that actually HAVE a doctor.
+// Exported (mallcoppro-529) so cli/doctor.go's connector lookup reuses this
+// EXACT walk rather than re-deriving it — the one place
+// recordConnectorDiagnosis (the failure path), confirmResolvedGrants (the
+// success path, Route 2), and `mallcop doctor` (the on-demand path) all reach
+// the real leaf connectors from.
+func Diagnosables(connector connect.Connector) []connect.Diagnosable {
 	if d, ok := connector.(connect.Diagnosable); ok {
 		return []connect.Diagnosable{d}
 	}
@@ -47,7 +49,7 @@ func diagnosables(connector connect.Connector) []connect.Diagnosable {
 }
 
 // recordConnectorDiagnosis is called from Run when cfg.Connector.Pull fails.
-// It walks every connect.Diagnosable reachable from connector (diagnosables,
+// It walks every connect.Diagnosable reachable from connector (Diagnosables,
 // above — direct or wrapped in a production connect.Multi) and appends
 // exactly one GrantOutcome MISS row per Diagnosable to KindGrants carrying
 // what it found — and, when a given diagnosis came back Known:false, the E1
@@ -79,7 +81,7 @@ func diagnosables(connector connect.Connector) []connect.Diagnosable {
 // it is the same "Probe on every scheduled run" cadence the GrantClaim kernel
 // documents (core/connect/diagnose.go).
 func recordConnectorDiagnosis(ctx context.Context, st *store.Store, connector connect.Connector) error {
-	diags := diagnosables(connector)
+	diags := Diagnosables(connector)
 	if len(diags) == 0 {
 		return nil
 	}
@@ -88,24 +90,47 @@ func recordConnectorDiagnosis(ctx context.Context, st *store.Store, connector co
 		if err != nil {
 			return fmt.Errorf("pipeline: diagnose connect failure: %w", err)
 		}
-
-		row := store.GrantOutcome{
-			Connector:    report.ConnectorID,
-			FailureClass: report.Diagnosis.Summary,
-			DetectedAt:   time.Now().UTC(),
-			Resolved:     false,
-		}
-		if req, ok := connect.RaiseUnknownDiagnosis(report); ok {
-			row.DecisionKind = req.Kind
-			row.BlastRadius = req.BlastRadius
-			row.Question = req.Question
-		}
-
-		if _, err := st.Append(store.KindGrants, row); err != nil {
-			return fmt.Errorf("pipeline: record grant-miss diagnosis: %w", err)
+		if _, err := RecordDiagnosis(st, report); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// RecordDiagnosis persists ONE DiagnosisReport as a GRANT-MISS row on the
+// grants stream — the single write recordConnectorDiagnosis's loop performs
+// per Diagnosable, above, extracted so a caller that already holds a fresh
+// report from its OWN Diagnose call (mallcop doctor's cli/doctor.go — the
+// dual-audience CLI path this item's HARD CONSTRAINT requires call the
+// IDENTICAL kernel functions the chat/MCP skin will — mallcoppro-529/99b0)
+// records it through the exact same code recordConnectorDiagnosis uses, never
+// a re-derived copy of the row-construction logic.
+//
+// A row is written unconditionally — Known:true (a classified, healthy or
+// deficient status) is itself useful history exactly as recordConnectorDiagnosis's
+// own doc above argues, not only a Known:false GRANT-MISS. When Diagnosis.Known
+// is false, the row additionally carries the E1 SecurityDecision-request fields
+// (connect.RaiseUnknownDiagnosis) — the same augmentation recordConnectorDiagnosis
+// applies. sha is the commit Store.Append returned for this row — the identity a
+// later RecordConfirmOutcome call resolves back via Store.ResolveGrantMiss.
+func RecordDiagnosis(st *store.Store, report connect.DiagnosisReport) (sha string, err error) {
+	row := store.GrantOutcome{
+		Connector:    report.ConnectorID,
+		FailureClass: report.Diagnosis.Summary,
+		DetectedAt:   time.Now().UTC(),
+		Resolved:     false,
+	}
+	if req, ok := connect.RaiseUnknownDiagnosis(report); ok {
+		row.DecisionKind = req.Kind
+		row.BlastRadius = req.BlastRadius
+		row.Question = req.Question
+	}
+
+	sha, err = st.Append(store.KindGrants, row)
+	if err != nil {
+		return "", fmt.Errorf("pipeline: record grant-miss diagnosis: %w", err)
+	}
+	return sha, nil
 }
 
 // pendingGrantMiss returns the most recent UNRESOLVED GrantOutcome row for
@@ -146,7 +171,7 @@ func pendingGrantMiss(st *store.Store, connectorID string) (missSHA string, miss
 
 // confirmResolvedGrants is called from Run AFTER a SUCCESSFUL Pull
 // (mallcoppro-d3f veracity rework, Route 2 — the WRITE half's real caller).
-// For every connect.Diagnosable reachable from connector (diagnosables,
+// For every connect.Diagnosable reachable from connector (Diagnosables,
 // above — direct or wrapped in the production connect.Multi shape), it reads
 // the grants stream (pendingGrantMiss, above) for an outstanding, unresolved
 // GRANT-MISS attributed to that connector's ID. Only when one is found does it
@@ -159,7 +184,7 @@ func pendingGrantMiss(st *store.Store, connectorID string) (missSHA string, miss
 // broken) appends a fresh miss row (RecordConfirmOutcome's NEW-A19 branch) —
 // never silently drops the still-outstanding ask.
 func confirmResolvedGrants(ctx context.Context, st *store.Store, connector connect.Connector) error {
-	for _, diag := range diagnosables(connector) {
+	for _, diag := range Diagnosables(connector) {
 		id := diag.ID()
 		if id == "" {
 			continue
