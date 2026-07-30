@@ -56,6 +56,7 @@ func runMigrate(args []string) error {
 	mallcopVersion := fs.String("mallcop-version", "", "mallcop release tag to pin (default: query the latest GitHub release)")
 	configOnly := fs.Bool("config-only", false, "Only migrate mallcop.yaml; do not touch workflows or go.mod")
 	dryRun := fs.Bool("dry-run", false, "Print what would change without writing any files")
+	adoptUnstamped := fs.Bool("adopt-unstamped", false, "Advance managed workflow files that predate content-hash provenance tracking (mallcoppro-f19) — an explicit, non-silent statement that you have not hand-edited them. Without this flag, such files are left untouched and reported.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -112,9 +113,10 @@ func runMigrate(args []string) error {
 
 	// --- 2 + 3. workflows + go.mod ----------------------------------------
 	divergedCount := 0
+	unstampedCount := 0
 	if !*configOnly {
 		if *dryRun {
-			plan, err := planWorkflowRefresh(absDir, version)
+			plan, err := planWorkflowRefresh(absDir, version, *adoptUnstamped)
 			if err != nil {
 				return err
 			}
@@ -126,15 +128,20 @@ func runMigrate(args []string) error {
 				case st.Diverged:
 					divergedCount++
 					fmt.Printf("mallcop migrate: [dry-run] %s has diverged from what mallcop generated (hand-edited since %s) — would be LEFT UNTOUCHED\n", rel, describeFromVersion(st.FromVersion))
+				case st.Unstamped && !*adoptUnstamped:
+					unstampedCount++
+					fmt.Printf("mallcop migrate: [dry-run] %s has no provenance stamp (generated before mallcoppro-f19 tracking, pinned %s) — mallcop CANNOT verify whether it was hand-edited; would be LEFT UNTOUCHED. Re-run with --adopt-unstamped if you have not hand-edited it, to advance it and stamp it going forward\n", rel, describeFromVersion(st.FromVersion))
 				case st.FromVersion == version:
 					fmt.Printf("mallcop migrate: [dry-run] %s already pinned to %s — no change\n", rel, version)
+				case st.Unstamped:
+					fmt.Printf("mallcop migrate: [dry-run] would refresh %s: %s -> %s (unstamped legacy file, adopted via --adopt-unstamped)\n", rel, st.FromVersion, version)
 				default:
 					fmt.Printf("mallcop migrate: [dry-run] would refresh %s: %s -> %s\n", rel, st.FromVersion, version)
 				}
 			}
 			fmt.Printf("mallcop migrate: [dry-run] would refresh go.mod pin to %s (if a github.com/mallcop-app/mallcop require line exists)\n", version)
 		} else {
-			plan, err := refreshDeployWorkflows(absDir, version)
+			plan, err := refreshDeployWorkflows(absDir, version, *adoptUnstamped)
 			if err != nil {
 				return err
 			}
@@ -144,6 +151,11 @@ func runMigrate(args []string) error {
 				case st.Diverged:
 					divergedCount++
 					fmt.Printf("mallcop migrate: SKIPPED %s — diverged from what mallcop generated (hand-edited since %s); left untouched, review it manually\n", rel, describeFromVersion(st.FromVersion))
+				case st.Unstamped && !*adoptUnstamped:
+					unstampedCount++
+					fmt.Printf("mallcop migrate: SKIPPED %s — no provenance stamp (generated before mallcoppro-f19 tracking, pinned %s); mallcop CANNOT verify whether it was hand-edited, so it was left untouched. Re-run with --adopt-unstamped if you have not hand-edited it\n", rel, describeFromVersion(st.FromVersion))
+				case st.Changed && st.Unstamped:
+					fmt.Printf("mallcop migrate: refreshed %s (pinned %s, adopted unstamped legacy file via --adopt-unstamped)\n", rel, version)
 				case st.Changed:
 					fmt.Printf("mallcop migrate: refreshed %s (pinned %s)\n", rel, version)
 				default:
@@ -169,8 +181,13 @@ func runMigrate(args []string) error {
 	fmt.Printf("  3. Ensure the inference key secret is set on the repo:\n")
 	fmt.Printf("       gh secret set MALLCOP_API_KEY --repo <owner/name> --body \"$MALLCOP_API_KEY\"\n")
 
-	if divergedCount > 0 {
+	switch {
+	case divergedCount > 0 && unstampedCount > 0:
+		return fmt.Errorf("mallcop migrate: PARTIAL — %d managed workflow file(s) were hand-edited since generation, and %d have no provenance stamp to verify (see above); resolve the hand-edited ones manually, and re-run with --adopt-unstamped for the unstamped ones if they are truly untouched, then re-run", divergedCount, unstampedCount)
+	case divergedCount > 0:
 		return fmt.Errorf("mallcop migrate: PARTIAL — %d managed workflow file(s) were hand-edited since generation and left unchanged (see above); resolve them manually, then re-run", divergedCount)
+	case unstampedCount > 0:
+		return fmt.Errorf("mallcop migrate: PARTIAL — %d managed workflow file(s) have no provenance stamp to verify (predate mallcoppro-f19 tracking) and were left unchanged (see above); re-run with --adopt-unstamped if they are truly untouched", unstampedCount)
 	}
 	return nil
 }

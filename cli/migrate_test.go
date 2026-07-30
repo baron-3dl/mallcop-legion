@@ -396,3 +396,188 @@ func TestRunMigrateReportsHandEditedWorkflowInsteadOfSteamrolling(t *testing.T) 
 		t.Errorf("mallcop-investigate.yml was not advanced to v0.20.0:\n%s", inv)
 	}
 }
+
+// seedMigrateDir creates a t.TempDir() deploy-repo fixture with a
+// current-schema mallcop.yaml, so runMigrate's config-migration branch is a
+// no-op and only the workflow-refresh path under test is exercised. No git
+// repo here (unlike initDeployGitRepo) -- these tests target runMigrate's
+// --dry-run REPORTING and error-return branches directly, which need only
+// real file I/O and the real config loader, not a git history.
+func seedMigrateDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := config.WriteConfig(filepath.Join(dir, config.ConfigFileName), config.Defaults()); err != nil {
+		t.Fatalf("seeding mallcop.yaml: %v", err)
+	}
+	return dir
+}
+
+// stripStampMarker removes the MALLCOP_STAMP marker line and its following
+// explanation comment lines from a rendered workflow, WITHOUT touching
+// anything else -- simulating a file generated before mallcoppro-f19's
+// content-hash provenance tracking existed. Used only to drive runMigrate's
+// --dry-run CLI reporting through the Unstamped branch; the SUBSTANTIVE
+// claim that a real pre-stamp file is handled correctly is proven separately
+// against an actual historical git tag (see
+// TestRefreshDeployWorkflowsHandlesGenuinelyOldUnstampedFile in
+// deployrepo_test.go) -- this helper only needs to trigger the same code
+// path to test the CLI's message formatting and error return.
+func stripStampMarker(rendered string) string {
+	lines := strings.Split(rendered, "\n")
+	out := make([]string, 0, len(lines))
+	skipping := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, `# MALLCOP_STAMP:`) {
+			skipping = true
+			continue
+		}
+		if skipping {
+			if strings.HasPrefix(line, "#") {
+				continue
+			}
+			skipping = false
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
+// TestRunMigrateDryRunReportsCreateForMissingWorkflows covers the --dry-run
+// CREATE branch (previously entirely untested): a deploy repo with no
+// workflow files at all must report "would CREATE" for both managed files,
+// write nothing, and return no error.
+func TestRunMigrateDryRunReportsCreateForMissingWorkflows(t *testing.T) {
+	dir := seedMigrateDir(t)
+
+	var runErr error
+	stdout := captureStdout(t, func() {
+		runErr = runMigrate([]string{"--dir", dir, "--mallcop-version", "v0.20.0", "--dry-run"})
+	})
+	if runErr != nil {
+		t.Fatalf("dry-run with missing workflows must not error: %v", runErr)
+	}
+	for _, want := range []string{"would CREATE", "scan.yml", "mallcop-investigate.yml"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("dry-run output missing %q:\n%s", want, stdout)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".github", "workflows", "scan.yml")); !os.IsNotExist(err) {
+		t.Errorf("--dry-run must not actually create scan.yml, stat err=%v", err)
+	}
+}
+
+// TestRunMigrateDryRunReportsAlreadyPinned covers the --dry-run "already
+// pinned, no change" branch (previously entirely untested).
+func TestRunMigrateDryRunReportsAlreadyPinned(t *testing.T) {
+	dir := seedMigrateDir(t)
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "scan.yml"), renderScanWorkflow("v0.20.0"))
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "mallcop-investigate.yml"), renderInvestigateWorkflow("v0.20.0"))
+
+	var runErr error
+	stdout := captureStdout(t, func() {
+		runErr = runMigrate([]string{"--dir", dir, "--mallcop-version", "v0.20.0", "--dry-run"})
+	})
+	if runErr != nil {
+		t.Fatalf("dry-run on an already-current repo must not error: %v", runErr)
+	}
+	if !strings.Contains(stdout, "already pinned to v0.20.0 — no change") {
+		t.Errorf("dry-run output missing the already-pinned no-change line:\n%s", stdout)
+	}
+}
+
+// TestRunMigrateDryRunReportsRefresh covers the --dry-run "would refresh"
+// branch (previously entirely untested): a genuinely stale (stamped,
+// untouched) workflow at an old version reports "would refresh oldVersion ->
+// newVersion", writes nothing, and returns no error.
+func TestRunMigrateDryRunReportsRefresh(t *testing.T) {
+	dir := seedMigrateDir(t)
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "scan.yml"), renderScanWorkflow("v0.19.0"))
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "mallcop-investigate.yml"), renderInvestigateWorkflow("v0.19.0"))
+
+	var runErr error
+	stdout := captureStdout(t, func() {
+		runErr = runMigrate([]string{"--dir", dir, "--mallcop-version", "v0.20.0", "--dry-run"})
+	})
+	if runErr != nil {
+		t.Fatalf("dry-run over a genuinely stale repo must not error: %v", runErr)
+	}
+	if !strings.Contains(stdout, "would refresh") || !strings.Contains(stdout, "v0.19.0 -> v0.20.0") {
+		t.Errorf("dry-run output missing the refresh line:\n%s", stdout)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "workflows", "scan.yml")); !strings.Contains(got, `MALLCOP_VERSION: "v0.19.0"`) {
+		t.Error("--dry-run must not actually write the refreshed file")
+	}
+}
+
+// TestRunMigrateDryRunReportsDivergedAndReturnsPartialError is the
+// mallcoppro-f19 REWORK requirement's DIVERGED-branch + dry-run-PARTIAL-error
+// coverage (previously entirely untested, on the operator-facing safety
+// surface that decides whether someone runs the real command at all): a
+// hand-edited scan.yml must be reported "has diverged ... would be LEFT
+// UNTOUCHED", and --dry-run itself must return the non-nil PARTIAL error --
+// a dry preview of a run that WOULD be partial must not itself report clean
+// success.
+func TestRunMigrateDryRunReportsDivergedAndReturnsPartialError(t *testing.T) {
+	dir := seedMigrateDir(t)
+	handEdited := renderScanWorkflow("v0.19.0") + "\n# operator: custom step, do not remove\n"
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "scan.yml"), handEdited)
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "mallcop-investigate.yml"), renderInvestigateWorkflow("v0.19.0"))
+
+	var runErr error
+	stdout := captureStdout(t, func() {
+		runErr = runMigrate([]string{"--dir", dir, "--mallcop-version", "v0.20.0", "--dry-run"})
+	})
+	if runErr == nil {
+		t.Fatal("--dry-run over a diverged workflow must return a non-nil PARTIAL error, not silent success")
+	}
+	if !strings.Contains(runErr.Error(), "PARTIAL") {
+		t.Errorf("dry-run error does not communicate a partial outcome: %v", runErr)
+	}
+	if !strings.Contains(stdout, "has diverged from what mallcop generated") || !strings.Contains(stdout, "would be LEFT UNTOUCHED") {
+		t.Errorf("dry-run output missing the diverged/left-untouched line:\n%s", stdout)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "workflows", "scan.yml")); got != handEdited {
+		t.Error("--dry-run must never write, even when reporting divergence")
+	}
+}
+
+// TestRunMigrateDryRunReportsUnstampedAndAdoptFlagAdvances covers the
+// --dry-run Unstamped branch (mallcoppro-f19 REWORK requirement, previously
+// entirely untested) and the --adopt-unstamped opt-in end to end through the
+// CLI: a legacy workflow with a version marker but no content-hash stamp is,
+// by default, reported as unverifiable and left untouched with a non-nil
+// PARTIAL error; passing --adopt-unstamped instead reports it as an adopted
+// refresh and returns no error.
+func TestRunMigrateDryRunReportsUnstampedAndAdoptFlagAdvances(t *testing.T) {
+	dir := seedMigrateDir(t)
+	unstamped := stripStampMarker(renderScanWorkflow("v0.19.0"))
+	if strings.Contains(unstamped, "MALLCOP_STAMP") {
+		t.Fatalf("test setup bug: stripStampMarker did not remove the stamp:\n%s", unstamped)
+	}
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "scan.yml"), unstamped)
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "mallcop-investigate.yml"), renderInvestigateWorkflow("v0.19.0"))
+
+	var runErr error
+	stdout := captureStdout(t, func() {
+		runErr = runMigrate([]string{"--dir", dir, "--mallcop-version", "v0.20.0", "--dry-run"})
+	})
+	if runErr == nil {
+		t.Fatal("--dry-run over an unstamped legacy workflow must return a non-nil PARTIAL error by default")
+	}
+	if !strings.Contains(runErr.Error(), "PARTIAL") {
+		t.Errorf("dry-run error does not communicate a partial outcome: %v", runErr)
+	}
+	if !strings.Contains(stdout, "no provenance stamp") || !strings.Contains(stdout, "would be LEFT UNTOUCHED") {
+		t.Errorf("dry-run output missing the unstamped/left-untouched line:\n%s", stdout)
+	}
+
+	stdout2 := captureStdout(t, func() {
+		runErr = runMigrate([]string{"--dir", dir, "--mallcop-version", "v0.20.0", "--dry-run", "--adopt-unstamped"})
+	})
+	if runErr != nil {
+		t.Fatalf("--dry-run --adopt-unstamped over an unstamped-but-untouched file must not error: %v", runErr)
+	}
+	if !strings.Contains(stdout2, "would refresh") || !strings.Contains(stdout2, "adopted via --adopt-unstamped") {
+		t.Errorf("dry-run --adopt-unstamped output missing the adopted-refresh line:\n%s", stdout2)
+	}
+}
