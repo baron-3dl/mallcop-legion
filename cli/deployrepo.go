@@ -50,6 +50,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -245,25 +246,140 @@ func renderInvestigateWorkflow(mallcopVersion string) string {
 	return strings.ReplaceAll(w, "{{CHAT_BRANCH}}", mallcopChatBranch)
 }
 
-// refreshDeployWorkflows re-writes BOTH generated CI workflows to the pinned
-// mallcopVersion, ALWAYS overwriting whatever is there (unlike
-// scaffoldDeployAssets' skip-if-exists). This is the `mallcop migrate` seam:
-// an existing customer deploy repo may carry a stale scan.yml and be missing
+// mallcopVersionMarkerRe pulls the MALLCOP_VERSION env value a rendered
+// scan.yml/mallcop-investigate.yml embeds (see the `MALLCOP_VERSION:
+// "{{VERSION}}"` line in both templates below) back out of a file already on
+// disk, so a refresh can tell what version IT was generated at.
+var mallcopVersionMarkerRe = regexp.MustCompile(`(?m)^\s*MALLCOP_VERSION:\s*"([^"]*)"\s*$`)
+
+// extractPinnedVersion reads the MALLCOP_VERSION marker out of a rendered
+// workflow file's content. ok is false when no marker is found (e.g. the
+// file predates the marker, or isn't a mallcop-generated file at all).
+func extractPinnedVersion(content string) (version string, ok bool) {
+	m := mallcopVersionMarkerRe.FindStringSubmatch(content)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// managedWorkflowFile pairs a generated workflow's filename with its render
+// function, so plan/refresh can walk both files identically.
+type managedWorkflowFile struct {
+	name   string // relative to .github/workflows/
+	render func(mallcopVersion string) string
+}
+
+var managedWorkflowFiles = []managedWorkflowFile{
+	{"scan.yml", renderScanWorkflow},
+	{"mallcop-investigate.yml", renderInvestigateWorkflow},
+}
+
+// WorkflowFileStatus is the per-file outcome of inspecting (planWorkflowRefresh)
+// or applying (refreshDeployWorkflows) a version-bump refresh against one
+// managed workflow file.
+type WorkflowFileStatus struct {
+	Name        string // e.g. "scan.yml"
+	Path        string // absolute path
+	Existed     bool   // false if the file didn't exist before this refresh
+	Diverged    bool   // hand-edited since generation -- left untouched
+	FromVersion string // version extracted from the file's own marker; "" if absent/unrecognized
+	Changed     bool   // true if refreshDeployWorkflows actually wrote new content
+}
+
+// planWorkflowRefresh inspects dir's managed workflow files against
+// targetVersion WITHOUT writing anything. For each file it reports whether
+// the file is missing (safe to create), untouched since generation at
+// whatever version it currently carries (safe to advance), already at
+// targetVersion (no-op), or DIVERGED from what mallcop itself would have
+// generated for its own pinned version (an operator hand-edit — must not be
+// silently clobbered).
+//
+// Divergence is detected by re-rendering the template at the file's OWN
+// extracted version and comparing byte-for-byte to what's on disk: a
+// byte-identical result proves nothing has touched the file since mallcop
+// generated it.
+func planWorkflowRefresh(dir, targetVersion string) ([]WorkflowFileStatus, error) {
+	workflowDir := filepath.Join(dir, ".github", "workflows")
+	statuses := make([]WorkflowFileStatus, len(managedWorkflowFiles))
+	for i, wf := range managedWorkflowFiles {
+		path := filepath.Join(workflowDir, wf.name)
+		st := WorkflowFileStatus{Name: wf.name, Path: path}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				statuses[i] = st
+				continue
+			}
+			return nil, fmt.Errorf("deploy-repo: reading %s: %w", path, err)
+		}
+		st.Existed = true
+		current := string(data)
+		pinned, ok := extractPinnedVersion(current)
+		if !ok {
+			// No recognizable pin marker at all -- never seen this shape before
+			// (predates the marker, or isn't ours). Treat as diverged: refuse to
+			// guess, surface it instead of overwriting.
+			st.Diverged = true
+			statuses[i] = st
+			continue
+		}
+		st.FromVersion = pinned
+		if wf.render(pinned) != current {
+			// Doesn't match what mallcop would have generated for its OWN pinned
+			// version -- an operator edited it since generation.
+			st.Diverged = true
+			statuses[i] = st
+			continue
+		}
+		statuses[i] = st
+	}
+	return statuses, nil
+}
+
+// refreshDeployWorkflows re-writes the generated CI workflows to the pinned
+// mallcopVersion. This is the `mallcop migrate` seam: an existing customer
+// deploy repo may carry a stale scan.yml and be missing
 // mallcop-investigate.yml entirely (added in v0.10) — a version bump must
-// force both to the current pinned release. The workflows are generated
-// assets, never hand-edited, so overwriting is safe.
-func refreshDeployWorkflows(dir, mallcopVersion string) error {
+// force both to the current pinned release.
+//
+// SAFETY: a file that has diverged from what mallcop itself generated (an
+// operator hand-edit — see planWorkflowRefresh) is left completely
+// untouched; its status comes back with Diverged=true and Changed=false so
+// the caller can report it instead of silently steamrolling the edit. A file
+// that already renders identically to the target version is left alone too
+// (Changed=false) so a repo that is already current produces no git diff —
+// the idempotent no-op the product's git-is-the-spine model depends on.
+func refreshDeployWorkflows(dir, mallcopVersion string) ([]WorkflowFileStatus, error) {
+	plan, err := planWorkflowRefresh(dir, mallcopVersion)
+	if err != nil {
+		return nil, err
+	}
 	workflowDir := filepath.Join(dir, ".github", "workflows")
 	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-		return fmt.Errorf("deploy-repo: creating .github/workflows/: %w", err)
+		return nil, fmt.Errorf("deploy-repo: creating .github/workflows/: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(workflowDir, "scan.yml"), []byte(renderScanWorkflow(mallcopVersion)), 0o644); err != nil {
-		return fmt.Errorf("deploy-repo: writing .github/workflows/scan.yml: %w", err)
+	for i, wf := range managedWorkflowFiles {
+		st := &plan[i]
+		if st.Diverged {
+			continue
+		}
+		rendered := wf.render(mallcopVersion)
+		if st.Existed {
+			current, err := os.ReadFile(st.Path)
+			if err != nil {
+				return nil, fmt.Errorf("deploy-repo: reading %s: %w", st.Path, err)
+			}
+			if string(current) == rendered {
+				continue // already current -- no write, no spurious git diff
+			}
+		}
+		if err := os.WriteFile(st.Path, []byte(rendered), 0o644); err != nil {
+			return nil, fmt.Errorf("deploy-repo: writing %s: %w", st.Path, err)
+		}
+		st.Changed = true
 	}
-	if err := os.WriteFile(filepath.Join(workflowDir, "mallcop-investigate.yml"), []byte(renderInvestigateWorkflow(mallcopVersion)), 0o644); err != nil {
-		return fmt.Errorf("deploy-repo: writing .github/workflows/mallcop-investigate.yml: %w", err)
-	}
-	return nil
+	return plan, nil
 }
 
 // refreshGoMod bumps the pinned github.com/mallcop-app/mallcop require version

@@ -13,8 +13,16 @@
 //   1. mallcop.yaml  — legacy shape -> the new strict schema (config.Config),
 //      carrying over what maps (github org, findings budget, the donut rail)
 //      and LOUDLY reporting every dropped key rather than silently eating it.
-//   2. .github/workflows/  — force-refresh scan.yml AND add the (v0.10) new
-//      mallcop-investigate.yml, both pinned to the target release.
+//   2. .github/workflows/  — refresh scan.yml AND add the (v0.10) new
+//      mallcop-investigate.yml, both pinned to the target release. A file
+//      that's byte-identical to what mallcop generated for its OWN pinned
+//      version (i.e. genuinely stale, never hand-touched — see
+//      planWorkflowRefresh/refreshDeployWorkflows in deployrepo.go) advances
+//      cleanly; a file that has DIVERGED from the generated template (an
+//      operator hand-edit) is left completely untouched and reported instead
+//      of clobbered (mallcoppro-f19 CRITICAL SAFETY). A run with any diverged
+//      file returns a non-nil error so a partial update is never reported as
+//      success, even though the rest of the repo still advances.
 //   3. go.mod  — bump the github.com/mallcop-app/mallcop require to the target
 //      release so CI sidecar builds match the workflow's downloaded binary.
 //
@@ -103,21 +111,52 @@ func runMigrate(args []string) error {
 	}
 
 	// --- 2 + 3. workflows + go.mod ----------------------------------------
+	divergedCount := 0
 	if !*configOnly {
 		if *dryRun {
-			fmt.Printf("mallcop migrate: [dry-run] would refresh .github/workflows/{scan,mallcop-investigate}.yml and go.mod to %s\n", version)
-		} else {
-			if err := refreshDeployWorkflows(absDir, version); err != nil {
+			plan, err := planWorkflowRefresh(absDir, version)
+			if err != nil {
 				return err
 			}
-			fmt.Printf("mallcop migrate: refreshed .github/workflows/scan.yml + mallcop-investigate.yml (pinned %s)\n", version)
+			for _, st := range plan {
+				rel := filepath.Join(".github", "workflows", st.Name)
+				switch {
+				case !st.Existed:
+					fmt.Printf("mallcop migrate: [dry-run] would CREATE %s (pinned %s)\n", rel, version)
+				case st.Diverged:
+					divergedCount++
+					fmt.Printf("mallcop migrate: [dry-run] %s has diverged from what mallcop generated (hand-edited since %s) — would be LEFT UNTOUCHED\n", rel, describeFromVersion(st.FromVersion))
+				case st.FromVersion == version:
+					fmt.Printf("mallcop migrate: [dry-run] %s already pinned to %s — no change\n", rel, version)
+				default:
+					fmt.Printf("mallcop migrate: [dry-run] would refresh %s: %s -> %s\n", rel, st.FromVersion, version)
+				}
+			}
+			fmt.Printf("mallcop migrate: [dry-run] would refresh go.mod pin to %s (if a github.com/mallcop-app/mallcop require line exists)\n", version)
+		} else {
+			plan, err := refreshDeployWorkflows(absDir, version)
+			if err != nil {
+				return err
+			}
+			for _, st := range plan {
+				rel := filepath.Join(".github", "workflows", st.Name)
+				switch {
+				case st.Diverged:
+					divergedCount++
+					fmt.Printf("mallcop migrate: SKIPPED %s — diverged from what mallcop generated (hand-edited since %s); left untouched, review it manually\n", rel, describeFromVersion(st.FromVersion))
+				case st.Changed:
+					fmt.Printf("mallcop migrate: refreshed %s (pinned %s)\n", rel, version)
+				default:
+					fmt.Printf("mallcop migrate: %s already current — no change\n", rel)
+				}
+			}
 
 			hadPin, err := refreshGoMod(absDir, version)
 			if err != nil {
 				return err
 			}
 			if hadPin {
-				fmt.Printf("mallcop migrate: bumped go.mod require github.com/mallcop-app/mallcop -> %s\n", version)
+				fmt.Printf("mallcop migrate: go.mod require github.com/mallcop-app/mallcop pinned to %s\n", version)
 			} else {
 				fmt.Printf("mallcop migrate: no github.com/mallcop-app/mallcop require line in go.mod — skipped go.mod pin bump\n")
 			}
@@ -129,7 +168,21 @@ func runMigrate(args []string) error {
 	fmt.Printf("  2. Commit + push:        git -C %s add -A && git -C %s commit -m 'mallcop migrate' && git -C %s push\n", *dir, *dir, *dir)
 	fmt.Printf("  3. Ensure the inference key secret is set on the repo:\n")
 	fmt.Printf("       gh secret set MALLCOP_API_KEY --repo <owner/name> --body \"$MALLCOP_API_KEY\"\n")
+
+	if divergedCount > 0 {
+		return fmt.Errorf("mallcop migrate: PARTIAL — %d managed workflow file(s) were hand-edited since generation and left unchanged (see above); resolve them manually, then re-run", divergedCount)
+	}
 	return nil
+}
+
+// describeFromVersion renders a FromVersion for a log line, covering the
+// case where no pin marker could be found at all (predates the marker, or
+// isn't a mallcop-generated file).
+func describeFromVersion(fromVersion string) string {
+	if fromVersion == "" {
+		return "an unrecognized version (no MALLCOP_VERSION marker found)"
+	}
+	return fromVersion
 }
 
 // legacyConfig is the pre-v0.10 mallcop.yaml shape (v0.9.3 and earlier). Every

@@ -153,7 +153,7 @@ func TestScanWorkflowPublishesGapsAndGatesOnMiss(t *testing.T) {
 	// Migrate force-refreshes generated workflows, so the same publish+gate must be
 	// present in the refresh path too (existing repos upgrade on 'mallcop migrate').
 	dir := t.TempDir()
-	if err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
+	if _, err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
 		t.Fatalf("refreshDeployWorkflows: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, ".github", "workflows", "scan.yml"))
@@ -233,7 +233,7 @@ func TestScanWorkflowPublishesDoctorReports(t *testing.T) {
 	// be present in the refresh path too (existing repos upgrade on 'mallcop
 	// migrate'), matching the sibling gaps.json/watchdog coverage above.
 	dir := t.TempDir()
-	if err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
+	if _, err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
 		t.Fatalf("refreshDeployWorkflows: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, ".github", "workflows", "scan.yml"))
@@ -300,7 +300,7 @@ func TestScanWorkflowHasLivenessWatchdog(t *testing.T) {
 	// present in the refresh path too (existing repos upgrade on 'mallcop
 	// migrate'), matching the sibling recall-red gate's own coverage above.
 	dir := t.TempDir()
-	if err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
+	if _, err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
 		t.Fatalf("refreshDeployWorkflows: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, ".github", "workflows", "scan.yml"))
@@ -738,5 +738,147 @@ func TestScaffoldWorkflowsPinActionsBySHA(t *testing.T) {
 				t.Errorf("%s: unpinned action ref: %q", wf, strings.TrimSpace(line))
 			}
 		}
+	}
+}
+
+// TestRefreshDeployWorkflowsAdvancesGenuinelyStaleFile is the mallcoppro-f19
+// happy path: a scan.yml that is byte-identical to what mallcop generated at
+// an OLD pinned version (never hand-touched since) must advance cleanly to
+// the new version — this is the exact live-hit scenario the item names
+// (3dl-dev/mallcop-deploy pinned v0.19.0, scan.yml predating the
+// doctor-publish step added at sha 718c321).
+func TestRefreshDeployWorkflowsAdvancesGenuinelyStaleFile(t *testing.T) {
+	dir := t.TempDir()
+	workflowDir := filepath.Join(dir, ".github", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := renderScanWorkflow("v0.19.0")
+	if err := os.WriteFile(filepath.Join(workflowDir, "scan.yml"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := refreshDeployWorkflows(dir, "v0.20.0")
+	if err != nil {
+		t.Fatalf("refreshDeployWorkflows: %v", err)
+	}
+
+	var scanStatus *WorkflowFileStatus
+	for i := range plan {
+		if plan[i].Name == "scan.yml" {
+			scanStatus = &plan[i]
+		}
+	}
+	if scanStatus == nil {
+		t.Fatalf("no status returned for scan.yml: %+v", plan)
+	}
+	if scanStatus.Diverged {
+		t.Fatalf("a genuinely stale (never hand-edited) scan.yml must not be reported as diverged: %+v", scanStatus)
+	}
+	if scanStatus.FromVersion != "v0.19.0" {
+		t.Errorf("FromVersion = %q, want v0.19.0", scanStatus.FromVersion)
+	}
+	if !scanStatus.Changed {
+		t.Errorf("scan.yml should have been advanced (Changed=true): %+v", scanStatus)
+	}
+
+	raw := mustRead(t, filepath.Join(workflowDir, "scan.yml"))
+	if strings.Contains(raw, `MALLCOP_VERSION: "v0.19.0"`) {
+		t.Error("scan.yml still pinned to the old version after refresh")
+	}
+	if !strings.Contains(raw, `MALLCOP_VERSION: "v0.20.0"`) {
+		t.Error("scan.yml was not pinned to the new version")
+	}
+}
+
+// TestRefreshDeployWorkflowsReportsHandEditedFile is the mallcoppro-f19
+// CRITICAL SAFETY check: a managed workflow file that has been hand-edited
+// since it was generated (content no longer byte-identical to what mallcop
+// would render for its own pinned version) must be left COMPLETELY
+// untouched by refreshDeployWorkflows and reported as diverged — never
+// silently steamrolled. The sibling mallcop-investigate.yml, which was NOT
+// hand-edited, must still advance normally in the same call.
+func TestRefreshDeployWorkflowsReportsHandEditedFile(t *testing.T) {
+	dir := t.TempDir()
+	workflowDir := filepath.Join(dir, ".github", "workflows")
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	handEdited := renderScanWorkflow("v0.19.0") + "\n# operator: added a custom notification step here\n"
+	if err := os.WriteFile(filepath.Join(workflowDir, "scan.yml"), []byte(handEdited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	untouched := renderInvestigateWorkflow("v0.19.0")
+	if err := os.WriteFile(filepath.Join(workflowDir, "mallcop-investigate.yml"), []byte(untouched), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := refreshDeployWorkflows(dir, "v0.20.0")
+	if err != nil {
+		t.Fatalf("refreshDeployWorkflows: %v", err)
+	}
+
+	for _, st := range plan {
+		switch st.Name {
+		case "scan.yml":
+			if !st.Diverged {
+				t.Errorf("hand-edited scan.yml must be reported Diverged=true: %+v", st)
+			}
+			if st.Changed {
+				t.Errorf("hand-edited scan.yml must not be written (Changed must stay false): %+v", st)
+			}
+		case "mallcop-investigate.yml":
+			if st.Diverged {
+				t.Errorf("untouched mallcop-investigate.yml must not be reported diverged: %+v", st)
+			}
+			if !st.Changed {
+				t.Errorf("untouched mallcop-investigate.yml should have advanced: %+v", st)
+			}
+		}
+	}
+
+	// The hand-edited file on disk must be byte-for-byte UNTOUCHED.
+	raw := mustRead(t, filepath.Join(workflowDir, "scan.yml"))
+	if raw != handEdited {
+		t.Errorf("refreshDeployWorkflows clobbered a hand-edited file:\nwant (unchanged):\n%s\ngot:\n%s", handEdited, raw)
+	}
+
+	// The untouched sibling file DID advance.
+	rawInv := mustRead(t, filepath.Join(workflowDir, "mallcop-investigate.yml"))
+	if !strings.Contains(rawInv, `MALLCOP_VERSION: "v0.20.0"`) {
+		t.Error("mallcop-investigate.yml was not advanced to v0.20.0")
+	}
+}
+
+// TestRefreshDeployWorkflowsIsIdempotent proves that refreshing an
+// already-current repo writes nothing: re-running at the SAME version a
+// second file-write already applied produces byte-identical content and
+// Changed=false for every file, so a git-backed deploy repo shows zero diff
+// on a repeat run (no empty commit needed).
+func TestRefreshDeployWorkflowsIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := refreshDeployWorkflows(dir, "v0.20.0"); err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+	scanBefore := mustRead(t, filepath.Join(dir, ".github", "workflows", "scan.yml"))
+	invBefore := mustRead(t, filepath.Join(dir, ".github", "workflows", "mallcop-investigate.yml"))
+
+	plan, err := refreshDeployWorkflows(dir, "v0.20.0")
+	if err != nil {
+		t.Fatalf("second refresh: %v", err)
+	}
+	for _, st := range plan {
+		if st.Changed {
+			t.Errorf("second refresh at the same version must be a no-op, but %s reported Changed=true", st.Name)
+		}
+		if st.Diverged {
+			t.Errorf("an untouched file must never be reported diverged: %s", st.Name)
+		}
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "workflows", "scan.yml")); got != scanBefore {
+		t.Error("scan.yml content changed on an idempotent re-run")
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "workflows", "mallcop-investigate.yml")); got != invBefore {
+		t.Error("mallcop-investigate.yml content changed on an idempotent re-run")
 	}
 }
