@@ -244,6 +244,238 @@ func TestRunAll_IdempotencyDecisionTable(t *testing.T) {
 	})
 }
 
+// --- Case-keyed recurrence (mallcoppro-42e) --------------------------------
+
+// escalatedForCase is escalatedFor plus a resolved CaseID — mirroring what
+// core/pipeline threads onto EscalatedFinding.CaseID via the SAME exported
+// core/cases.CaseID hash (never re-derived here — the caller just needs SOME
+// stable string a real caseID would also produce; the exact hash bytes don't
+// matter to these unit tests, only that two calls sharing caseID collide onto
+// the SAME record and a fresh CaseID produces a different one).
+func escalatedForCase(id, actor, caseID string) EscalatedFinding {
+	ef := escalatedFor(id, actor)
+	ef.CaseID = caseID
+	return ef
+}
+
+// TestRunAll_CaseKeyed_RefireRefreshesSharedRecord proves the mallcoppro-42e
+// migration end to end at the RunAll level: two SEPARATE RunAll calls (two
+// "scans"), each escalating a DIFFERENT finding ID but the SAME CaseID (a
+// refire of the same recurring case), write to exactly ONE on-disk record —
+// investigations/<caseID>.json — refreshed in place: UpdatedAt advances,
+// CreatedAt is preserved from the FIRST occurrence, and FindingID tracks the
+// most recent contributing finding. No investigations/<finding-id>.json is
+// ever written for either finding once CaseID is set.
+func TestRunAll_CaseKeyed_RefireRefreshesSharedRecord(t *testing.T) {
+	s := newTempStore(t)
+	const caseID = "case-abc123"
+	client := &scriptedClient{reply: `{"verdict":"benign","confidence":0.9,"narrative":"first occurrence, looks routine."}`}
+
+	first := Input{Store: s, Client: client, Findings: []EscalatedFinding{escalatedForCase("finding-1", "actor-a", caseID)}, Config: okConfig()}
+	out1 := RunAll(context.Background(), first)
+	if out1.Investigated != 1 {
+		t.Fatalf("scan 1 Outcome = %+v, want Investigated=1", out1)
+	}
+	rec1 := readRecord(t, first, caseID)
+	if rec1.FindingID != "finding-1" || rec1.CaseID != caseID {
+		t.Fatalf("scan 1 record = %+v, want FindingID=finding-1 CaseID=%s", rec1, caseID)
+	}
+
+	// Neither finding's own finding-ID path ever gets a record once CaseID is set.
+	if data, err := s.ReadSnapshot(recordPath("finding-1")); err != nil || len(data) != 0 {
+		t.Fatalf("expected no per-finding record at investigations/finding-1.json, got data=%q err=%v", data, err)
+	}
+
+	time.Sleep(1100 * time.Millisecond) // past RFC3339's 1s resolution
+	client.reply = `{"verdict":"benign","confidence":0.85,"narrative":"recurred again, same read."}`
+	second := Input{Store: s, Client: client, Findings: []EscalatedFinding{escalatedForCase("finding-2", "actor-a", caseID)}, Config: okConfig()}
+	out2 := RunAll(context.Background(), second)
+	if out2.Investigated != 1 || out2.Skipped != 0 {
+		t.Fatalf("scan 2 (refire, DIFFERENT finding, SAME case) Outcome = %+v, want Investigated=1 (a refire is never skipped)", out2)
+	}
+	if client.calls != 2 {
+		t.Fatalf("client called %d times across 2 scans, want 2 (each refire makes its own call)", client.calls)
+	}
+
+	rec2 := readRecord(t, second, caseID)
+	if rec2.FindingID != "finding-2" {
+		t.Errorf("rec2.FindingID = %q, want finding-2 (the most recent contributing finding)", rec2.FindingID)
+	}
+	if rec2.CreatedAt != rec1.CreatedAt {
+		t.Errorf("CreatedAt changed on refire: scan1=%q scan2=%q, want preserved (case's first occurrence)", rec1.CreatedAt, rec2.CreatedAt)
+	}
+	if rec2.UpdatedAt == rec1.UpdatedAt {
+		t.Errorf("UpdatedAt did not advance on refire")
+	}
+	if data, err := s.ReadSnapshot(recordPath("finding-2")); err != nil || len(data) != 0 {
+		t.Fatalf("expected no per-finding record at investigations/finding-2.json, got data=%q err=%v", data, err)
+	}
+
+	// Exactly one investigations/*.json record exists for this case across
+	// both scans — no duplicate, no second file under either finding's ID.
+	if data, err := s.ReadSnapshot(recordPath(caseID)); err != nil || len(data) == 0 {
+		t.Fatalf("expected exactly one record at investigations/%s.json", caseID)
+	}
+}
+
+// TestRunAll_CaseKeyed_VerdictFlipFlagged proves the recurrence design's other
+// half: a refire whose fresh pass lands a MATERIALLY DIFFERENT trusted verdict
+// (benign -> threat) WRITES the new verdict (never averages, never suppresses
+// it — Verdict/Confidence/Narrative are the fresh pass's own values) AND flags
+// the change: structurally (Record.VerdictFlip) and in-band (a prefix on the
+// narrative itself), so a reader of just this one JSON document sees the flip
+// without having to diff historical copies.
+func TestRunAll_CaseKeyed_VerdictFlipFlagged(t *testing.T) {
+	s := newTempStore(t)
+	const caseID = "case-flip1"
+	client := &scriptedClient{reply: `{"verdict":"benign","confidence":0.9,"narrative":"looked routine at first."}`}
+
+	first := Input{Store: s, Client: client, Findings: []EscalatedFinding{escalatedForCase("finding-1", "actor-a", caseID)}, Config: okConfig()}
+	if out := RunAll(context.Background(), first); out.Investigated != 1 {
+		t.Fatalf("scan 1 Outcome = %+v, want Investigated=1", out)
+	}
+	rec1 := readRecord(t, first, caseID)
+	if rec1.Verdict != VerdictBenign || rec1.VerdictFlip != nil {
+		t.Fatalf("scan 1 record = %+v, want Verdict=benign, VerdictFlip=nil (nothing to flip against yet)", rec1)
+	}
+
+	client.reply = `{"verdict":"threat","confidence":0.95,"narrative":"recurrence pattern now reveals active compromise."}`
+	second := Input{Store: s, Client: client, Findings: []EscalatedFinding{escalatedForCase("finding-2", "actor-a", caseID)}, Config: okConfig()}
+	if out := RunAll(context.Background(), second); out.Investigated != 1 {
+		t.Fatalf("scan 2 (refire, flipped verdict) Outcome = %+v, want Investigated=1", out)
+	}
+
+	rec2 := readRecord(t, second, caseID)
+	if rec2.Verdict != VerdictThreat {
+		t.Fatalf("rec2.Verdict = %q, want threat — the FRESH verdict is written, never averaged or suppressed", rec2.Verdict)
+	}
+	if rec2.VerdictFlip == nil {
+		t.Fatal("rec2.VerdictFlip = nil, want a flip flag (benign -> threat)")
+	}
+	if rec2.VerdictFlip.From != VerdictBenign || rec2.VerdictFlip.To != VerdictThreat {
+		t.Errorf("VerdictFlip = %+v, want {From:benign To:threat}", rec2.VerdictFlip)
+	}
+	if !strings.Contains(rec2.Narrative, "VERDICT FLIP") {
+		t.Errorf("Narrative = %q, want an in-band flip flag", rec2.Narrative)
+	}
+	if !strings.Contains(rec2.Narrative, "active compromise") {
+		t.Errorf("Narrative = %q, want the model's own fresh narrative preserved, not replaced", rec2.Narrative)
+	}
+}
+
+// TestRunAll_CaseKeyed_MultiFindingPerCase_RerunIsIdempotent proves the
+// mallcoppro-42e review fix (BUG 1 — re-run idempotency was lost): two
+// DISTINCT findings sharing ONE case, in a SINGLE scan, both genuinely need
+// investigating the first time (Investigated=2, one call each) — but an
+// IDENTICAL RERUN of that exact same scan (the SAME two findings handed to
+// RunAll again) must cost ZERO additional calls (Skipped=2), exactly like
+// the single-finding-per-case case. Without the fix, the skip condition
+// compared only against the record's single FindingID (the most recent
+// contributor), which a second, different finding can never match even on
+// its own exact re-run — so this scenario re-invested BOTH findings on
+// EVERY re-scan, forever (a metered-cost regression).
+func TestRunAll_CaseKeyed_MultiFindingPerCase_RerunIsIdempotent(t *testing.T) {
+	s := newTempStore(t)
+	const caseID = "case-multi1"
+	client := &scriptedClient{reply: `{"verdict":"benign","confidence":0.9,"narrative":"routine, first pass."}`}
+
+	in := Input{
+		Store: s, Client: client,
+		Findings: []EscalatedFinding{
+			escalatedForCase("finding-1", "actor-a", caseID),
+			escalatedForCase("finding-2", "actor-a", caseID),
+		},
+		Config: okConfig(),
+	}
+
+	first := RunAll(context.Background(), in)
+	if first.Investigated != 2 || first.Skipped != 0 {
+		t.Fatalf("scan 1 Outcome = %+v, want Investigated=2 Skipped=0 (both findings are new)", first)
+	}
+	if client.calls != 2 {
+		t.Fatalf("scan 1 made %d calls, want 2 (one per distinct finding)", client.calls)
+	}
+	rec1 := readRecord(t, in, caseID)
+	if !containsString(rec1.InvestigatedFindingIDs, "finding-1") || !containsString(rec1.InvestigatedFindingIDs, "finding-2") {
+		t.Fatalf("rec1.InvestigatedFindingIDs = %v, want both finding-1 and finding-2", rec1.InvestigatedFindingIDs)
+	}
+
+	// Scan 2: the IDENTICAL scan (same two findings, same case) re-runs.
+	// This must be a pure no-op: zero additional calls, zero writes.
+	beforeSHA := headSHA(t, s)
+	second := RunAll(context.Background(), in)
+	if second.Investigated != 0 || second.Skipped != 2 || second.Degraded != 0 {
+		t.Fatalf("scan 2 (identical re-run) Outcome = %+v, want Investigated=0 Skipped=2 — a re-run of "+
+			"a multi-finding case must cost zero calls, exactly like a single-finding case", second)
+	}
+	if client.calls != 2 {
+		t.Errorf("client called %d times across 2 identical scans, want 2 (scan 2 must make ZERO additional "+
+			"model calls — a metered-cost regression if it doesn't)", client.calls)
+	}
+	afterSHA := headSHA(t, s)
+	if beforeSHA != afterSHA {
+		t.Errorf("identical re-run produced a new commit (%s -> %s); the shared case record must be untouched", beforeSHA, afterSHA)
+	}
+	rec2 := readRecord(t, in, caseID)
+	if rec2.CreatedAt != rec1.CreatedAt || rec2.UpdatedAt != rec1.UpdatedAt {
+		t.Errorf("identical re-run touched the record: rec1=%+v rec2=%+v", rec1, rec2)
+	}
+}
+
+// TestRunAll_CaseKeyed_IntraScanDisagreement_NotAFlip proves the
+// mallcoppro-42e review fix (BUG 2 — spurious intra-scan VerdictFlip): two
+// DISTINCT findings sharing ONE case, landing DIFFERENT investigator
+// verdicts within a SINGLE scan (a sequencedClient serves benign then
+// threat), is NEVER a VerdictFlip — nothing changed over TIME, two findings
+// simply co-occurred and disagreed at the same moment. The later verdict is
+// still WRITTEN (never averaged/suppressed), and the disagreement is
+// deliberately represented via CoOccurringVerdict + an in-band narrative
+// note — never silently overwritten, and never mislabeled as a temporal
+// flip.
+func TestRunAll_CaseKeyed_IntraScanDisagreement_NotAFlip(t *testing.T) {
+	s := newTempStore(t)
+	const caseID = "case-cooccur1"
+	client := &sequencedClient{replies: []string{
+		`{"verdict":"benign","confidence":0.8,"narrative":"first finding looks routine."}`,
+		`{"verdict":"threat","confidence":0.9,"narrative":"second finding, same scan, looks malicious."}`,
+	}}
+
+	in := Input{
+		Store: s, Client: client,
+		Findings: []EscalatedFinding{
+			escalatedForCase("finding-1", "actor-a", caseID), // processed first (sorted by finding ID)
+			escalatedForCase("finding-2", "actor-a", caseID), // processed second
+		},
+		Config: okConfig(),
+	}
+
+	out := RunAll(context.Background(), in)
+	if out.Investigated != 2 {
+		t.Fatalf("Outcome = %+v, want Investigated=2 (both co-occurring findings are new)", out)
+	}
+
+	rec := readRecord(t, in, caseID)
+	if rec.Verdict != VerdictThreat {
+		t.Fatalf("rec.Verdict = %q, want threat — the later finding's verdict is written, not averaged", rec.Verdict)
+	}
+	if rec.VerdictFlip != nil {
+		t.Fatalf("rec.VerdictFlip = %+v, want nil — two co-occurring findings in ONE scan disagreeing is "+
+			"never a flip (nothing changed over time)", rec.VerdictFlip)
+	}
+	if rec.CoOccurringVerdict == nil {
+		t.Fatal("rec.CoOccurringVerdict = nil, want a co-occurring-disagreement flag (benign -> threat)")
+	}
+	if rec.CoOccurringVerdict.From != VerdictBenign || rec.CoOccurringVerdict.To != VerdictThreat {
+		t.Errorf("CoOccurringVerdict = %+v, want {From:benign To:threat}", rec.CoOccurringVerdict)
+	}
+	if strings.Contains(rec.Narrative, "VERDICT FLIP") {
+		t.Errorf("Narrative = %q, must NOT claim a VERDICT FLIP — nothing flipped over time", rec.Narrative)
+	}
+	if !strings.Contains(rec.Narrative, "CO-OCCURRING") {
+		t.Errorf("Narrative = %q, want an in-band co-occurring-disagreement note", rec.Narrative)
+	}
+}
+
 // TestRunAll_Force_BypassesIdempotencySkip proves the low-confidence
 // deeper-pass retrigger (mallcoppro-09a): a finding whose EXISTING record is
 // already ok + current-schema (the case the normal path SKIPS) IS re-investigated

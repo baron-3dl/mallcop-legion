@@ -58,6 +58,21 @@ func caseID(k Key) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
+// CaseID is the EXPORTED twin of caseID — the SHARED clustering hash any
+// caller outside this package must use to resolve which case a (type, actor,
+// entity) triple belongs to, so a second, independently-derived clustering
+// path never has a chance to drift from Collapse's own grouping
+// (mallcoppro-42e: core/inquest's case-keyed investigation records resolve a
+// finding's case ID this way — core/inquest cannot import this package
+// itself, per its closed import allowlist, so its caller, core/pipeline,
+// which already imports core/cases for directive replay, computes CaseID
+// once per escalated finding and threads it through). Identical output to
+// caseID for the same Key; kept as two names only so the internal callers in
+// this file keep their original, unexported spelling.
+func CaseID(k Key) string {
+	return caseID(k)
+}
+
 // Collapse projects newEsc — this scan's already-escalated occurrences — onto
 // existing, clustering each by (Type, Actor, Entity), and returns the FULL
 // updated case set. It is PURE: a deterministic function of its arguments

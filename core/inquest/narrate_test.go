@@ -33,6 +33,30 @@ func (c *scriptedClient) Messages(_ context.Context, req agent.MessagesRequest) 
 	}, nil
 }
 
+// sequencedClient is a canned agent.Client that returns a DIFFERENT scripted
+// reply per call, in order (replies[0] on the first call, replies[1] on the
+// second, ...) — the fixture the intra-scan-disagreement tests need: a SINGLE
+// RunAll call processing two co-occurring findings that land two DIFFERENT
+// investigator verdicts, unlike scriptedClient's one fixed reply for every
+// call. Calling past len(replies) repeats the last entry rather than
+// panicking/indexing out of range.
+type sequencedClient struct {
+	replies []string
+	calls   int
+}
+
+func (c *sequencedClient) Messages(_ context.Context, _ agent.MessagesRequest) (agent.MessagesResponse, error) {
+	i := c.calls
+	if i >= len(c.replies) {
+		i = len(c.replies) - 1
+	}
+	c.calls++
+	return agent.MessagesResponse{
+		StopReason: "end_turn",
+		Content:    []agent.ContentBlock{{Type: "text", Text: c.replies[i]}},
+	}, nil
+}
+
 func sampleFinding() finding.Finding {
 	return finding.Finding{
 		ID: "finding-evt-1", Type: "assume_role", Severity: "critical",

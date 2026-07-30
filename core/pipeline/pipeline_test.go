@@ -219,7 +219,7 @@ func TestPipeline_EndToEnd_ConnectDetectCascadeStore(t *testing.T) {
 		Store:     st,
 		Baseline:  knownActorsBaseline(),
 		Cascade: agent.CascadeOptions{RepoRoot: root, Tools: fixedTools{
-			text:      "events: evt-mfa-001 mfa_disabled ops-bot 14:22; baseline: ops-bot known, 312 prior changes, break-glass runbook RB-114 on file",
+			text: "events: evt-mfa-001 mfa_disabled ops-bot 14:22; baseline: ops-bot known, 312 prior changes, break-glass runbook RB-114 on file",
 			// Deep tool signals (6 calls / 4 distinct tools) so the investigate-tier
 			// resolve clears the structural gate (>=0.55) and need not fan out.
 			toolCalls: 6, distinctTools: 4,
