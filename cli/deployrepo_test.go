@@ -165,6 +165,86 @@ func TestScanWorkflowPublishesGapsAndGatesOnMiss(t *testing.T) {
 	}
 }
 
+// TestScanWorkflowPublishesDoctorReports is the mallcoppro-62c DONE CONDITION
+// check: the rendered scan.yml runs 'mallcop doctor --all --json' and
+// publishes the result as store/doctor.json on the findings branch -- the
+// MISSING LINK between the doctor CLI (mallcoppro-529) and the console
+// reader (mallcoppro-99b0). It must stage ONLY doctor.json (never 'add -A',
+// matching the sibling gaps.json publish step's own discipline), must run
+// BEFORE the findings-store push (so doctor.json is durably published, same
+// ordering discipline as the gaps.json step), and must never fail the job
+// (the doctor invocation's own exit code is neutralized before the
+// git add/commit).
+func TestScanWorkflowPublishesDoctorReports(t *testing.T) {
+	w := renderScanWorkflow("v0.7.0")
+
+	if !strings.Contains(w, "mallcop doctor --all --json --store ./store") {
+		t.Fatalf("scan.yml does not run 'mallcop doctor --all --json' to build the doctor.json aggregate:\n%s", w)
+	}
+	if !strings.Contains(w, "store/doctor.json") {
+		t.Fatalf("scan.yml does not write store/doctor.json:\n%s", w)
+	}
+	if !strings.Contains(w, "git -C store add doctor.json") {
+		t.Fatalf("scan.yml doctor publish must stage ONLY doctor.json (never add -A):\n%s", w)
+	}
+	if strings.Contains(w, "add -A") || strings.Contains(w, `commit -q -m "scan:`) {
+		t.Fatalf("doctor publish must not restage the whole tree or reuse the scan commit form:\n%s", w)
+	}
+
+	// The doctor invocation's own exit code must be neutralized (a deficient
+	// or errored connector must not fail the scheduled job) BEFORE the
+	// git add/commit runs.
+	if !strings.Contains(w, "set +e") || !strings.Contains(w, "set -e") {
+		t.Fatalf("scan.yml doctor publish does not neutralize 'mallcop doctor --all's own exit code:\n%s", w)
+	}
+
+	// Publish BEFORE the push, same ordering discipline as gaps.json, so the
+	// artifact is durably published even on a failing run.
+	pushIdx := strings.Index(w, "git -C store push")
+	doctorIdx := strings.Index(w, "mallcop doctor --all --json")
+	if pushIdx < 0 || doctorIdx < 0 || doctorIdx > pushIdx {
+		t.Fatalf("doctor publish must run BEFORE the findings push (doctor@%d, push@%d):\n%s", doctorIdx, pushIdx, w)
+	}
+
+	// The step must parse as a well-formed YAML step within the scan job
+	// (not just a substring match).
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(w), &doc); err != nil {
+		t.Fatalf("scan.yml does not parse as YAML: %v\n%s", err, w)
+	}
+	jobs, _ := doc["jobs"].(map[string]any)
+	scanJob, _ := jobs["scan"].(map[string]any)
+	steps, _ := scanJob["steps"].([]any)
+	found := false
+	for _, s := range steps {
+		stepMap, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if run, _ := stepMap["run"].(string); strings.Contains(run, "mallcop doctor --all") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("scan.yml has no parsed step running 'mallcop doctor --all':\n%s", w)
+	}
+
+	// Migrate force-refreshes generated workflows, so the doctor publish must
+	// be present in the refresh path too (existing repos upgrade on 'mallcop
+	// migrate'), matching the sibling gaps.json/watchdog coverage above.
+	dir := t.TempDir()
+	if err := refreshDeployWorkflows(dir, "v0.9.0"); err != nil {
+		t.Fatalf("refreshDeployWorkflows: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, ".github", "workflows", "scan.yml"))
+	if err != nil {
+		t.Fatalf("read refreshed scan.yml: %v", err)
+	}
+	if !strings.Contains(string(raw), "mallcop doctor --all --json --store ./store") {
+		t.Fatalf("refreshed scan.yml (migrate path) is missing the doctor publish step:\n%s", raw)
+	}
+}
+
 // TestScanWorkflowHasLivenessWatchdog is the mallcoppro-1e0 DONE CONDITION
 // check: the rendered scan.yml carries an `if: always()` step invoking
 // `mallcop status --gate --max-age 48h` (design §5 primitive 1 — the

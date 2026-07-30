@@ -23,6 +23,7 @@
 //	mallcop migrate     [--dir <path>] [--mallcop-version <tag>] [--config-only] [--dry-run]
 //	mallcop status      --store <dir> [--gate --max-age <dur>]
 //	mallcop doctor      <connector-id> [--config <mallcop.yaml>] [--store <dir>] [--json] [--confirm <grant-ref>]
+//	mallcop doctor      --all [--config <mallcop.yaml>] [--store <dir>] [--json]
 //	mallcop config
 //	mallcop config set connector --kind=file|github|cloud --id=<id> [...]
 //	mallcop config set autonomy <non|semi|fully>
@@ -257,6 +258,18 @@ Commands:
                commands (blast-radius, dry-run, staleness) — this process
                NEVER runs one. Exit 1 (like 'mallcop scan') when deficient or
                still-failing-after-confirm; 0 when healthy/resolved.
+
+  doctor --all  Diagnose EVERY configured connector that supports self-diagnosis and
+                print the results as ONE JSON array (--json) -- the aggregate the
+                canonical scheduled-scan workflow publishes as store/doctor.json.
+                A connector with no doctor support, or whose live probe itself
+                errors, is silently absent from the array (never a fabricated
+                healthy-looking entry) instead of failing the whole command.
+                Never records to the grants stream (unlike the single-connector
+                form above) -- doctor.json is an observability snapshot, not the
+                interactive remediation loop. Exit 1 when any present report is
+                deficient or any connector's probe errored; 0 when everything
+                diagnosed came back healthy.
 
   config  Print the effective scan config merged from a discovered mallcop.yaml + the environment
   config set connector --kind=file|github|cloud --id=<id> [--path=][--org=][--source=][--binary=][--since=][--args=a,b][--env=NAME1,NAME2]

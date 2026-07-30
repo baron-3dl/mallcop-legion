@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 //
 //	mallcop doctor <connector-id> [--config <mallcop.yaml>] [--store <dir>] [--json]
 //	mallcop doctor <connector-id> --confirm <grant-ref> [--config <mallcop.yaml>] [--store <dir>] [--json]
+//	mallcop doctor --all [--config <mallcop.yaml>] [--store <dir>] [--json]
 //
 // The first form runs Diagnose and records a GRANT-MISS/status row (grant_ref
 // in the output). After the operator applies one of the printed
@@ -42,12 +44,22 @@ import (
 // didn't (core/pipeline's NEW-A19 semantics) — against the ORIGINAL row's
 // grant_ref, through the real git-backed store.
 //
+// The third form, --all (mallcoppro-62c), is the aggregate the canonical
+// scheduled-scan workflow (cli/deployrepo.go's scanWorkflowTemplate) drives:
+// it diagnoses EVERY configured connector that supports self-diagnosis and
+// prints the results as ONE array — see runDoctorAll's own doc for why that
+// aggregation belongs here (one process, one Diagnosables walk) rather than
+// a bash loop re-invoking the single-connector form above per connector.
+//
 // Exit codes: 0 healthy/resolved, 1 (errFindings) deficient/still-failing —
 // same sentinel `mallcop scan`/`mallcop status --gate` use for "something
 // needs an operator's attention" — 2 any other command failure.
 func runDoctor(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("doctor: usage: mallcop doctor <connector-id> [--config <mallcop.yaml>] [--store <dir>] [--json] [--confirm <grant-ref>]")
+		return fmt.Errorf("doctor: usage: mallcop doctor <connector-id>|--all [--config <mallcop.yaml>] [--store <dir>] [--json] [--confirm <grant-ref>]")
+	}
+	if args[0] == "--all" {
+		return runDoctorAll(args[1:])
 	}
 	connectorID := args[0]
 
@@ -227,6 +239,155 @@ func runDoctorConfirm(ctx context.Context, st *store.Store, diag connect.Diagnos
 type doctorConfirmReport struct {
 	doctorReport
 	Resolved bool `json:"resolved"`
+}
+
+// runDoctorAll implements `mallcop doctor --all`: diagnoses EVERY configured
+// connector that supports self-diagnosis and prints the results as ONE JSON
+// array — the shape the canonical scheduled-scan workflow (cli/deployrepo.go's
+// scanWorkflowTemplate "Publish doctor reports" step, mallcoppro-62c) writes
+// verbatim to store/doctor.json on the findings branch for mallcop-pro's
+// console (mallcoppro-99b0) to read.
+//
+// This is a SEPARATE invocation form from the single-connector
+// `mallcop doctor <connector-id> --json` mallcoppro-529 shipped — that
+// contract (one DiagnosisReport object per invocation, asserted by the
+// mallcop-connectors sibling's own doctor_test.go) is UNCHANGED and
+// untouched by this function. --all aggregates by walking the SAME
+// pipeline.Diagnosables reachability findDiagnosable already uses, in one
+// process, exactly the way `mallcop collect --json` already aggregates
+// coverage gaps across every configured connector in one process rather
+// than a caller looping a per-connector command — the established
+// aggregation pattern in this codebase.
+//
+// A connector with no doctor support is silently absent from the array: it's
+// never in pipeline.Diagnosables' walk to begin with (only connect/exec's
+// ExecConnector — kind:cloud — implements Diagnosable today), so there is no
+// separate "skip" branch to fall into — a scan must not die because one
+// connector lacks a doctor, and here there is nothing that could die. A
+// connector whose live Diagnose call DOES return an error (diagnoseAll,
+// below) is likewise omitted from the array rather than represented with a
+// synthetic/empty report — CRITICAL per the item's anti-lie contract: an
+// operator reading doctor.json must be able to tell "this connector was
+// never diagnosed" (absent from the array) apart from "this connector is
+// healthy" (present, Known:true, no remediation). This function never
+// fabricates the latter for the former.
+//
+// --all deliberately never calls pipeline.RecordDiagnosis: that writes an
+// unconditional row to the grants stream on every call (core/pipeline's own
+// doc on RecordDiagnosis), which is the right behavior for an operator
+// explicitly running the single-connector form, or a genuine connect
+// failure recording a GRANT-MISS — but would flood the grants stream with a
+// steady-state row per configured connector on every scheduled run (hourly,
+// per scanWorkflowTemplate's cron) regardless of health. doctor.json is a
+// point-in-time observability snapshot for the console, not a driver of the
+// interactive GrantClaim remediation loop.
+func runDoctorAll(args []string) error {
+	fs := flag.NewFlagSet("doctor --all", flag.ContinueOnError)
+	configPath := fs.String("config", "", "Path to mallcop.yaml (overrides discovery/$"+config.EnvConfigPath+")")
+	storePath := fs.String("store", "", "Path to the git-repo store (overrides config store.path) -- used only to construct connectors identically to the single-connector doctor/scan path; --all itself never writes to it")
+	asJSON := fs.Bool("json", false, "Emit the aggregated []DiagnosisReport as a JSON array instead of the human-readable form")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, cfgPath, err := config.LoadEffective(*configPath)
+	if err != nil {
+		return fmt.Errorf("doctor --all: %w", err)
+	}
+	haveConfig := cfgPath != ""
+	if !haveConfig || len(cfg.Connectors) == 0 {
+		return fmt.Errorf("doctor --all: no connectors configured (a mallcop.yaml with a connectors: list is required)")
+	}
+
+	resolvedStore := *storePath
+	if resolvedStore == "" {
+		resolvedStore = cfg.Store.Path
+	}
+
+	// buildConnectors is the SAME config -> connector composition root
+	// `mallcop scan` and the single-connector doctor form use (see
+	// runDoctor's own comment) -- no second, hand-rolled construction path.
+	conn, err := buildConnectors(cfg, resolvedStore, nil)
+	if err != nil {
+		return fmt.Errorf("doctor --all: %w", err)
+	}
+
+	diags := pipeline.Diagnosables(conn)
+
+	reports, anyDeficient, anyError := diagnoseAll(context.Background(), diags, os.Stderr)
+
+	if *asJSON {
+		if err := printDoctorAllJSON(reports); err != nil {
+			return err
+		}
+	} else {
+		for _, report := range reports {
+			printDoctorAllHuman(report)
+		}
+	}
+
+	if anyDeficient || anyError {
+		return errFindings
+	}
+	return nil
+}
+
+// diagnoseAll runs Diagnose (via ctx) against every d in diags and returns
+// one connect.DiagnosisReport per connector whose call actually produced a
+// report. A connector whose Diagnose call returns an error is OMITTED from
+// reports -- never given a synthetic placeholder entry -- and a one-line
+// warning is written to errW so the failure is reported honestly (e.g. the
+// scheduled workflow's own step log) without aborting the loop or the
+// caller's process: one connector's failed probe must never take down the
+// aggregate for every other configured connector.
+//
+// anyDeficient is true when at least one PRESENT report is deficient
+// (diagnosisDeficient); anyError is true when at least one Diagnose call was
+// omitted this way. Both feed runDoctorAll's exit-code convention.
+func diagnoseAll(ctx context.Context, diags []connect.Diagnosable, errW io.Writer) (reports []connect.DiagnosisReport, anyDeficient, anyError bool) {
+	for _, d := range diags {
+		report, err := d.Diagnose(ctx)
+		if err != nil {
+			fmt.Fprintf(errW, "doctor --all: diagnose %q: %v (omitted from doctor.json -- never diagnosed, never fabricated healthy)\n", d.ID(), err)
+			anyError = true
+			continue
+		}
+		reports = append(reports, report)
+		if diagnosisDeficient(report) {
+			anyDeficient = true
+		}
+	}
+	return reports, anyDeficient, anyError
+}
+
+// printDoctorAllJSON writes reports as a JSON array to stdout -- an EMPTY
+// array (never null) when nothing was diagnosed, so a reader (the console,
+// or jq in the workflow step) always gets valid, well-typed JSON.
+func printDoctorAllJSON(reports []connect.DiagnosisReport) error {
+	if reports == nil {
+		reports = []connect.DiagnosisReport{}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(reports)
+}
+
+// printDoctorAllHuman writes one summary line per report. It does not print a
+// grant_ref/--confirm hint the way printDiagnosisReport does: --all never
+// records to the grants stream, so there is no ref to hand back.
+func printDoctorAllHuman(report connect.DiagnosisReport) {
+	id := report.ConnectorID
+	if id == "" {
+		id = "(unknown)"
+	}
+	status := "HEALTHY"
+	switch {
+	case !report.Diagnosis.Known:
+		status = "UNKNOWN"
+	case len(report.Remediation) > 0:
+		status = "DEFICIENT"
+	}
+	fmt.Printf("%-24s %-10s %s\n", id, status, report.Diagnosis.Summary)
 }
 
 // diagnosisDeficient reports whether report describes a connector an operator
