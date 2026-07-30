@@ -17,6 +17,7 @@ package connect
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -105,6 +106,77 @@ type DiagnosisReport struct {
 	// one exists. Empty when Diagnosis.Known is false (nothing to rank yet) or
 	// the deficiency needs no remediation.
 	Remediation []RemediationOption `json:"remediation,omitempty"`
+}
+
+// SecurityDecisionRequest is what a DiagnosisReport whose Diagnosis is
+// Known == false maps onto for mallcop-pro's async E1 SecurityDecision
+// channel (mallcoppro-d3f, Design §Gap D wiring; mallcop-pro
+// internal/server/security_decision.go, mallcoppro-44bc). Field-for-field
+// the same shape as that endpoint's securityDecisionRaiseRequest body
+// (POST /api/security/decisions: kind/target/blast_radius/question) so a
+// caller holding a live, authenticated session — mallcop-pro's own chat
+// runtime, never core/connect itself — can pass this value's JSON straight
+// through with no translation layer that could drift from the real contract.
+// "Repo" is deliberately absent: that identifies WHICH customer connection
+// the ask belongs to, something only the caller (who holds the connection)
+// knows — core/connect diagnoses a connector, it does not know about repos.
+type SecurityDecisionRequest struct {
+	// Kind mirrors mallcop-pro's decisionKind vocabulary
+	// (grant|authorize|approve|confirm). RaiseUnknownDiagnosis always
+	// returns "grant" — an unknown diagnosis has no ranked RemediationOption
+	// to try, so mallcop is asking the operator to review or supply the
+	// credential/scope it could not classify on its own.
+	Kind string `json:"kind"`
+	// Target is what the decision is about — the connector this diagnosis
+	// came from.
+	Target string `json:"target"`
+	// BlastRadius is the operator-facing "what does approving this allow"
+	// text. mallcop-pro rejects an empty one (the operator must be able to
+	// judge what they are about to approve) — RaiseUnknownDiagnosis never
+	// returns one empty.
+	BlastRadius string `json:"blast_radius"`
+	// Question is the operator-facing question — synthesized from the
+	// diagnosis so the operator sees exactly what mallcop could and could
+	// not tell about the failure.
+	Question string `json:"question"`
+}
+
+// RaiseUnknownDiagnosis turns a DiagnosisReport into a SecurityDecisionRequest
+// when — and only when — its Diagnosis.Known is false: a GRANT-MISS the
+// corpus hasn't mapped yet, so Remediate has nothing ranked to suggest and
+// the doctor would otherwise dead-end on a raw, unresolved failure. ok is
+// false when report.Diagnosis.Known is true — a classified failure already
+// has (or will have) a ranked RemediationOption to try, so it is not an E1
+// ask; the caller's normal Remediate/Confirm flow (design §3) handles it
+// instead.
+//
+// This function is pure and does no I/O — it is the data-shape half of the
+// Gap D wiring. The caller is responsible for persisting the request
+// somewhere the operator-input spine reads (core/pipeline's connect-stage
+// wiring appends it onto a store.GrantOutcome row) and, eventually, for
+// actually calling mallcop-pro's endpoint from a context that holds the
+// live session the endpoint requires — core/connect never does I/O of any
+// kind (see the package import-lint) and has no such session to hold.
+func RaiseUnknownDiagnosis(report DiagnosisReport) (req SecurityDecisionRequest, ok bool) {
+	if report.Diagnosis.Known {
+		return SecurityDecisionRequest{}, false
+	}
+	target := report.ConnectorID
+	if target == "" {
+		target = "connector"
+	}
+	return SecurityDecisionRequest{
+		Kind:   "grant",
+		Target: target,
+		BlastRadius: fmt.Sprintf(
+			"mallcop could not classify why %s failed to authenticate or pull, so it has no "+
+				"automated fix to try. Approving this only tells mallcop you have reviewed the "+
+				"failure yourself — it grants no credential or scope on its own.", target),
+		Question: fmt.Sprintf(
+			"%s's self-diagnosis came back unclassified (confidence %.2f): %s. Can you check its "+
+				"credential/grant and confirm what access it's missing?",
+			target, report.Diagnosis.Confidence, report.Diagnosis.Summary),
+	}, true
 }
 
 // GrantClaim is the ONE code-first primitive per connector (or per cloud

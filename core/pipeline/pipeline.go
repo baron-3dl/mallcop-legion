@@ -272,9 +272,21 @@ func Run(ctx context.Context, cfg Config) (summary Summary, err error) {
 	}()
 
 	// (1) CONNECT.
-	events, err := cfg.Connector.Pull(ctx)
-	if err != nil {
-		return Summary{}, fmt.Errorf("pipeline: connect: %w", err)
+	events, connErr := cfg.Connector.Pull(ctx)
+	if connErr != nil {
+		// mallcoppro-d3f (Design §Gap D wiring): a Pull failure used to dead-end
+		// here as a raw, uninterpreted error — nothing durable recorded WHY, and
+		// no path for the operator to act on an unclassified failure short of
+		// reading logs. If the connector can self-diagnose, record what it found
+		// onto the SAME spine the rest of the store already steers from,
+		// instead — never replacing or masking connErr, which remains Run's
+		// error either way (a diagnosis, known or not, never turns a genuine
+		// connect failure into a successful scan).
+		err = fmt.Errorf("pipeline: connect: %w", connErr)
+		if derr := recordConnectorDiagnosis(ctx, cfg.Store, cfg.Connector); derr != nil {
+			err = fmt.Errorf("%w (additionally failed to record connector diagnosis: %v)", err, derr)
+		}
+		return Summary{}, err
 	}
 	stage = "baseline"
 

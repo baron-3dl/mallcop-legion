@@ -290,6 +290,40 @@ type GrantOutcome struct {
 	// closing a GRANT-MISS therefore must capture the sha Append returned for
 	// the miss and carry it forward into the resolution row's ResolvedRef.
 	ResolvedRef string `json:"resolved_ref,omitempty"`
+
+	// DecisionKind/BlastRadius/Question (mallcoppro-d3f, Design §Gap D wiring)
+	// are ADDITIVE fields — omitted entirely by a store written before this
+	// change, which decodes as all three empty, exactly like ScanRecord's
+	// Success/FailedStage/Error precedent above. They are populated on a MISS
+	// row ONLY when the Diagnose call that produced it came back
+	// Diagnosis.Known == false: an unclassified failure has no ranked
+	// RemediationOption to try (Remediate has nothing to rank), so instead of
+	// dead-ending it becomes an E1 async SecurityDecision ask (mallcop-pro
+	// mallcoppro-44bc, POST /api/security/decisions) the operator can judge.
+	// core/investigate is net/http-banned and that endpoint requires an
+	// authenticated browser session mallcop's own headless process never
+	// holds (internal/server/session.go: cookie-only, no bearer fallback) —
+	// so this row IS mallcop's half of the E1 wire, mirroring the same
+	// "mallcop enqueues, mallcop-pro's privileged side later consumes" shape
+	// KindSelfextDispatches already established, never a direct HTTP call
+	// this process cannot authenticate. See connect.RaiseUnknownDiagnosis,
+	// which computes these three values from a DiagnosisReport.
+	//
+	// DecisionKind mirrors mallcop-pro's decisionKind vocabulary
+	// (grant|authorize|approve|confirm) — always "grant" for an unknown
+	// GrantClaim diagnosis, since mallcop is asking the operator to review or
+	// supply the credential/scope it could not classify on its own. Empty on
+	// a Known==true miss row (a classified failure already has, or will have,
+	// a ranked remediation to try) and always empty on a resolution row.
+	DecisionKind string `json:"decision_kind,omitempty"`
+	// BlastRadius is the operator-facing "what does approving this allow"
+	// text — mirrors mallcop-pro's securityDecisionRaiseRequest.BlastRadius
+	// field-for-field, populated whenever DecisionKind is set.
+	BlastRadius string `json:"blast_radius,omitempty"`
+	// Question is the operator-facing question — mirrors mallcop-pro's
+	// securityDecisionRaiseRequest.Question field-for-field, populated
+	// whenever DecisionKind is set.
+	Question string `json:"question,omitempty"`
 }
 
 // LoadGrantOutcomes replays the grants stream into typed GrantOutcome
