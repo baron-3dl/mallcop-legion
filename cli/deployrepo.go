@@ -39,6 +39,56 @@
 // actually exercised live is envGitHubToken: a raw token from an environment
 // variable (e.g. `gh auth token`'s output), used as a personal access token
 // would be.
+//
+// STATUS (mallcoppro-0354, 2026-07-13 — followup from the mallcoppro-6a3 IDOR
+// fix): proAppToken remains genuinely NOT LIVE. Confirmed by reading, not
+// assuming: runInit's --create-repo branch constructs its repoToken as
+// envGitHubToken{envVar: *githubTokenEnv} unconditionally (see init.go) —
+// there is no CLI flag, config field, or code path anywhere that constructs a
+// proAppToken outside its own unit test (deployrepo_test.go). Building a live
+// create-repo mint endpoint now would be speculative (no caller exists to
+// exercise it) and is exactly the kind of work R2/no-gold-plating says to
+// defer until something real wires it up.
+//
+// It matters that this stays unwired: proAppToken as written POSTs to the
+// SAME endpoint (/v1/github/token) that mallcoppro-6a3 hardened to mint
+// ONLY {"contents":"write","metadata":"read"} scoped to the caller's
+// already-connected repos-of-record (conn.Repos in github_token.go) — the
+// correct, minimal scope for the scan/chat PUSH path. That scope cannot
+// create a new repository: GitHub App installation tokens can only create a
+// repo via POST /orgs/{org}/repos, which requires the installation-wide
+// "administration":"write" permission, and by definition there is no
+// pre-existing repos-of-record entry for a repo that doesn't exist yet. If
+// someone wires --create-repo to proAppToken today unmodified, it
+// authenticates fine and then fails closed with a 403 from GitHub at the
+// create-repo call — a functional trap, not a security hole, but worth
+// avoiding by design rather than by surprise.
+//
+// Design for when this seam goes live (do not build ahead of a real caller):
+//  1. A NEW endpoint, distinct from /v1/github/token — never widen that one,
+//     it stays scoped to the chat/scan push path. E.g. POST
+//     /v1/github/create-repo-token.
+//  2. Token scope: {"administration":"write"}, installation-wide (no
+//     "repositories" key — there is nothing to list yet). This is the one
+//     case where an installation-wide permission is unavoidable, which is
+//     exactly why step 3 is mandatory, not optional.
+//  3. Account<->org ownership binding, reusing the model
+//     github_connect.go's callback already proves for the CONNECT flow
+//     (mallcop-pro/internal/server/github_connect.go, "OWNS-not-just-can-
+//     access"): resolve the caller's installation via the same
+//     resolveConnectedRepos()/conn.InstallID lookup /v1/github/token uses
+//     (never trust a client-supplied org name), then require that for a
+//     personal-account installation the installation account id equals the
+//     caller's verified GitHub user id, and for an org installation the
+//     caller's verified GitHub identity is an ACTIVE ADMIN of that org (a
+//     plain member is rejected — same rule github_connect.go already
+//     enforces, so the two flows can never disagree about who owns what).
+//  4. Test plan: an httptest-backed unit test analogous to today's
+//     TestProAppToken* tests, PLUS a server-side test analogous to
+//     github_token_test.go's cross-tenant IDOR regression cases (reject a
+//     caller who is not an admin of the target org; reject a client-supplied
+//     org/installation_id that doesn't match the caller's bound
+//     installation).
 package cli
 
 import (
@@ -104,6 +154,12 @@ func (e envGitHubToken) Token(_ context.Context) (string, error) {
 // it exchanges a mallcop donut-rail API key + GitHub App installation ID for
 // a scoped installation access token via mallcop-pro's POST
 // {endpoint}/v1/github/token.
+//
+// NOT WIRED TO --create-repo (mallcoppro-0354): see the STATUS note in the
+// package doc above. This endpoint mints contents:write on existing
+// repos-of-record, which cannot create a new repo. Do not point
+// --create-repo at proAppToken without first building the purpose-scoped
+// create-repo-token endpoint + org-ownership binding described there.
 type proAppToken struct {
 	endpoint       string
 	apiKey         string
